@@ -10,6 +10,7 @@
 | --- | --- | --- | --- |
 | npm | `npm config get cache` | `npm cache clean --force` | 次のインストールのダウンロード |
 | pnpm | `pnpm store path` | `pnpm store prune` | 同上 |
+| pnpm のメタデータキャッシュ | macOS `~/Library/Caches/pnpm`、Windows `%LOCALAPPDATA%\pnpm-cache` | 削除 | 次のインストールでの取り直し |
 | pnpm の古いストア | `pnpm store path` の親にある、今のバージョン以外のフォルダ（`v3` `v10` など） | 削除 | 同上。`node_modules` とファイルを共有しているので、空く量はサイズより小さい（macOS は clone のため見積もれない） |
 | yarn | Yarn 1 は `yarn cache dir`、2 以降は `yarn config get cacheFolder` | Yarn 1 は `yarn cache clean`、2 以降は `yarn cache clean --all` | 同上 |
 | bun | `~/.bun/install/cache` | `bun pm cache rm`（`package.json` のあるディレクトリで実行する） | 同上 |
@@ -26,7 +27,7 @@
 | --- | --- | --- | --- |
 | mise の使われていない版 | `mise prune --dry-run` | `mise prune` | 記録に残っていないプロジェクトが使う版。そのプロジェクトで再インストールが要る |
 | Rust の古いツールチェーン（default と、`rust-toolchain.toml` で使われているものを除く） | `rustup toolchain list` | `rustup toolchain uninstall <name>` | 後でそのバージョンが要ったときの再ダウンロード |
-| Playwright のブラウザ | macOS `~/Library/Caches/ms-playwright`、Linux `~/.cache/ms-playwright` | `npx playwright uninstall --all` か削除 | E2E テスト前の再ダウンロード |
+| Playwright のブラウザ（稼働中のプロジェクトが使っていないとき） | macOS `~/Library/Caches/ms-playwright`、Linux `~/.cache/ms-playwright` | `npx playwright uninstall --all` か削除 | E2E テスト前の再ダウンロード |
 | Puppeteer のブラウザ | `~/.cache/puppeteer` | 削除 | 同上 |
 | node-gyp のヘッダ | `~/.node-gyp`、`~/Library/Caches/node-gyp`、`~/.cache/node-gyp` | 削除 | ネイティブモジュールのビルド時の再ダウンロード |
 | Electron | macOS `~/Library/Caches/electron`、Linux `~/.cache/electron` | 削除 | 再ダウンロード |
@@ -47,7 +48,7 @@
 
 | もの | 場所の引き方 | 消し方 | 失うもの |
 | --- | --- | --- | --- |
-| ビルドキャッシュ | `docker system df` | `docker builder prune` | 次のビルド時間 |
+| ビルドキャッシュ | `docker system df` | `docker builder prune` | 次のビルド時間。Docker Desktop ではディスクのファイル（`Docker.raw`・`docker_data.vhdx`）が縮まず、空きが増えないことがある |
 | 宙に浮いたイメージ（タグの無いもの） | `docker images -f dangling=true` | `docker image prune` | 無し |
 
 ## OS
@@ -55,7 +56,7 @@
 | もの | 場所の引き方 | 消し方 | 失うもの |
 | --- | --- | --- | --- |
 | ゴミ箱 | macOS `~/.Trash`、Linux `~/.local/share/Trash`、Windows `C:\$Recycle.Bin` | ユーザーに空にしてもらう | 中身を戻せなくなる |
-| 一時ファイル（Windows） | `%TEMP%` | 使用中のものを除いて削除 | 無し |
+| 一時ファイル（Windows） | `%TEMP%` の中で、更新が1日以上前のもの | 削除（消せないものは飛ばす） | 無し |
 
 ## Windows の既定の場所
 
