@@ -25,7 +25,7 @@
 | もの | 場所の引き方 | 消し方 | 失うもの |
 | --- | --- | --- | --- |
 | mise の使われていない版 | `mise prune --dry-run` | `mise prune` | 記録に残っていないプロジェクトが使う版。そのプロジェクトで再インストールが要る |
-| Rust の古いツールチェーン | `rustup toolchain list` | `rustup toolchain uninstall <name>` | そのバージョンを `rust-toolchain.toml` で固定したプロジェクトの再ダウンロード |
+| Rust の古いツールチェーン（default と、`rust-toolchain.toml` で使われているものを除く） | `rustup toolchain list` | `rustup toolchain uninstall <name>` | 後でそのバージョンが要ったときの再ダウンロード |
 | Playwright のブラウザ | macOS `~/Library/Caches/ms-playwright`、Linux `~/.cache/ms-playwright` | `npx playwright uninstall --all` か削除 | E2E テスト前の再ダウンロード |
 | Puppeteer のブラウザ | `~/.cache/puppeteer` | 削除 | 同上 |
 | node-gyp のヘッダ | `~/.node-gyp`、`~/Library/Caches/node-gyp`、`~/.cache/node-gyp` | 削除 | ネイティブモジュールのビルド時の再ダウンロード |
@@ -48,7 +48,7 @@
 | もの | 場所の引き方 | 消し方 | 失うもの |
 | --- | --- | --- | --- |
 | ビルドキャッシュ | `docker system df` | `docker builder prune` | 次のビルド時間 |
-| 使われていないイメージ | `docker images` と `docker ps -a` | `docker image prune -a`（先に消えるイメージの一覧を見せる） | 再 pull か再ビルド |
+| 宙に浮いたイメージ（タグの無いもの） | `docker images -f dangling=true` | `docker image prune` | 無し |
 
 ## OS
 
@@ -62,7 +62,10 @@
 | もの | 場所 |
 | --- | --- |
 | npm | `%LOCALAPPDATA%\npm-cache` |
-| pnpm のストア | `pnpm store path` で引く |
+| pnpm のストア | `%LOCALAPPDATA%\pnpm\store`（`pnpm store path` で確かめる） |
+| bun | `%USERPROFILE%\.bun\install\cache` |
+| Cargo レジストリ | `%USERPROFILE%\.cargo\registry` |
+| Rust のツールチェーン | `%USERPROFILE%\.rustup\toolchains` |
 | Playwright | `%LOCALAPPDATA%\ms-playwright` |
 | Electron | `%LOCALAPPDATA%\electron\Cache` |
 | Go ビルドキャッシュ | `%LOCALAPPDATA%\go-build` |
