@@ -1,58 +1,37 @@
 # 調査の手順（サブエージェント向け）
 
-ディスクの掃除候補を探して、表で返す。**読み取りだけ。** 消す・動かす・書き込むのは呼び出し元がユーザーの選択を得てから行うので、ここでは測って調べるところまでで止める。
-`herdr` のような他のセッションや端末を操作するコマンドも、読み取り以外は使わない。
+ディスクの掃除候補を測って、目録（catalog.md）と突き合わせ、表で返す。**読み取りだけ。** 削除・移動・書き込み・prune 系のコマンド・他のセッションの操作はしない。
 
-## 1. 候補を探す
+## 1. 目録の行を探す
 
-2方向から当たる。
+catalog.md の行ごとに、「場所の引き方」でこの環境にあるかを調べ、あればサイズを測る。
 
-- **上から:** ホームと作業ディレクトリの直下を測り、大きいものの中へ降りていく。測り方は下の「測り方」。
-- **目録から:** [catalog.md](catalog.md) の定番の場所のうち、この環境にあるものを測る。コマンドが入っているか、ディレクトリがあるかで判断する。
+- ビルド成果物（`target/` や `node_modules/` など）は、作業ディレクトリの中を名前で探す。`git check-ignore -q <path>` で無視対象と確かめられたものだけ載せる。
+- 依頼で渡された「セッションの動いているプロジェクト」の中にあるものは「持ち主に頼む」に置く。
+- 目録の「条件」を満たさない行は載せない。
 
-目録に無いものも候補にしてよい。仮想ディスク（`.vhd` `.vhdx` `.vdi` `.vmdk`）や VM のフォルダは目録に無くても最大の塊になりやすい。
+## 2. 目録に無い大きいものを探す
 
-完了条件は2つ。
-- 測った上位の場所が「候補」「触らない」「不明」のどれかに**すべて**振り分けられていること。
-- 測った合計が、呼び出し元から渡されたディスクの使用量と大きく食い違わないこと。足りなければ、隠し属性の場所・システムの場所・測れなかった場所を疑って当たり直す。それでも埋まらない差は、そのまま「測れなかった分」として返す。
+測る場所の直下を測り、1GB 以上で目録に当たらないものを大きい順に「参考」に置く。正体が分かれば一言添える。1GB 以上のものの中は、目録に当たる場所が隠れていないか1段だけ降りて見る。
 
-### 測り方
+## 測り方
 
-- **macOS / Linux:** `du -sh -x <dir>/* <dir>/.[!.]* 2>/dev/null | sort -rh | head -20`。zsh ではマッチが無いと失敗するので `setopt nullglob` を先に打つ。
-- **Windows:** Git Bash の `du` は遅すぎて使えない（ホーム直下で10分超）。PowerShell 7 で .NET の列挙を合計する。隠し属性・システム属性のファイルも数え、ジャンクションなどのリパースポイントは二重計上を避けるため飛ばす。
+- **macOS / Linux:** `find <dir> -mindepth 1 -maxdepth 1 -exec du -sh -x {} + 2>/dev/null | sort -rh | head -20`（ドットで始まるものも含む）。
+- **Windows:** Git Bash の `du` は遅すぎて使えない。PowerShell 7 で .NET の列挙を合計する。隠し属性のファイルも数え、ジャンクションなどのリパースポイントは二重に数えないよう飛ばす。
 
   ```powershell
-  $o = [System.IO.EnumerationOptions]@{ RecurseSubdirectories = $true; IgnoreInaccessible = $true; AttributesToSkip = [System.IO.FileAttributes]::ReparsePoint }
-  Get-ChildItem <dir> -Directory -Force | Where-Object { -not ($_.Attributes -band [System.IO.FileAttributes]::ReparsePoint) } | ForEach-Object {
-    $sum = ($_.EnumerateFiles('*', $o) | Measure-Object Length -Sum).Sum
-    [pscustomobject]@{ GB = [math]::Round($sum / 1GB, 2); Path = $_.FullName }
-  } | Sort-Object GB -Descending | Select-Object -First 20
+  $dir  = '<dir>'
+  $skip = [System.IO.FileAttributes]::ReparsePoint
+  $o = [System.IO.EnumerationOptions]@{ RecurseSubdirectories = $true; IgnoreInaccessible = $true; AttributesToSkip = $skip }
+  $rows = Get-ChildItem $dir -Directory -Force -ErrorAction SilentlyContinue | Where-Object { -not ($_.Attributes -band $skip) } | ForEach-Object {
+    [pscustomobject]@{ GB = [math]::Round((($_.EnumerateFiles('*', $o) | Measure-Object Length -Sum).Sum) / 1GB, 2); Path = $_.FullName }
+  }
+  $files = (Get-ChildItem $dir -File -Force -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
+  @($rows) + [pscustomobject]@{ GB = [math]::Round($files / 1GB, 2); Path = "$dir（直下のファイル）" } | Sort-Object GB -Descending | Select-Object -First 20
   ```
 
-  `AttributesToSkip` の既定は Hidden と System で、そのままだと AppData が丸ごと抜ける。`EnumerationOptions` は Windows PowerShell 5.1 には無い。
+  `AttributesToSkip` の既定は Hidden と System で、指定しないと AppData が丸ごと抜ける。PowerShell 7 が無ければ、測れなかったこととして返す。OneDrive のフォルダはリパースポイント扱いで数えられない可能性がある（未確認）。
 
-どの OS でも、大きな木を測るのは時間がかかる。場所ごとに並列に回してよい。
+## 返す
 
-## 2. 候補ごとに3つを確かめる
-
-- **消し方:** 道具自身の掃除コマンドがあればそれ。書式はバージョンで変わるので `--help` で確かめる。消す前に候補を見せる読み取りのモード（`mise prune --dry-run` など）があれば、ここで使う。
-- **失うもの:** 次に使うとき自動で作り直されるか。作り直しに要るもの（ダウンロード・ビルド時間）。作り直せない情報（履歴・復元点・手元にしかないデータ）があるか。
-- **持ち主:** 稼働中のプロジェクトのものか。セッションが開いている（`ListAgents` などで見える）、直近に更新がある、で判断する。
-
-プロジェクト内の成果物は `git check-ignore -q <path>` で無視対象か確かめる。無視されていないものは成果物ではなく、ソースやデータの可能性がある。
-使用中のもの（起動中のアプリのキャッシュ、動いているコンテナのイメージなど）は、そのことを書き添える。
-
-区分は次の4つ。迷ったら「失うものがある」側に置く。
-
-| 区分 | 意味 |
-| --- | --- |
-| 再生成できる | 消しても、次に使うとき作り直されるだけ |
-| 失うものがある | 失うものを具体的に書く（「resume できなくなる」「再ダウンロードに数GB」など） |
-| 持ち主に頼む | 稼働中のプロジェクトのもの |
-| 触らない / 不明 | 認証情報・設定・インストール済みのプラグインや拡張・エージェントのメモリ・ソースコード・アプリの利用データ（VM のディスクを含む）・OS の管理する領域、または正体が分からないもの |
-
-## 3. 返す
-
-区分ごとの表を、サイズの大きい順に返す。各行にパス・サイズ・消し方（コマンド）・失うもの・持ち主を載せる。
-合計の見込み、測った合計と使用量の差、測れなかった場所とその理由、確かめきれなかったことも添える。
-測った生の出力は返さない。
+区分（消せる / 持ち主に頼む / 参考）ごとの表を、サイズの大きい順に返す。「消せる」の行にはパス・サイズ・消し方・失うもの（目録のとおり）を載せる。測れなかった場所があれば理由を添える。測った生の出力は返さない。
