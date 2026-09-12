@@ -1,0 +1,3 @@
+# notes/ の中身は各環境のもの。フォルダだけ配る。
+notes/*
+!notes/.gitkeep
