@@ -2,10 +2,12 @@
 
 Claude Code に持たせる skill の置き場。
 
+skill は、決まったコマンドを順に叩くスクリプトではなく、Claude がその場で判断して進める手順として書いている（スクリプトは restart-sessions の後戻りできない部分だけ）。実際に打つコマンドは、Claude Code のバージョン・権限の設定・CLAUDE.md などで変わる。うまくいかないときは、その場で指示を足すか調べさせる。
+
 | skill | できること |
 | --- | --- |
 | `restart-sessions` | [Herdr](https://herdr.dev) 上のセッションを、別のセッションから handoff を取って再起動する |
-| `cleanup` | ディスクのゴミを調べてレポートし、目録に載っている種類の中から選んだものだけ消す（Windows でレポートまで1回通しただけ） |
+| `cleanup` | ディスクのゴミを調べてレポートし、目録に載っている種類の中から選んだものだけ消す（Windows で削除まで1回通しただけ） |
 
 `.claude/skills/` から読み込んでいる。他のプロジェクトで使うなら、`.agents/skills/<skill>/` を自分の skill ディレクトリに置けばよい。
 
@@ -96,9 +98,10 @@ Claude Code に持たせる skill の置き場。
 
 ### 読む前に
 
-- **今の書き方は Windows でレポートまで1回通しただけ。** 1つ前の書き方では、macOS で削除まで1回、Windows でレポートまで2回通した。Linux では未確認
+- **今の書き方は Windows で削除まで1回通しただけ。** 1つ前の書き方では、macOS で削除まで1回、Windows でレポートまで2回通した。Linux では未確認
 - **消せるのは目録（`references/catalog.md`）に載っている種類だけ。** 載っていないものは大きくても見せるだけで、消したければ目録に行を足す
 - **選んだものは実際に消え、戻せないものもある。** レポートの「失うもの」を読んでから選ぶこと
+- **削除できるかは Claude Code の権限の設定によって変わる。** 設定によってはできないことがある。詳しくは Anthropic の公式ドキュメント（[Configure permissions](https://code.claude.com/docs/en/permissions)）を参照
 
 ### できること
 
