@@ -8,6 +8,7 @@ skill は、決まったコマンドを順に叩くスクリプトではなく�
 | --- | --- |
 | `restart-sessions` | [Herdr](https://herdr.dev) 上のセッションを、別のセッションから handoff を取って再起動する |
 | `cleanup` | ディスクのゴミを調べてレポートし、目録に載っている種類の中から選んだものだけ消す（Windows で削除まで1回通しただけ） |
+| `machine-setup` | 新しいマシンに、選んだアプリ・ツールを入れ、設定ファイルを取り込む（実機では未確認） |
 
 `.claude/skills/` から読み込んでいる。他のプロジェクトで使うなら、`.agents/skills/<skill>/` を自分の skill ディレクトリに置けばよい。
 
@@ -130,3 +131,60 @@ skill は、決まったコマンドを順に叩くスクリプトではなく�
 | `.agents/skills/cleanup/SKILL.md` | 決まりと手順 |
 | `.agents/skills/cleanup/references/survey.md` | 調査を任されたサブエージェントの手順と測り方 |
 | `.agents/skills/cleanup/references/catalog.md` | 消してよいものの目録。場所・消し方・失うもの |
+
+## machine-setup
+
+### 読む前に
+
+- **Claude の Pro / Max / Team / Enterprise の契約と、別の端末の Claude App が要る。** 新しいマシンの Claude Code を、スマホなどから [Remote Control](https://code.claude.com/docs/en/remote-control) で操作する。Remote Control は claude.ai でのログインが要り、API キーでは使えない。Team / Enterprise では、オーナーが管理画面で有効にしておく必要がある
+- **この手順そのものは、まだ実機で通していない。** 元にした個人のセットアップスクリプトは macOS と Windows で動かしたが、一発では通らず、再起動や順番の修正が要った。そのとき直したところは `references/os-notes.md` に入れてある
+- **既定の権限設定では、コマンドを打つたびに承認を求められる。** スマホから承認し続けるか、起動するときに権限のモードを選ぶ。詳しくは Anthropic の公式ドキュメント（[Configure permissions](https://code.claude.com/docs/en/permissions)）を参照
+- **ホームの設定ファイルを差し替える。** 取ってきた設定ファイルとぶつかる既存のファイル（rc ファイルや `~/.claude/` の中身など）は、確かめたうえで退避して差し替える。ログインシェルも変えることがある
+- **新しいマシンの前でやることがある。** Claude Code のインストールと `/rc`、認証（`gh auth login` や SSH 鍵）、sudo や管理者権限の確認画面、再起動のあとの起動し直し
+- **確認は途中でも出る。** 既にあるファイルの退避、ログインシェルの変更、sudo の要る大きな変更は、実行の前に確かめてくる。なるべく最初にまとめて聞くが、放っておけば最後まで進むとは限らない
+- **入れるものは、その場で選ぶ。** `references/genres.md` にはジャンルだけを書いてあり、ジャンルごとの候補は Claude が知識から出す。候補は時期や Claude のモデルによって変わり、新しいツールや知られていないツールは出てこないことがある。決まった一覧があるなら、頼むときにその URL を渡す。認証なしで読める URL なら最初に、そうでなければ設定ファイルを取ってきたあとで読む
+- **入れ方はその場で公式の情報を見て決める。** 同じものでも、時期によって打つコマンドが変わる
+
+### できること
+
+```
+0. 入れるもの（ジャンルごとの候補から選ぶ）、設定ファイルの置き場所・取ってくる手段・管理ツール、あとで確認が要ることを聞く
+1. パッケージマネージャを用意する
+2. 設定ファイルを取ってくる道具（git, gh など）を入れる
+3. 認証してもらい、設定ファイルを取ってくる
+4. 選んだアプリ・ツール・言語・フォントを入れる
+5. 設定ファイルを展開する
+6. シェルと初期設定
+7. 再起動のあとで確かめることを書き、報告する
+```
+
+進み具合は `~/machine-setup-progress.md` に書くので、再起動でセッションが切れても続きから頼める。
+
+### 使い方
+
+新しいマシンには、まだこのリポジトリも skill も無い。スマホなど別の端末の Claude App から頼む。
+
+1. 新しいマシンに Claude Code を入れる。2026-09 時点のコマンドは次のとおりで、変わっていることがあるので[公式ドキュメント](https://code.claude.com/docs/en/setup)も見る
+   - macOS / Ubuntu / WSL: `curl -fsSL https://claude.ai/install.sh | bash`（Ubuntu で curl が無ければ、先に `sudo apt update && sudo apt install -y curl`）
+   - Windows (PowerShell): `irm https://claude.ai/install.ps1 | iex`
+2. 作業用のディレクトリ（例: `~/machine-setup`）を作って移り、`claude` を起動する。Remote Control の前提になる信頼の確認は、このディレクトリに保存される（ホームディレクトリには保存されない）
+3. ログインしていなければ `/login` で claude.ai にログインし、`/rc` で Remote Control を有効にする
+4. 別の端末の Claude App から、そのセッションに送る
+
+> https://raw.githubusercontent.com/miyabi-satoh/yorozuya/main/.agents/skills/machine-setup/SKILL.md を curl -fsSL で取って読み、その手順でこのマシンをセットアップして
+
+Windows では `curl` を `curl.exe` にする。fork したなら、URL の `miyabi-satoh` を自分のものに替える。自分の一覧を使うなら「一覧は <URL>」と添える。
+
+再起動のあとは、新しいマシンで同じ作業用のディレクトリに移って `claude` を起動し直し、`/rc` を打って次を送る。`claude` が見つからなければ、`~/.local/bin/claude` をフルパスで打つ。
+
+> ~/machine-setup-progress.md を読んで続けて
+
+このリポジトリを clone してあるマシンでは、`claude` にそのまま頼めばよい。
+
+### 中身
+
+| | |
+| --- | --- |
+| `.agents/skills/machine-setup/SKILL.md` | 決まりと手順 |
+| `.agents/skills/machine-setup/references/genres.md` | 入れるもののジャンルと、候補の出し方 |
+| `.agents/skills/machine-setup/references/os-notes.md` | OS ごとに、過去に実機で詰まったところ |
