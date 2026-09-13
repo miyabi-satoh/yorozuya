@@ -6,6 +6,7 @@ OS ごとに、インストールの途中で詰まりやすいところと、�
 
 - **mise を入れたなら、mise で入れた言語やツールは今のシェルの PATH に無い。** `mise exec <tool> -- <command>` で呼ぶか、`mise where <tool>` の `bin` をフルパスで使う。
 - **mise の go で `go install` したものは、GOPATH ではなく go のインストール先の bin（GOBIN）に入る。** 場所は `mise exec go -- go env GOBIN` で見る。go のバージョンに紐づくので、`mise exec go -- <入れたコマンド>` で呼ぶ。設定ファイルの管理ツールを `go install` で入れるときに当たる。
+- **`gh auth login` は、`~/.gitconfig` に git の認証の設定（credential helper）を書く。** 設定ファイルが `~/.gitconfig` を持っていると、展開でぶつかる。credential の節を `~/.config/git/config`（`~/.gitconfig` と一緒に読まれる）に移してから展開し、`git ls-remote` で認証が通るか確かめる。`~/.gitconfig` が symlink になったあとの `git config --global` は、取ってきた設定ファイルの中身を書き換える。
 - **rhysd/dotfiles を使うなら、`link --dry` の `Exist:` では衝突を見分けられない。** 宛先に何かあるだけで出るので、正しいリンクでも、居座った実ファイルでも同じ行になる。リンクされたかは `dotfiles list` で確かめる（mapping にあるのに出ないものは、リンクされていない）。
 
 ## macOS
