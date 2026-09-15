@@ -1,3 +1,6 @@
 # notes/ の中身は各環境のもの。フォルダだけ配る。
 notes/*
 !notes/.gitkeep
+
+# ホームの絶対パスが入る個人の設定。
+.claude/settings.local.json
