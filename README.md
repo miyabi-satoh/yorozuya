@@ -17,7 +17,7 @@ skill は、決まったコマンドを順に叩くスクリプトではなく�
 ### 読む前に
 
 - **Herdr が要る。** tmux ではない
-- **macOS でしか実機確認していない**
+- **実機確認は macOS と Windows 11 だけ。** Linux は未確認
 - **handoff（引き継ぎ資料）を書く skill が別に要る。** 既定は [Matt Pocock 氏の skills](https://github.com/mattpocock/skills) の `/mattpocock-skills:handoff`。差し替えられる
 - **Claude Code と Herdr の、公式に保証されていない振る舞いに頼っている。** どちらの更新でも壊れうる（[頼っている外部の振る舞い](#頼っている外部の振る舞い)）
 - **対象のセッションを終了させる道具。** 走っているバックグラウンドの処理は巻き添えになる
