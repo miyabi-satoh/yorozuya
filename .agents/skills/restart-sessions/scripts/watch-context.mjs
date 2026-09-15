@@ -10,7 +10,8 @@
 // START は Herdr の一覧が最初に取れた回に、その回の知らせより先に出す。
 // OVER・UPDATE と WARN（ペインごと）はセッションごとに1回だけ出す。覚えているのはこのプロセスの中だけ。
 //
-// --pattern は使用率の数字を1つ目のキャプチャで取る。照合の前にノーブレークスペースを普通の空白に揃える。
+// --pattern は使用率の数字を1つ目のキャプチャで取る。入力欄の下枠より下（ステータスライン）だけに当てる。
+// 照合の前にノーブレークスペースを普通の空白に揃える。
 // --update-pattern は、入力欄の上枠のすぐ上の1行だけに当てる。省けば更新は見ない。
 
 import { parseArgs } from 'node:util';
@@ -87,9 +88,22 @@ function readScreen(pane) {
   return screen.replace(/\u00a0/g, ' ');
 }
 
+// 入力欄の下枠: 下から見て最初の「─ だけの行」。見つからなければ -1。
+function bottomBorder(lines) {
+  let index = lines.length - 1;
+  while (index >= 0 && !/^─+$/.test(lines[index].trim())) index -= 1;
+  return index;
+}
+
+// ステータスラインは入力欄の下枠より下に出る（2.1.272 で実測）。そこだけに当てる。
+// 画面全体に当てると、会話に映った別ペインの使用率（この見張りの START を貼った画面など）を先に拾う。
+// 下枠が見つからなければ読めない扱いにする。続けば WARN で気づける。
 function readUsage(screen) {
   if (screen === null) return null;
-  const captured = screen.match(pattern)?.[1];
+  const lines = screen.split('\n');
+  const bottom = bottomBorder(lines);
+  if (bottom < 0) return null;
+  const captured = lines.slice(bottom + 1).join('\n').match(pattern)?.[1];
   // 空のキャプチャを 0% と読むと、WARN も OVER も出なくなる。
   if (!captured) return null;
   const value = Number(captured);
@@ -102,8 +116,7 @@ function readUsage(screen) {
 // 入力欄の無い画面では '' か別の行を返しうる。そこに更新の文言がたまたま無ければ知らせは出ない。
 function noticeRow(screen) {
   const lines = screen.split('\n');
-  let bottom = lines.length - 1;
-  while (bottom >= 0 && !/^─+$/.test(lines[bottom].trim())) bottom -= 1;
+  const bottom = bottomBorder(lines);
   // 入力欄の中身は複数行になりうるので、下枠から上枠まで遡る。
   for (let top = bottom - 1; top >= 1; top -= 1) {
     if (lines[top].trimStart().startsWith('─')) return lines[top - 1];
