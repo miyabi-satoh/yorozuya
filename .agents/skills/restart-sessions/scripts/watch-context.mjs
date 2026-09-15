@@ -88,22 +88,30 @@ function readScreen(pane) {
   return screen.replace(/\u00a0/g, ' ');
 }
 
-// 入力欄の下枠: 下から見て最初の「─ だけの行」。見つからなければ -1。
+// 入力欄の下枠: 下から見て最初の「行頭から ─ だけの行」。見つからなければ -1。
+// 行頭を見るのは、会話に映った別ペインの画面（herdr pane read の出力）の枠を拾わないため。
+// ツールの出力は字下げして表示されるので、その中の枠は行頭から始まらない。
 function bottomBorder(lines) {
   let index = lines.length - 1;
-  while (index >= 0 && !/^─+$/.test(lines[index].trim())) index -= 1;
+  while (index >= 0 && !/^─+\s*$/.test(lines[index])) index -= 1;
   return index;
 }
 
-// ステータスラインは入力欄の下枠より下に出る（2.1.272 で実測）。そこだけに当てる。
-// 画面全体に当てると、会話に映った別ペインの使用率（この見張りの START を貼った画面など）を先に拾う。
-// 下枠が見つからなければ読めない扱いにする。続けば WARN で気づける。
+// 入力欄の下枠より下は、ステータスラインと mode の行だけ（2.1.272 で実測。末尾の空行を入れて4行）。
+// 画面全体に当てると、会話に映った別ペインの画面（herdr pane read の出力）の使用率を先に拾う。
+const BELOW_BORDER_LIMIT = 8;
+
+// 下枠より下の数行だけに当てる。
+// 自分の入力欄が画面に無い（トランスクリプト表示や全面パネル）と、下枠の探索は会話まで上り、
+// そこに映った別ペインの下枠を拾う。だから下が長すぎるときも読めない扱いにする。続けば WARN で気づける。
 function readUsage(screen) {
   if (screen === null) return null;
   const lines = screen.split('\n');
   const bottom = bottomBorder(lines);
   if (bottom < 0) return null;
-  const captured = lines.slice(bottom + 1).join('\n').match(pattern)?.[1];
+  const below = lines.slice(bottom + 1);
+  if (below.length > BELOW_BORDER_LIMIT) return null;
+  const captured = below.join('\n').match(pattern)?.[1];
   // 空のキャプチャを 0% と読むと、WARN も OVER も出なくなる。
   if (!captured) return null;
   const value = Number(captured);
@@ -119,7 +127,7 @@ function noticeRow(screen) {
   const bottom = bottomBorder(lines);
   // 入力欄の中身は複数行になりうるので、下枠から上枠まで遡る。
   for (let top = bottom - 1; top >= 1; top -= 1) {
-    if (lines[top].trimStart().startsWith('─')) return lines[top - 1];
+    if (lines[top].startsWith('─')) return lines[top - 1];
   }
   return '';
 }
