@@ -1,65 +1,65 @@
 #!/usr/bin/env node
 // 各 claude ペインのステータスラインからコンテキストの使用率を読み、閾値を越えたら1行出す。
 // 指定があれば、Claude Code の更新の知らせ（再起動で反映される）が出ているペインも1行出す。
-// usage: watch-context.mjs --pattern <正規表現> [--threshold 50] [--interval 120] [--update-pattern <正規表現>] [--once]
+// usage: watch-context.mjs --pattern <正規表現> --threshold <使用率> [--interval 120] [--update-pattern <正規表現>] [--once]
 //
 // 出すのは「聞きに行くきっかけ」だけ。区切りかどうか、再起動するかは読んだ側と対象が決める。
 // 画面からの読み取りで後戻りできない操作まで進めない。読み違えても、依頼が早いか遅いかで済むようにする。
 //
-// stdout の1行が1件の知らせ（Monitor で受ける前提）。列はタブ区切り。最初の回は START を先頭に出す。
-//   START   <閾値>  <読めたペイン>/<claude ペイン>  <名前=使用率 …>（blocked のペインは 名前=blocked）
-//   OVER    <使用率>  <pane_id>  <Herdr 名|->  <端末タイトル>  <セッションID>  <cwd>
-//   UPDATE  <知らせの行>  <pane_id>  <Herdr 名|->  <端末タイトル>  <セッションID>  <cwd>
-//   WARN    <何が起きたか>
-// OVER・UPDATE と WARN（ペインごと）はセッションIDごとに1回だけ出す。再起動すればIDが変わるので、また出る。
-// 覚えているのはこのプロセスの中だけ。走らせ直すと、閾値を越えたままのセッションにもう一度出る。
+// stdout の1行が1件の知らせ（Monitor で受ける前提）。列と扱いは SKILL.md の「コンテキストを見張る」にある。
+// START は Herdr の一覧が最初に取れた回に、その回の知らせより先に出す。
+// OVER・UPDATE と WARN（ペインごと）はセッションごとに1回だけ出す。覚えているのはこのプロセスの中だけ。
 //
-// --pattern はステータスラインの表示に合わせる。使用率の数字を1つ目のキャプチャで取る。
-// 例: 'Ctx Used: ([\d.]+)%'
-// --update-pattern は更新の知らせの文言に合わせる。省けば更新は見ない。
-// 例: 'Update installed'（Claude Code 2.1.272 では「Update installed · Restart to update」か「… Restart to apply」）
+// --pattern は使用率の数字を1つ目のキャプチャで取る。照合の前にノーブレークスペースを普通の空白に揃える。
+// --update-pattern は、入力欄の上枠のすぐ上の1行だけに当てる。省けば更新は見ない。
 
 import { parseArgs } from 'node:util';
 import { herdr, herdrError, herdrJson } from './lib/herdr.mjs';
 
-const usage = 'usage: watch-context.mjs --pattern <正規表現> [--threshold 50] [--interval 120] [--update-pattern <正規表現>] [--once]';
+const usage = 'usage: watch-context.mjs --pattern <正規表現> --threshold <使用率> [--interval 120] [--update-pattern <正規表現>] [--once]';
+
+function fail(message) {
+  process.stderr.write(`${message}\n${usage}\n`);
+  process.exit(1);
+}
 
 let options;
 try {
   ({ values: options } = parseArgs({
     options: {
       pattern: { type: 'string' },
-      threshold: { type: 'string', default: '50' },
+      threshold: { type: 'string' },
       interval: { type: 'string', default: '120' },
       'update-pattern': { type: 'string' },
       once: { type: 'boolean', default: false },
     },
   }));
 } catch (error) {
-  process.stderr.write(`${error.message}\n${usage}\n`);
-  process.exit(1);
+  fail(error.message);
 }
 
-if (!options.pattern) {
-  process.stderr.write(`${usage}\n`);
-  process.exit(1);
-}
+if (!options.pattern || options.threshold === undefined) fail('--pattern と --threshold は必須');
+
 function compile(flag, source) {
   try {
     return new RegExp(source);
   } catch (error) {
-    process.stderr.write(`${flag} を正規表現として読めない: ${error.message}\n`);
-    process.exit(1);
+    fail(`${flag} を正規表現として読めない: ${error.message}`);
   }
 }
 const pattern = compile('--pattern', options.pattern);
+// キャプチャが無いと、どのペインも読めない扱いになる。
+if (new RegExp(`${options.pattern}|`).exec('').length < 2) fail('--pattern に使用率を取るキャプチャが無い');
 const updatePattern = options['update-pattern'] ? compile('--update-pattern', options['update-pattern']) : null;
-const threshold = Number(options.threshold);
-const interval = Number(options.interval);
-// Infinity を通すと setTimeout があふれて、ほぼ間を置かずに読み続ける。
-if (!Number.isFinite(threshold) || !Number.isFinite(interval) || !(interval > 0)) {
-  process.stderr.write(`--threshold と --interval は数で渡すこと\n${usage}\n`);
-  process.exit(1);
+
+// 空文字は Number('') が 0 になって通ってしまうので、数の形をしているものだけ受ける。
+const toNumber = (text) => (/^\s*\d+(\.\d+)?\s*$/.test(text) ? Number(text) : NaN);
+const threshold = toNumber(options.threshold);
+const interval = toNumber(options.interval);
+// setTimeout は 2^31-1 ms を越えるとあふれて、ほぼ間を置かずに読み続ける。
+const MAX_INTERVAL = Math.floor((2 ** 31 - 1) / 1000);
+if (!Number.isFinite(threshold) || !(interval > 0 && interval <= MAX_INTERVAL)) {
+  fail(`--threshold は数、--interval は 0 より大きく ${MAX_INTERVAL} 以下の秒数で渡すこと`);
 }
 
 // 続けて読めなかった回数がこれに達したら WARN を出す。
@@ -77,24 +77,29 @@ const updated = new Set();
 const warned = new Set();
 const misses = new Map();
 let listFailures = 0;
+let started = false;
 
 function readScreen(pane) {
   const screen = herdr(['pane', 'read', pane, '--source', 'visible']);
   if (screen === null) return null;
   // ステータスラインの空白はノーブレークスペースで来ることがある（実測）。
   // 画面で見たとおり普通の空白で書いたパターンが当たるよう、揃えてから照合する。
-  return screen.replace(/ /g, ' ');
+  return screen.replace(/\u00a0/g, ' ');
 }
 
 function readUsage(screen) {
   if (screen === null) return null;
-  const value = Number(screen.match(pattern)?.[1]);
+  const captured = screen.match(pattern)?.[1];
+  // 空のキャプチャを 0% と読むと、WARN も OVER も出なくなる。
+  if (!captured) return null;
+  const value = Number(captured);
   return Number.isFinite(value) ? value : null;
 }
 
 // 更新の知らせは、入力欄の上枠のすぐ上の行に右寄せで出る（2.1.272 で実測）。その1行だけを返す。
 // 画面全体に当てると、会話に出てきた同じ文言（この見張りの話をしているときなど）を拾い、要らない再起動まで進む。
-// 入力欄が見つからなければ '' を返す。形が変われば知らせが出なくなるだけで、再起動には進まない。
+// 下から見て最初の「─ だけの行」を下枠、その上で最初の「─ で始まる行」を上枠とみなす。
+// 入力欄の無い画面では '' か別の行を返しうる。そこに更新の文言がたまたま無ければ知らせは出ない。
 function noticeRow(screen) {
   const lines = screen.split('\n');
   let bottom = lines.length - 1;
@@ -106,11 +111,17 @@ function noticeRow(screen) {
   return '';
 }
 
-function tick(first) {
+function tick() {
   const agents = herdrJson(['agent', 'list'])?.result?.agents;
   if (!Array.isArray(agents)) {
     listFailures += 1;
-    if (listFailures === MISS_LIMIT) emit('WARN', clean(`Herdr のエージェント一覧を ${MISS_LIMIT} 回続けて取れない（${herdrError()}）`));
+    const reason = herdrError() || 'agents の一覧が出力に無い';
+    if (options.once) {
+      emit('WARN', clean(`Herdr のエージェント一覧を取れない（${reason}）`));
+      process.exitCode = 1;
+    } else if (listFailures === MISS_LIMIT) {
+      emit('WARN', clean(`Herdr のエージェント一覧を ${MISS_LIMIT} 回続けて取れない（${reason}）`));
+    }
     return;
   }
   listFailures = 0;
@@ -121,55 +132,63 @@ function tick(first) {
   let read = 0;
   for (const agent of claudes) {
     const label = clean(agent.terminal_title_stripped || agent.name || agent.pane_id);
-    // 空文字の ID は全セッションで重なるので、ペインIDで代える。後で本物の ID が取れるとキーが変わり、知らせがもう一度出うる。
-    const session = agent.agent_session?.value || agent.pane_id;
-    const blocked = agent.agent_status === 'blocked';
+    const id = agent.agent_session?.value || '';
+    // 重複除けのキー。ID が空のペインはペインIDで代える（空文字のままだと全ペインで重なる）。
+    const key = id || `pane:${agent.pane_id}`;
+    const where = [agent.pane_id, clean(agent.name || '-'), label, clean(id || '-'), clean(agent.cwd)];
+
+    // blocked のペインには依頼が届かないので、何も出さない。1回しか出さないので、ここで使い切らない。
+    if (agent.agent_status === 'blocked') {
+      readings.push(`${label}=blocked`);
+      continue;
+    }
+
     const screen = readScreen(agent.pane_id);
 
-    // blocked のペインには依頼が届かないので、答えてもらってから出す。1回しか出さないので、ここで使い切らない。
-    if (updatePattern && screen !== null && !blocked && !updated.has(session)) {
+    if (updatePattern && screen !== null && !updated.has(key)) {
       const row = noticeRow(screen);
       if (updatePattern.test(row)) {
-        updated.add(session);
-        events.push(['UPDATE', clean(row.trim()), agent.pane_id, clean(agent.name || '-'), label, session, clean(agent.cwd)]);
+        updated.add(key);
+        events.push(['UPDATE', clean(row.trim()), ...where]);
       }
     }
 
     const used = readUsage(screen);
     if (used === null) {
-      if (blocked) {
-        readings.push(`${label}=blocked`);
-        continue;
-      }
-      const count = (misses.get(session) ?? 0) + 1;
-      misses.set(session, count);
-      if (count >= MISS_LIMIT && !warned.has(session)) {
-        warned.add(session);
+      readings.push(`${label}=?`);
+      const count = (misses.get(key) ?? 0) + 1;
+      misses.set(key, count);
+      if (count >= MISS_LIMIT && !warned.has(key)) {
+        warned.add(key);
         events.push(['WARN', `${label} の使用率を ${MISS_LIMIT} 回続けて読めない（${agent.pane_id}）`]);
       }
       continue;
     }
-    misses.delete(session);
+    misses.delete(key);
     read += 1;
     readings.push(`${label}=${used}%`);
 
-    if (used >= threshold && !notified.has(session)) {
-      notified.add(session);
-      events.push(['OVER', `${used}%`, agent.pane_id, clean(agent.name || '-'), label, session, clean(agent.cwd)]);
+    if (used >= threshold && !notified.has(key)) {
+      notified.add(key);
+      events.push(['OVER', `${used}%`, ...where]);
     }
   }
 
   // START を先に出す。読み手は START で見張りが動き出したと知ってから、個々の知らせを扱う。
-  if (first) emit('START', `${threshold}%`, `${read}/${claudes.length}`, readings.join(' '));
+  if (!started) {
+    started = true;
+    emit('START', `${threshold}%`, `${read}/${claudes.length}`, readings.join(' '));
+  }
   for (const columns of events) emit(...columns);
 }
 
-tick(true);
-if (options.once) process.exit(0);
+tick();
 
 // 待ちは setTimeout で。Atomics.wait で止めると、macOS ではパイプへの書き込みが非同期なので
-// 出したはずの行が流れず、Monitor に届かない。
-for (;;) {
-  await new Promise((resolve) => setTimeout(resolve, interval * 1000));
-  tick(false);
+// 出したはずの行が流れず、Monitor に届かない。同じ理由で --once も process.exit を呼ばずに自然に終える。
+if (!options.once) {
+  for (;;) {
+    await new Promise((resolve) => setTimeout(resolve, interval * 1000));
+    tick();
+  }
 }
