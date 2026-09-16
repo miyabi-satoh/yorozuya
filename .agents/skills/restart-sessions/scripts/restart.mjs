@@ -10,6 +10,7 @@
 //   FAIL — 送った後に止まった。復旧の道筋をメッセージに書く。
 
 import { handoffProblem } from './lib/handoff.mjs';
+import { HOW_TO_PROCEED } from './lib/prompts.mjs';
 import {
   agentInfo,
   agentStatus,
@@ -143,7 +144,7 @@ if (!startAgent(name, pane)) {
     `起動できない（${herdrError()}）。ペインを見ること。claude が上がっていれば（確認やダイアログが出ていれば答えてから）'@${handoff}' を打つ。シェルのままなら、${recovery}`,
   );
 }
-if (!prompt(name, `@${handoff} 前セッションの引き継ぎ資料です。読んで現状を把握したら、ユーザーの指示を待ってください。`)) {
+if (!prompt(name, `@${handoff} 前セッションの引き継ぎ資料です。読んで現状を把握したら、${HOW_TO_PROCEED}`)) {
   fail(`起動はしたが資料を渡せなかった（${herdrError()}）。ペインで @${handoff} と打てば読める`);
 }
 
