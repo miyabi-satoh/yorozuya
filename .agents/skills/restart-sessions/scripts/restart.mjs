@@ -10,6 +10,7 @@
 //   FAIL — 送った後に止まった。復旧の道筋をメッセージに書く。
 
 import { handoffProblem } from './lib/handoff.mjs';
+import { HOW_TO_PROCEED } from './lib/prompts.mjs';
 import {
   agentInfo,
   agentStatus,
@@ -143,14 +144,7 @@ if (!startAgent(name, pane)) {
     `起動できない（${herdrError()}）。ペインを見ること。claude が上がっていれば（確認やダイアログが出ていれば答えてから）'@${handoff}' を打つ。シェルのままなら、${recovery}`,
   );
 }
-// 資料を読んだら選択式の問いを出させる。ユーザーは選ぶだけで続きに入れ、問いが出ること自体で再起動にも気づける。
-// 黙って進めさせると気づく手段が無く、黙って待たせると資料があるのに止まったままになる。
-const firstPrompt =
-  `@${handoff} 前セッションの引き継ぎ資料です。読んで現状を把握したら、AskUserQuestion で` +
-  `「お任せで進める」「何もしない」の二択をユーザーに出してください。答えが返るまで作業を始めないこと。` +
-  `「お任せで進める」が選ばれたら、資料の残りから次の一手を選んで進めます。` +
-  `ただし後戻りできない操作と外向きの操作（push・PR・マージ・削除・他セッションへの依頼）は、そのつど確認してください。`;
-if (!prompt(name, firstPrompt)) {
+if (!prompt(name, `@${handoff} 前セッションの引き継ぎ資料です。読んで現状を把握したら、${HOW_TO_PROCEED}`)) {
   fail(`起動はしたが資料を渡せなかった（${herdrError()}）。ペインで @${handoff} と打てば読める`);
 }
 
