@@ -101,6 +101,11 @@ function bottomBorder(lines) {
 // 画面全体に当てると、会話に映った別ペインの画面（herdr pane read の出力）の使用率を先に拾う。
 const BELOW_BORDER_LIMIT = 8;
 
+// バックグラウンドのサブエージェントを走らせている間は、ステータスラインの下に一覧が並ぶ
+// （`  ⏺ main`、`  ◯ general-purpose …`、選んでいる行は `❯ ◯ …`）。この行は数えない。
+// 会話の `⏺` は行頭から始まるので、字下げか `❯` の付いた行だけを一覧とみなす。
+const AGENT_LIST_LINE = /^(?:\s+|❯\s+)[⏺◯]\s/;
+
 // 下枠より下の数行だけに当てる。
 // 自分の入力欄が画面に無い（トランスクリプト表示や全面パネル）と、下枠の探索は会話まで上り、
 // そこに映った別ペインの下枠を拾う。だから下が長すぎるときも読めない扱いにする。続けば WARN で気づける。
@@ -110,7 +115,7 @@ function readUsage(screen) {
   const bottom = bottomBorder(lines);
   if (bottom < 0) return null;
   const below = lines.slice(bottom + 1);
-  if (below.length > BELOW_BORDER_LIMIT) return null;
+  if (below.filter((line) => !AGENT_LIST_LINE.test(line)).length > BELOW_BORDER_LIMIT) return null;
   const captured = below.join('\n').match(pattern)?.[1];
   // 空のキャプチャを 0% と読むと、WARN も OVER も出なくなる。
   if (!captured) return null;

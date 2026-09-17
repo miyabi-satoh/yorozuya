@@ -88,7 +88,7 @@ description: Herdr 上の Claude セッションを、handoff を取ってから
 3. 更新も見るなら、知らせの文言に合う `--update-pattern` を作る（例: `'Update installed'`。2.1.272 の知らせは「Update installed · Restart to update」か「… Restart to apply」）。
    知らせは入力欄の上枠のすぐ上の行に右寄せで出るので、スクリプトはその1行だけに当てる。会話に同じ文言が出ても拾わないためで、パターンは文言だけ合わせればよい。
 4. `--once` を付けて当て、`START` の行で全ペインが読めているか確かめる。列は `閾値 読めた数/claude ペインの数 名前=使用率 …`。読めないペインは `名前=?`、`blocked` のペイン（承認や選択式の問いの待ち）は `名前=blocked` と並び、どちらも読めた数に入らない。Herdr の一覧が取れなければ、`START` の代わりに `WARN` が出て終了コードが 1 になる。
-5. Monitor で走らせる。Monitor は最長 30 分で切れるので、`timeout_ms` を上限にし、切れたら同じコマンドで張り直す。
+5. Monitor で走らせる。Monitor は最長 30 分で切れるので、`timeout_ms` を上限にし、切れたら同じコマンドで張り直す。張り直すたびに、その時点の時刻をひとこと添える（`date '+%H:%M'` などで取る）。
    ```
    node <このスキルのディレクトリ>/scripts/watch-context.mjs --pattern '<パターン>' --threshold <閾値> [--update-pattern '<パターン>']
    ```
