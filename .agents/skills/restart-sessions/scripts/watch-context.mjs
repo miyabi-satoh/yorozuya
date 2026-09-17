@@ -103,7 +103,10 @@ const BELOW_BORDER_LIMIT = 8;
 
 // バックグラウンドのエージェントを走らせている間は、ステータスラインの下に一覧が並ぶ（2.1.274 で実測と同梱コード）。
 // 行頭は `❯ ` か空白2つ、入れ子なら `├ `・`└ ` が続き、丸印は `⏺`（macOS 以外は `●`）か `◯`。
-// 例: `  ⏺ main`、`  ◯ general-purpose …`、`❯ ◯ …`、`    └ ◯ …`。この行は上限の数に入れない。
+// 例: `  ⏺ main`、`  ◯ general-purpose …`、`❯ ◯ …`、`    └ ◯ …`。この行は上限の数にも使用率の照合にも入れない。
+// 照合からも外すのは、一覧に出るエージェントの作業内容に使用率らしき文字列が混ざったとき、
+// それを自分の使用率と読まないため（ステータスラインが隠れていると、低い値を黙って返しうる）。
+// ステータスラインの行（`  Model: … | Ctx Used: … | …`）はこのパターンに当たらないので、除外しても残る。
 // 別ペインの画面を拾わない守りの本体は、行頭から始まる下枠のほう。この除外は上限を緩めるので、
 // 字下げした丸印の多いツールの出力が下枠より下にあると、読めない扱いにならないことがある。
 const AGENT_LIST_LINE = /^(?:❯|\s)\s*(?:[├└]\s)?[⏺●◯]\s/;
@@ -116,8 +119,8 @@ function readUsage(screen) {
   const lines = screen.split('\n');
   const bottom = bottomBorder(lines);
   if (bottom < 0) return null;
-  const below = lines.slice(bottom + 1);
-  if (below.filter((line) => !AGENT_LIST_LINE.test(line)).length > BELOW_BORDER_LIMIT) return null;
+  const below = lines.slice(bottom + 1).filter((line) => !AGENT_LIST_LINE.test(line));
+  if (below.length > BELOW_BORDER_LIMIT) return null;
   const captured = below.join('\n').match(pattern)?.[1];
   // 空のキャプチャを 0% と読むと、WARN も OVER も出なくなる。
   if (!captured) return null;
