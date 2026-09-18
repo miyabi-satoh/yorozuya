@@ -45,12 +45,14 @@ description: Herdr 上の Claude セッションを、handoff を取ってから
    ```
    herdr agent wait <name> --until working --until blocked --timeout 30000
    ```
-   新しいセッションが資料を読み始めていれば通る（読み終えて二択を出していれば `blocked`）。
-   `timeout` のエラーが返ったら、`herdr agent read <name> --source visible --format ansi` で入力欄を読む。次の両方に当てはまるときだけ、`herdr agent send-keys <name> Enter` で送り、もう一度待つ。
-   - 入力欄にあるのが依頼の文だけで、薄字（`ESC[2m`）のサジェストではない。長い依頼は末尾しか見えない
-   - 候補のメニューも、ダイアログや選択式の問いも出ていない
+   返ったもので分ける。
+   - `working` — 資料を読み始めている。手順7へ。
+   - `blocked` — `herdr agent read <name> --source visible` で画面を読む。進め方の二択（お任せで進める／何もしない）が出ていれば、読み終えている。手順7へ。ほかのダイアログ（信頼や権限の確認など）なら、依頼は送信されていないかもしれない。Enter を送らずにユーザーにペインを見てもらう。
+   - `timeout` のエラー — `herdr agent read <name> --source visible --format ansi` で入力欄を読む。次の両方に当てはまるときだけ、`herdr agent send-keys <name> Enter` で送り、もう一度待つ。
+     - 入力欄にあるのが依頼の文だけで、薄字（`ESC[2m`）のサジェストではない。長い依頼は末尾しか見えない
+     - 候補のメニューも、ダイアログや選択式の問いも出ていない
 
-   それ以外のとき、2回目も時間切れのとき、`timeout` 以外のエラーが返ったときは、Enter を送らずにユーザーにペインを見てもらう。
+   どれにも当てはまらないとき（入力欄が上の条件に合わない、2回目も時間切れ、ほかのエラー）は、Enter を送らずにユーザーにペインを見てもらう。
 
 7. 結果を報告する。旧セッションID は `resume:` として出力の末尾に出る。
 
