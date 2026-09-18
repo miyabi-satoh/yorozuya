@@ -144,7 +144,7 @@ if (!startAgent(name, pane)) {
     `起動できない（${herdrError()}）。ペインを見ること。claude が上がっていれば（確認やダイアログが出ていれば答えてから）'@${handoff}' を打つ。シェルのままなら、${recovery}`,
   );
 }
-if (!prompt(name, `@${handoff} 前セッションの引き継ぎ資料です。読んで現状を把握したら、${HOW_TO_PROCEED}`)) {
+if (!prompt(name, `@${handoff} 前セッションの引き継ぎ資料です。読んだら、${HOW_TO_PROCEED}`)) {
   fail(`起動はしたが資料を渡せなかった（${herdrError()}）。ペインで @${handoff} と打てば読める`);
 }
 
