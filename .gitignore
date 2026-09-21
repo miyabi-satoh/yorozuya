@@ -4,3 +4,6 @@ notes/*
 
 # ホームの絶対パスが入る個人の設定。
 .claude/settings.local.json
+
+# macOS が作るフォルダの表示情報。
+.DS_Store
