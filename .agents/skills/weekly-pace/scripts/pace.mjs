@@ -12,6 +12,10 @@ import { readFileSync } from 'node:fs';
 
 const args = process.argv.slice(2);
 const textFlagIndex = args.indexOf('--text');
+if (textFlagIndex >= 0 && args[textFlagIndex + 1] === undefined) {
+  process.stderr.write('--text には値が要る。\n');
+  process.exit(1);
+}
 const raw = textFlagIndex >= 0 ? args[textFlagIndex + 1] : readFileSync(0, 'utf8');
 // ステータスラインの空白はノーブレークスペース（U+00A0）。watch-context.mjs と同じく、
 // 照合の前に普通の空白へ揃える（揃えないと "Weekly Reset" のような固定文字列がマッチしない）。
@@ -20,7 +24,7 @@ const text = raw.replace(/ /g, ' ');
 const WEEKLY_CYCLE_HOURS = 168; // 7日
 
 // 例: "Weekly: 7.0% | Weekly Reset: 6d 17hr 34m" / "Weekly Reset: 17hr 34m" / "Weekly Reset: 34m"
-const pctMatch = text.match(/Weekly:\s*([\d.]+)%/);
+const pctMatch = text.match(/Weekly:\s*(\d+(?:\.\d+)?)%/);
 const resetMatch = text.match(/Weekly Reset:\s*(?:(\d+)d\s*)?(?:(\d+)hr\s*)?(?:(\d+)m)?/);
 
 if (!pctMatch || !resetMatch || (!resetMatch[1] && !resetMatch[2] && !resetMatch[3])) {
@@ -29,6 +33,10 @@ if (!pctMatch || !resetMatch || (!resetMatch[1] && !resetMatch[2] && !resetMatch
 }
 
 const pct = Number(pctMatch[1]);
+if (!Number.isFinite(pct)) {
+  process.stderr.write(`Weekly% の値がおかしい: "${pctMatch[1]}"\n`);
+  process.exit(1);
+}
 const days = Number(resetMatch[1] ?? 0);
 const hours = Number(resetMatch[2] ?? 0);
 const minutes = Number(resetMatch[3] ?? 0);
