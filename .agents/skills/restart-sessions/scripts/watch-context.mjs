@@ -1,23 +1,37 @@
 #!/usr/bin/env node
 // 各 claude ペインのステータスラインからコンテキストの使用率を読み、閾値以上になったら1行出す。
-// 指定があれば、Claude Code の更新の知らせ（再起動で反映される）が出ているペインも1行出す。
-// usage: watch-context.mjs --pattern <正規表現> --threshold <使用率> [--interval 120] [--update-pattern <正規表現>] [--once]
+// Claude Code の更新の知らせ（再起動で反映される）と、放置のヒントが出ているペインも1行ずつ出す。
+// usage: watch-context.mjs [--pattern <正規表現>] [--threshold <使用率>] [--interval 120] [--update-pattern <正規表現>] [--idle-pattern <正規表現>] [--no-update] [--no-idle] [--start] [--once]
+// 引数は全部省ける。既定は DEFAULTS のとおり。
 //
 // 出すのは「聞きに行くきっかけ」だけ。区切りかどうか、再起動するかは読んだ側と対象が決める。
 // 画面からの読み取りで後戻りできない操作まで進めない。読み違えても、依頼が早いか遅いかで済むようにする。
 //
 // stdout の1行が1件の知らせ（Monitor で受ける前提）。列と扱いは SKILL.md の「コンテキストを見張る」にある。
-// START は Herdr の一覧が最初に取れた回に、その回の知らせより先に出す。
+// START は --start を付けたときだけ、Herdr の一覧が最初に取れた回に、その回の知らせより先に出す。
+// 既定で出さないのは、Monitor で張り直すたびに START で起こされないため。`| grep -v '^START'` で落とす手は使わない。
+// Claude Code のシェルでは grep が別物（組み込みの ugrep のシェル関数）に差し替わっていて、走りっぱなしの入力では行が流れず、OVER も UPDATE も届かなくなる（notes/watch-context.md 2026-09-20）。
 // OVER・UPDATE と WARN（ペインごと）はセッションごとに1回だけ出す。覚えているのはこのプロセスの中だけ。
 //
 // --pattern は使用率の数字を1つ目のキャプチャで取る。入力欄の下枠より下（ステータスライン）だけに当てる。
 // 照合の前にノーブレークスペースを普通の空白に揃える。
-// --update-pattern は、入力欄の上枠のすぐ上の1行だけに当てる。省けば更新は見ない。
+// --update-pattern は、入力欄の上枠のすぐ上の1行だけに当てる。--no-update を付ければ更新は見ない。
+// --idle-pattern も同じ1行に当てる。Claude Code の「放置から戻ったときのヒント」（`new task? /clear to save …`。
+// コンテキスト 10万トークン以上で、最後の応答から 75 分たつと出る。2.1.278 のコードで確認）を拾う。--no-idle を付ければ見ない。
 
 import { parseArgs } from 'node:util';
 import { herdr, herdrError, herdrJson } from './lib/herdr.mjs';
 
-const usage = 'usage: watch-context.mjs --pattern <正規表現> --threshold <使用率> [--interval 120] [--update-pattern <正規表現>] [--once]';
+const usage = 'usage: watch-context.mjs [--pattern <正規表現>] [--threshold <使用率>] [--interval 120] [--update-pattern <正規表現>] [--idle-pattern <正規表現>] [--no-update] [--no-idle] [--start] [--once]';
+
+// 既定の --pattern は ccstatusline の「Ctx Used: 12.3%」用。ほかの表示のステータスラインには --pattern を渡す。
+const DEFAULTS = {
+  pattern: 'Ctx Used: ([\\d.]+)%',
+  threshold: '50',
+  interval: '120',
+  'update-pattern': 'Update installed',
+  'idle-pattern': 'new task\\?',
+};
 
 function fail(message) {
   process.stderr.write(`${message}\n${usage}\n`);
@@ -28,18 +42,20 @@ let options;
 try {
   ({ values: options } = parseArgs({
     options: {
-      pattern: { type: 'string' },
-      threshold: { type: 'string' },
-      interval: { type: 'string', default: '120' },
-      'update-pattern': { type: 'string' },
+      pattern: { type: 'string', default: DEFAULTS.pattern },
+      threshold: { type: 'string', default: DEFAULTS.threshold },
+      interval: { type: 'string', default: DEFAULTS.interval },
+      'update-pattern': { type: 'string', default: DEFAULTS['update-pattern'] },
+      'idle-pattern': { type: 'string', default: DEFAULTS['idle-pattern'] },
+      'no-update': { type: 'boolean', default: false },
+      'no-idle': { type: 'boolean', default: false },
+      start: { type: 'boolean', default: false },
       once: { type: 'boolean', default: false },
     },
   }));
 } catch (error) {
   fail(error.message);
 }
-
-if (!options.pattern || options.threshold === undefined) fail('--pattern と --threshold は必須');
 
 function compile(flag, source) {
   try {
@@ -51,7 +67,8 @@ function compile(flag, source) {
 const pattern = compile('--pattern', options.pattern);
 // キャプチャが無いと、どのペインも読めない扱いになる。
 if (new RegExp(`${options.pattern}|`).exec('').length < 2) fail('--pattern に使用率を取るキャプチャが無い');
-const updatePattern = options['update-pattern'] ? compile('--update-pattern', options['update-pattern']) : null;
+const updatePattern = options['no-update'] ? null : compile('--update-pattern', options['update-pattern']);
+const idlePattern = options['no-idle'] ? null : compile('--idle-pattern', options['idle-pattern']);
 
 // 空文字は Number('') が 0 になって通ってしまうので、数の形をしているものだけ受ける。
 const toNumber = (text) => (/^\s*\d+(\.\d+)?\s*$/.test(text) ? Number(text) : NaN);
@@ -75,6 +92,7 @@ const clean = (text) => String(text ?? '').replace(/[\t\n]/g, ' ');
 
 const notified = new Set();
 const updated = new Set();
+const idled = new Set();
 const warned = new Set();
 const misses = new Map();
 let listFailures = 0;
@@ -176,12 +194,19 @@ function tick() {
 
     const screen = readScreen(agent.pane_id);
 
-    if (updatePattern && screen !== null && !updated.has(key)) {
-      const row = noticeRow(screen);
-      if (updatePattern.test(row)) {
-        updated.add(key);
-        events.push(['UPDATE', clean(row.trim()), ...where]);
-      }
+    const row = screen !== null && (updatePattern || idlePattern) ? noticeRow(screen) : '';
+    // 放置のヒントが出ているペインは、IDLE だけを出す。IDLE は資料を書かせずに /clear する手順で、
+    // OVER・UPDATE の handoff を先に頼むと、冷えたキャッシュに大きな会話を読ませる割高な処理が走って手遅れになる。
+    // /clear で会話が消えれば OVER は無意味になり、UPDATE の知らせは新しいセッションで改めて出る。
+    const idleHit = idlePattern && !idled.has(key) && idlePattern.test(row);
+    if (idleHit) {
+      idled.add(key);
+      updated.add(key);
+      notified.add(key);
+      events.push(['IDLE', clean(row.trim()), ...where]);
+    } else if (updatePattern && !updated.has(key) && updatePattern.test(row)) {
+      updated.add(key);
+      events.push(['UPDATE', clean(row.trim()), ...where]);
     }
 
     const used = readUsage(screen);
@@ -208,7 +233,7 @@ function tick() {
   // START を先に出す。読み手は START で見張りが動き出したと知ってから、個々の知らせを扱う。
   if (!started) {
     started = true;
-    emit('START', `${threshold}%`, `${read}/${claudes.length}`, readings.join(' '));
+    if (options.start) emit('START', `${threshold}%`, `${read}/${claudes.length}`, readings.join(' '));
   }
   for (const columns of events) emit(...columns);
 }
