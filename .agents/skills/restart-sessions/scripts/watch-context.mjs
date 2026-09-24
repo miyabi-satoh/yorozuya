@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // 各 claude ペインのステータスラインからコンテキストの使用率を読み、閾値以上になったら1行出す。
 // Claude Code の更新の知らせ（再起動で反映される）と、放置のヒントが出ているペインも1行ずつ出す。
-// usage: watch-context.mjs [--pattern <正規表現>] [--threshold <使用率>] [--interval 120] [--update-pattern <正規表現>] [--idle-pattern <正規表現>] [--no-update] [--no-idle] [--start] [--once]
+// usage: watch-context.mjs [--pattern <正規表現>] [--threshold <使用率>] [--interval 120] [--update-pattern <正規表現>] [--idle-pattern <正規表現>] [--goal-pattern <正規表現>] [--no-update] [--no-idle] [--no-goal] [--start] [--once]
 // 引数は全部省ける。既定は DEFAULTS のとおり。
 //
 // 出すのは「聞きに行くきっかけ」だけ。区切りかどうか、再起動するかは読んだ側と対象が決める。
@@ -18,9 +18,14 @@
 // --update-pattern は、入力欄の上枠のすぐ上の1行だけに当てる。--no-update を付ければ更新は見ない。
 // --idle-pattern も同じ1行に当てる。Claude Code の「放置から戻ったときのヒント」（`new task? /clear to save …`。
 // コンテキスト 10万トークン以上で、最後の応答から 75 分たつと出る。2.1.278 のコードで確認）を拾う。--no-idle を付ければ見ない。
+// --goal-pattern も同じ1行に当てる。`/goal`（自律的な目標追従モード）が動いている間は
+// OVER・UPDATE・IDLE をどれも出さない（区切りの確認で割り込むと、目標追従を途中で止めることになるため）。
+// 表示の `(Nm)` は経過時間で、上限の長さは分からない（2026-09-23 実測で 5m→7m と増え続けた）。
+// 長く動き続けるなら、その間は見張りが黙り続ける。通知先の集合には加えない（何回でも継続を判定できるようにする）ので、
+// `/goal` が外れれば次の tick で改めて出る。--no-goal を付ければ見ない。
 
 import { parseArgs } from 'node:util';
-import { herdr, herdrError, herdrJson } from './lib/herdr.mjs';
+import { AGENT_LIST_LINE, bottomBorder, herdr, herdrError, herdrJson, readScreen } from './lib/herdr.mjs';
 
 const usage = 'usage: watch-context.mjs [--pattern <正規表現>] [--threshold <使用率>] [--interval 120] [--update-pattern <正規表現>] [--idle-pattern <正規表現>] [--no-update] [--no-idle] [--start] [--once]';
 
@@ -31,6 +36,7 @@ const DEFAULTS = {
   interval: '120',
   'update-pattern': 'Update installed',
   'idle-pattern': 'new task\\?',
+  'goal-pattern': '/goal active',
 };
 
 function fail(message) {
@@ -47,8 +53,10 @@ try {
       interval: { type: 'string', default: DEFAULTS.interval },
       'update-pattern': { type: 'string', default: DEFAULTS['update-pattern'] },
       'idle-pattern': { type: 'string', default: DEFAULTS['idle-pattern'] },
+      'goal-pattern': { type: 'string', default: DEFAULTS['goal-pattern'] },
       'no-update': { type: 'boolean', default: false },
       'no-idle': { type: 'boolean', default: false },
+      'no-goal': { type: 'boolean', default: false },
       start: { type: 'boolean', default: false },
       once: { type: 'boolean', default: false },
     },
@@ -69,6 +77,7 @@ const pattern = compile('--pattern', options.pattern);
 if (new RegExp(`${options.pattern}|`).exec('').length < 2) fail('--pattern に使用率を取るキャプチャが無い');
 const updatePattern = options['no-update'] ? null : compile('--update-pattern', options['update-pattern']);
 const idlePattern = options['no-idle'] ? null : compile('--idle-pattern', options['idle-pattern']);
+const goalPattern = options['no-goal'] ? null : compile('--goal-pattern', options['goal-pattern']);
 
 // 空文字は Number('') が 0 になって通ってしまうので、数の形をしているものだけ受ける。
 const toNumber = (text) => (/^\s*\d+(\.\d+)?\s*$/.test(text) ? Number(text) : NaN);
@@ -98,36 +107,15 @@ const misses = new Map();
 let listFailures = 0;
 let started = false;
 
-function readScreen(pane) {
-  const screen = herdr(['pane', 'read', pane, '--source', 'visible']);
-  if (screen === null) return null;
-  // ステータスラインの空白はノーブレークスペースで来ることがある（実測）。
-  // 画面で見たとおり普通の空白で書いたパターンが当たるよう、揃えてから照合する。
-  return screen.replace(/\u00a0/g, ' ');
-}
-
-// 入力欄の下枠: 下から見て最初の「行頭から ─ だけの行」。見つからなければ -1。
-// 行頭を見るのは、会話に映った別ペインの画面（herdr pane read の出力）の枠を拾わないため。
-// ツールの出力は字下げして表示されるので、その中の枠は行頭から始まらない。
-function bottomBorder(lines) {
-  let index = lines.length - 1;
-  while (index >= 0 && !/^─+\s*$/.test(lines[index])) index -= 1;
-  return index;
-}
-
 // 入力欄の下枠より下は、ステータスラインと mode の行だけ（2.1.272 で実測。末尾の空行を入れて4行）。
 // 画面全体に当てると、会話に映った別ペインの画面（herdr pane read の出力）の使用率を先に拾う。
 const BELOW_BORDER_LIMIT = 8;
 
-// バックグラウンドのエージェントを走らせている間は、ステータスラインの下に一覧が並ぶ（2.1.274 で実測と同梱コード）。
-// 行頭は `❯ ` か空白2つ、入れ子なら `├ `・`└ ` が続き、丸印は `⏺`（macOS 以外は `●`）か `◯`。
-// 例: `  ⏺ main`、`  ◯ general-purpose …`、`❯ ◯ …`、`    └ ◯ …`。この行は上限の数にも使用率の照合にも入れない。
+// エージェント一覧の行（AGENT_LIST_LINE）は、上限の数にも使用率の照合にも入れない。
 // 照合からも外すのは、一覧に出るエージェントの作業内容に使用率らしき文字列が混ざったとき、
 // それを自分の使用率と読まないため（ステータスラインが隠れていると、低い値を黙って返しうる）。
-// ステータスラインの行（`  Model: … | Ctx Used: … | …`）はこのパターンに当たらないので、除外しても残る。
 // 別ペインの画面を拾わない守りの本体は、行頭から始まる下枠のほう。この除外は上限を緩めるので、
 // 字下げした丸印の多いツールの出力が下枠より下にあると、読めない扱いにならないことがある。
-const AGENT_LIST_LINE = /^(?:❯|\s)\s*(?:[├└]\s)?[⏺●◯]\s/;
 
 // 下枠より下の数行だけに当てる。
 // 自分の入力欄が画面に無い（トランスクリプト表示や全面パネル）と、下枠の探索は会話まで上り、
@@ -194,9 +182,18 @@ function tick() {
 
     const screen = readScreen(agent.pane_id);
 
-    const row = screen !== null && (updatePattern || idlePattern) ? noticeRow(screen) : '';
+    const row = screen !== null && (updatePattern || idlePattern || goalPattern) ? noticeRow(screen) : '';
+
+    // /goal（自律的な目標追従モード）が動いている間は、区切りの確認で割り込まない。
+    // notified/updated/idled のどれにも加えないので、枠が外れれば次の tick でまた判定される。
+    if (goalPattern && goalPattern.test(row)) {
+      read += 1;
+      readings.push(`${label}=goal`);
+      continue;
+    }
+
     // 放置のヒントが出ているペインは、IDLE だけを出す。IDLE は資料を書かせずに /clear する手順で、
-    // OVER・UPDATE の handoff を先に頼むと、冷えたキャッシュに大きな会話を読ませる割高な処理が走って手遅れになる。
+    // OVER・UPDATE の区切りの確認を先に頼むと、冷えたキャッシュに大きな会話を読ませる割高な処理が走って手遅れになる。
     // /clear で会話が消えれば OVER は無意味になり、UPDATE の知らせは新しいセッションで改めて出る。
     const idleHit = idlePattern && !idled.has(key) && idlePattern.test(row);
     if (idleHit) {

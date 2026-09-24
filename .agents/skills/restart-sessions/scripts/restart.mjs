@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // 対象のペインの claude を終了させ、起動し直して引き継ぎ資料を読ませる。
-// usage: restart.mjs <pane_id> <name> <資料の絶対パス>
+// usage: restart.mjs [--allow-background] <pane_id> <name> <資料の絶対パス>
 //
 // この4手は1つのプロセスで走り切る。/exit と起動の間で中断されると、対象は
 // セッションの無いペインとして取り残される。呼び出し側がターンをまたぐと起こりうる。
@@ -8,12 +8,17 @@
 // 終了コード: 0 成功 / 1 失敗。失敗は2種類あり、stderr の接頭辞で見分ける。
 //   SKIP — /exit を送る前に止まった。対象は無傷。
 //   FAIL — 送った後に止まった。復旧の道筋をメッセージに書く。
+//
+// --allow-background を付けないとき、モードラインにバックグラウンドのシェル・Monitor が
+// 見えていれば SKIP する（対象の自己申告と実際の追跡が食い違うことがあるため）。
+// 対象に止めてもらってから呼び直す。--allow-background は、対象がセッションを終えても動かし続けたいと明言した独立したプロセスにだけ使う。
 
 import { handoffProblem } from './lib/handoff.mjs';
 import { HOW_TO_PROCEED } from './lib/prompts.mjs';
 import {
   agentInfo,
   agentStatus,
+  backgroundWorkHint,
   herdrError,
   herdrErrorCode,
   NAME_PATTERN,
@@ -26,9 +31,11 @@ import {
   waitForNameRelease,
 } from './lib/herdr.mjs';
 
-const [pane, name, handoff] = process.argv.slice(2);
+const rawArgs = process.argv.slice(2);
+const allowBackground = rawArgs.includes('--allow-background');
+const [pane, name, handoff] = rawArgs.filter((arg) => arg !== '--allow-background');
 if (!pane || !name || !handoff) {
-  process.stderr.write('usage: restart.mjs <pane_id> <name> <資料の絶対パス>\n');
+  process.stderr.write('usage: restart.mjs [--allow-background] <pane_id> <name> <資料の絶対パス>\n');
   process.exit(1);
 }
 
@@ -83,6 +90,20 @@ if (holder && holder !== pane) {
 // 控えられないなら終了させない。戻る手がかりが無い状態で殺すことになる。
 const sid = info.agent_session?.value ?? '';
 if (!sid) skip(`ペイン ${pane} のセッションIDを引けない。resume の手がかりが無いまま終了させたくないので止まる`);
+
+// 対象の自己申告（「バックグラウンド処理はありません」）は、実際にハーネスが追跡している
+// シェル・Monitor と食い違うことがある（2026-09-11・2026-09-23 に別プロジェクトで実際に発生）。
+// モードラインは対象の記憶に頼らない表示なので、/exit の前にここで機械的に照合する。
+if (!allowBackground) {
+  const hint = backgroundWorkHint(pane);
+  if (hint) {
+    skip(
+      `ペイン ${pane} のモードラインに「${hint}」と出ている。対象の自己申告と食い違っていないか確かめること。` +
+        `対象に TaskStop で止めてもらい、モードラインから消えたのを確かめて同じ引数で呼び直す。` +
+          `--allow-background は、対象がセッションを終えても動かし続けたいと明言した独立したプロセスにだけ使う`,
+    );
+  }
+}
 
 // --- ここから後戻りできない ---
 
