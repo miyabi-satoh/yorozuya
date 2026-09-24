@@ -108,7 +108,7 @@ Claude Code の更新の知らせ（再起動で反映される）と、「放�
 | 引数 | 既定 | 役割 |
 |---|---|---|
 | `--pattern` | `'Ctx Used: ([\d.]+)%'` | 使用率の数字を1つ目のキャプチャで取る。入力欄の下枠より下の数行（ステータスライン）だけに当てる。照合の前にノーブレークスペース（U+00A0）を普通の空白に揃えるので、空白は普通の空白で書く。既定は ccstatusline の表示用。ほかの表示なら渡す |
-| `--threshold` | `30` | この使用率（%）以上で `OVER` を出す |
+| `--threshold` | `30` | この使用率（%）以上で `OVER` を出す。使用率なので、コンテキストの上限が小さいモデルほど少ないトークンで出る |
 | `--interval` | `120` | ペインを読む間隔（秒） |
 | `--update-pattern` | `'Update installed'` | 更新の知らせの文言（2.1.272 の知らせは「Update installed · Restart to update」か「… Restart to apply」）。入力欄の上枠のすぐ上の1行だけに当てるので、会話に同じ文言が出ても拾わない |
 | `--idle-pattern` | `'new task\?'` | 放置のヒントの文言。`--update-pattern` と同じ1行に当てる。ヒントは、コンテキストが 10万トークン以上で、最後の応答から 75 分たつと出る（2.1.278 のコードで確認。環境変数 `CLAUDE_CODE_IDLE_TOKEN_THRESHOLD`・`CLAUDE_CODE_IDLE_THRESHOLD_MINUTES` で変わる） |
@@ -128,7 +128,7 @@ Claude Code の更新の知らせ（再起動で反映される）と、「放�
    `START` を出さないのは、張り直すたびに起こされないため。**`| grep -v '^START'` で落とさないこと。** Claude Code のシェルでは `grep` が組み込みの ugrep を呼ぶシェル関数に差し替わっていて、走りっぱなしの入力では行を溜め込み、`OVER` も `UPDATE` も Monitor に届かなくなる（`--line-buffered` を付けても同じ。実測は `notes/watch-context.md` の 2026-09-20）。
 
 引数を変えたいときは、そのときの依頼で渡す。恒常的に変えたい値（閾値など）は、このリポジトリには書かず、記憶機能か `CLAUDE.local.md` に置く。
-起動のたびに始めるよう、このリポジトリの `.claude/settings.json` に SessionStart（matcher: `startup`）の hook を置いてある。走らせるコマンドと「すでに走らせていれば二重に始めない」旨を会話に差し込む。コマンドのパスはリポジトリの直下からの相対なので、Yorozuya のセッションはリポジトリの直下で起動する。hook から Monitor は呼べないので、始めるのは最初に返事をするときになる。matcher を `startup` にした hook は、再開（resume）したセッションでは動かなかった（matcher に `resume` を足せば動くかは未確認）。
+起動のたびに始めるよう、このリポジトリの `.claude/settings.json` に SessionStart（matcher: `startup`）の hook を置いてある。走らせるコマンドと「すでに走らせていれば二重に始めない」旨を会話に差し込む。コマンドのパスはリポジトリの直下からの相対なので、Yorozuya のセッションはリポジトリの直下で起動する。直下で複数のセッションを起動すると、どれもが見張りを始め、同じ知らせで二重に動く。見張りは1つのセッションだけに持たせ、ほかは止める。このリポジトリの外で使うなら、同じ hook を使う側の `.claude/settings.json` に置き、パスをそこから見た位置に替える。hook から Monitor は呼べないので、始めるのは最初に返事をするときになる。matcher を `startup` にした hook は、再開（resume）したセッションでは動かなかった（matcher に `resume` を足せば動くかは未確認）。
 
 **知らせが来たら。**
 
