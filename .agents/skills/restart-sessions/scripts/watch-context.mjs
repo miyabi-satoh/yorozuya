@@ -27,7 +27,7 @@ const usage = 'usage: watch-context.mjs [--pattern <正規表現>] [--threshold 
 // 既定の --pattern は ccstatusline の「Ctx Used: 12.3%」用。ほかの表示のステータスラインには --pattern を渡す。
 const DEFAULTS = {
   pattern: 'Ctx Used: ([\\d.]+)%',
-  threshold: '50',
+  threshold: '30',
   interval: '120',
   'update-pattern': 'Update installed',
   'idle-pattern': 'new task\\?',
