@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Yorozuya 自身のセッションを、自ペインを分割した新ペインで立て直す。
-// usage: restart-self.mjs <資料の絶対パス> [name]
+// usage: restart-self.mjs [--allow-background] <資料の絶対パス> [name]
 //
 // 対象セッションの再起動とは手順が逆になる。死ぬ側が /exit を送るとスクリプトも道連れに
 // なるため、新セッションを先に立て、旧ペインを閉じるのは新セッションに任せる。
@@ -15,6 +15,7 @@ import { isAbsolute } from 'node:path';
 import { handoffProblem } from './lib/handoff.mjs';
 import { HOW_TO_PROCEED } from './lib/prompts.mjs';
 import {
+  backgroundWorkHint,
   herdr,
   herdrError,
   herdrJson,
@@ -25,9 +26,11 @@ import {
   waitForNameRelease,
 } from './lib/herdr.mjs';
 
-const [handoff, name = 'yorozuya'] = process.argv.slice(2);
+const rawArgs = process.argv.slice(2);
+const allowBackground = rawArgs.includes('--allow-background');
+const [handoff, name = 'yorozuya'] = rawArgs.filter((arg) => arg !== '--allow-background');
 if (!handoff) {
-  process.stderr.write('usage: restart-self.mjs <資料の絶対パス> [name]\n');
+  process.stderr.write('usage: restart-self.mjs [--allow-background] <資料の絶対パス> [name]\n');
   process.exit(1);
 }
 
@@ -63,6 +66,18 @@ if (current.agent !== 'claude') skip(`このペインで動いているのは cl
 // リポジトリの外で起動して CLAUDE.md も AGENTS.md も読まないセッションができる。
 const cwd = [current.cwd, current.foreground_cwd].find((value) => typeof value === 'string' && isAbsolute(value));
 if (!cwd) skip('ペインの cwd を Herdr から取れない。新ペインをどこで起動するか決められないので止まる');
+
+// 自分の申告（「見張りは止めた」など）も、自分自身の記憶違いで実際の追跡と食い違いうる。
+// モードラインは記憶に頼らない表示なので、旧ペインを道連れにする前にここで機械的に照合する。
+if (!allowBackground) {
+  const hint = backgroundWorkHint(self);
+  if (hint) {
+    skip(
+      `自分のモードラインに「${hint}」と出ている。Monitor を TaskStop で止め、走らせ直すコマンドを資料に書いたか確かめること。` +
+        `--allow-background は、ペインを閉じても動き続けると確かめた独立したプロセスにだけ使う（Monitor やシェルはペインと一緒に止まる）`,
+    );
+  }
+}
 
 // 旧ペイン（自分）が同じ名前を握っていると、新ペインで agent start が失敗する。
 // Herdr の名前は一意なので、起動の直前に外し、失敗したら戻す。

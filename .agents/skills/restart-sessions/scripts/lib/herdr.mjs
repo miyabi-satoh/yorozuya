@@ -59,8 +59,8 @@ export const SEND_REFUSED = new Set([
   'server_not_running',
 ]);
 
-// 入力欄に打ち込む。スラッシュコマンドを呼ばせるにはこの経路が要る
-// （handoff スキルは disable-model-invocation で、メッセージからは呼べない）。
+// 入力欄に打ち込む。`/exit` や `@<資料>` など、スラッシュコマンドや特殊な参照記法を
+// 確実に効かせるにはこの経路が要る（クロスセッションのメッセージは普通のテキストとして届く）。
 // 承認・質問ダイアログで止まっている相手は Herdr が agent_blocked で弾く（入力は送られない）。
 export function prompt(target, text) {
   return herdr(['agent', 'prompt', target, text]) !== null;
@@ -87,6 +87,51 @@ export function agentInfo(target) {
 
 export function agentStatus(pane) {
   return agentInfo(pane)?.agent_status ?? '';
+}
+
+// 画面を読む。ステータスラインの空白はノーブレークスペースで来ることがある（実測）。
+// 画面で見たとおり普通の空白で書いたパターンが当たるよう、揃えてから返す。
+export function readScreen(pane) {
+  const screen = herdr(['pane', 'read', pane, '--source', 'visible']);
+  if (screen === null) return null;
+  return screen.replace(/\u00a0/g, ' ');
+}
+
+// 入力欄の下枠: 下から見て最初の「行頭から ─ だけの行」。見つからなければ -1。
+// 行頭を見るのは、会話に映った別ペインの画面（herdr pane read の出力）の枠を拾わないため。
+// ツールの出力は字下げして表示されるので、その中の枠は行頭から始まらない。
+export function bottomBorder(lines) {
+  let index = lines.length - 1;
+  while (index >= 0 && !/^─+\s*$/.test(lines[index])) index -= 1;
+  return index;
+}
+
+// バックグラウンドのエージェントを走らせている間は、ステータスラインの下に一覧が並ぶ（2.1.274 で実測と同梱コード）。
+// 行頭は `❯ ` か空白2つ、入れ子なら `├ `・`└ ` が続き、丸印は `⏺`（macOS 以外は `●`）か `◯`。
+// 例: `  ⏺ main`、`  ◯ general-purpose …`、`❯ ◯ …`、`    └ ◯ …`。
+// ステータスラインの行（`  Model: … | Ctx Used: … | …`）やモードラインはこのパターンに当たらない。
+export const AGENT_LIST_LINE = /^(?:❯|\s)\s*(?:[├└]\s)?[⏺●◯]\s/;
+
+// モードライン（`⏵⏵ auto mode on · 1 monitor · ← for agents` の形）から
+// バックグラウンドのシェル・Monitor の数を読む。自己申告（「バックグラウンド処理はありません」）が
+// 実際のハーネスの追跡と食い違うことがある（2026-09-11 に別プロジェクトで起きた事故と同種）ため、
+// /exit の前にここで機械的に照合する。
+// 入力欄の下枠より下を、エージェント一覧の行を除いてすべて見る。一覧はモードラインの下に並ぶので、
+// 末尾の数行だけを見ると押し出される。モードの名前（auto・accept edits など）には頼らない。
+// 見つからなければ null（バックグラウンド無し、または読めなかった。呼び出し側は SKIP にしない）。
+// 実測: 2026-09-23・2026-09-24 に「1 monitor」「1 shell」「2 shells」を確認。
+export function backgroundWorkHint(pane) {
+  const screen = readScreen(pane);
+  if (screen === null) return null;
+  const lines = screen.split('\n');
+  const bottom = bottomBorder(lines);
+  if (bottom < 0) return null;
+  for (const line of lines.slice(bottom + 1)) {
+    if (AGENT_LIST_LINE.test(line) || !line.includes(' · ')) continue;
+    const total = [...line.matchAll(/(\d+)\s+(?:shells?|monitors?|tasks?)\b/g)].reduce((sum, m) => sum + Number(m[1]), 0);
+    if (total > 0) return line.trim();
+  }
+  return null;
 }
 
 // 名前が空いていれば ''、握られていればそのペインID、一覧が取れなければ null。
