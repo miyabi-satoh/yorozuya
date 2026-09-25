@@ -124,9 +124,15 @@ export function draftFromScreen(raw) {
       for (const part of line.split(/(\x1b\[[0-9;]*[A-Za-z])/)) {
         const sgr = part.match(/^\x1b\[([0-9;]*)m$/);
         if (sgr) {
-          for (const code of (sgr[1] || '0').split(';')) {
-            if (code === '2') dim = true;
-            else if (code === '0' || code === '22') dim = false;
+          // 色の指定（38・48・58 に続く 5;n か 2;r;g;b）の中の数は、薄字や解除の指定ではないので読み飛ばす。
+          // 空の引数は 0（解除）として扱う。
+          const codes = sgr[1].split(';').map((code) => (code === '' ? 0 : Number(code)));
+          for (let i = 0; i < codes.length; i += 1) {
+            const code = codes[i];
+            if (code === 38 || code === 48 || code === 58) {
+              i += codes[i + 1] === 5 ? 2 : codes[i + 1] === 2 ? 4 : 1;
+            } else if (code === 2) dim = true;
+            else if (code === 0 || code === 22) dim = false;
           }
         } else if (!part.startsWith('\x1b') && !dim) {
           kept += part;
