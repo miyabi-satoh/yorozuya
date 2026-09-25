@@ -13,7 +13,7 @@
 import { isAbsolute } from 'node:path';
 
 import { handoffProblem } from './lib/handoff.mjs';
-import { HOW_TO_PROCEED } from './lib/prompts.mjs';
+import { GUIDE, HOW_TO_PROCEED } from './lib/prompts.mjs';
 import {
   backgroundWorkHint,
   herdr,
@@ -46,7 +46,8 @@ const fail = (message) => {
 
 // --- 何かを変える前に、確かめられることは全部ここで確かめる ---
 
-const problem = handoffProblem(handoff, '新セッション');
+// 進め方の文書も @ 参照で渡すので、同じ条件で確かめる。
+const problem = handoffProblem(handoff, '新セッション') || handoffProblem(GUIDE, '新セッション');
 if (problem) skip(problem);
 if (!NAME_PATTERN.test(name)) skip(`Herdr の名前の規則（先頭は小文字・英数と _ - のみ・32字以内）に合わない: ${name}`);
 

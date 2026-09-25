@@ -14,7 +14,7 @@
 // 対象に止めてもらってから呼び直す。--allow-background は、対象がセッションを終えても動かし続けたいと明言した独立したプロセスにだけ使う。
 
 import { handoffProblem } from './lib/handoff.mjs';
-import { HOW_TO_PROCEED } from './lib/prompts.mjs';
+import { GUIDE, HOW_TO_PROCEED } from './lib/prompts.mjs';
 import {
   agentInfo,
   agentStatus,
@@ -51,7 +51,8 @@ const fail = (message) => {
 
 // --- /exit を送る前に、確かめられることは全部ここで確かめる ---
 
-const problem = handoffProblem(handoff, '対象のペイン');
+// 進め方の文書も @ 参照で渡すので、同じ条件で確かめる。
+const problem = handoffProblem(handoff, '対象のペイン') || handoffProblem(GUIDE, '対象のペイン');
 if (problem) skip(problem);
 if (!NAME_PATTERN.test(name)) skip(`Herdr の名前の規則（先頭は小文字・英数と _ - のみ・32字以内）に合わない: ${name}`);
 
@@ -165,7 +166,7 @@ if (!startAgent(name, pane)) {
     `起動できない（${herdrError()}）。ペインを見ること。claude が上がっていれば（確認やダイアログが出ていれば答えてから）'@${handoff}' を打つ。シェルのままなら、${recovery}`,
   );
 }
-if (!prompt(name, `@${handoff} 前セッションの引き継ぎ資料です。読んで現状を把握したら、${HOW_TO_PROCEED}`)) {
+if (!prompt(name, `@${handoff} 前セッションの引き継ぎ資料です。${HOW_TO_PROCEED}`)) {
   fail(`起動はしたが資料を渡せなかった（${herdrError()}）。ペインで @${handoff} と打てば読める`);
 }
 

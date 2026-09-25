@@ -2,7 +2,8 @@
 // 各 claude ペインのステータスラインからコンテキストの使用率を読み、閾値以上になったら1行出す。
 // Claude Code の更新の知らせ（再起動で反映される）と、放置のヒントが出ているペインも1行ずつ出す。
 // usage: watch-context.mjs [--pattern <正規表現>] [--threshold <使用率>] [--interval 120] [--update-pattern <正規表現>] [--idle-pattern <正規表現>] [--goal-pattern <正規表現>] [--no-update] [--no-idle] [--no-goal] [--start] [--once]
-// 引数は全部省ける。既定は DEFAULTS のとおり。
+// --pattern 以外の引数は省ける。優先順は 引数 → config.local.json の watch → DEFAULTS。
+// --pattern はステータスラインの表示しだいで、誰にでも合う既定値が無いので、引数か config.local.json で必ず渡す。
 //
 // 出すのは「聞きに行くきっかけ」だけ。区切りかどうか、再起動するかは読んだ側と対象が決める。
 // 画面からの読み取りで後戻りできない操作まで進めない。読み違えても、依頼が早いか遅いかで済むようにする。
@@ -25,13 +26,13 @@
 // `/goal` が外れれば次の tick で改めて出る。--no-goal を付ければ見ない。
 
 import { parseArgs } from 'node:util';
+import { CONFIG, loadConfig } from './lib/config.mjs';
 import { AGENT_LIST_LINE, bottomBorder, herdr, herdrError, herdrJson, readScreen } from './lib/herdr.mjs';
 
 const usage = 'usage: watch-context.mjs [--pattern <正規表現>] [--threshold <使用率>] [--interval 120] [--update-pattern <正規表現>] [--idle-pattern <正規表現>] [--no-update] [--no-idle] [--start] [--once]';
 
-// 既定の --pattern は ccstatusline の「Ctx Used: 12.3%」用。ほかの表示のステータスラインには --pattern を渡す。
+// --pattern の既定は持たない（上の usage の説明）。
 const DEFAULTS = {
-  pattern: 'Ctx Used: ([\\d.]+)%',
   threshold: '30',
   interval: '120',
   'update-pattern': 'Update installed',
@@ -48,21 +49,39 @@ let options;
 try {
   ({ values: options } = parseArgs({
     options: {
-      pattern: { type: 'string', default: DEFAULTS.pattern },
-      threshold: { type: 'string', default: DEFAULTS.threshold },
-      interval: { type: 'string', default: DEFAULTS.interval },
-      'update-pattern': { type: 'string', default: DEFAULTS['update-pattern'] },
-      'idle-pattern': { type: 'string', default: DEFAULTS['idle-pattern'] },
-      'goal-pattern': { type: 'string', default: DEFAULTS['goal-pattern'] },
-      'no-update': { type: 'boolean', default: false },
-      'no-idle': { type: 'boolean', default: false },
-      'no-goal': { type: 'boolean', default: false },
+      pattern: { type: 'string' },
+      threshold: { type: 'string' },
+      interval: { type: 'string' },
+      'update-pattern': { type: 'string' },
+      'idle-pattern': { type: 'string' },
+      'goal-pattern': { type: 'string' },
+      'no-update': { type: 'boolean' },
+      'no-idle': { type: 'boolean' },
+      'no-goal': { type: 'boolean' },
       start: { type: 'boolean', default: false },
       once: { type: 'boolean', default: false },
     },
   }));
 } catch (error) {
   fail(error.message);
+}
+
+// 引数で渡されなかったものを config.local.json の watch、次に DEFAULTS で埋める。
+// 数は JSON で数として書かれることもあるので、引数と同じ文字列に揃えてから検める。
+const { config, error: configError } = loadConfig();
+if (configError) fail(configError);
+const watchConfig = config.watch ?? {};
+if (typeof watchConfig !== 'object' || Array.isArray(watchConfig)) fail(`${CONFIG} の watch がオブジェクトではない`);
+for (const key of ['pattern', 'threshold', 'interval', 'update-pattern', 'idle-pattern', 'goal-pattern']) {
+  if (options[key] !== undefined) continue;
+  const value = watchConfig[key] ?? DEFAULTS[key];
+  if (value !== undefined) options[key] = String(value);
+}
+for (const key of ['no-update', 'no-idle', 'no-goal']) {
+  if (options[key] === undefined) options[key] = watchConfig[key] === true;
+}
+if (!options.pattern) {
+  fail(`--pattern が無い。ステータスラインの使用率の表示に合わせて、引数で渡すか ${CONFIG} の watch.pattern に書くこと（形は config.example.json）`);
 }
 
 function compile(flag, source) {

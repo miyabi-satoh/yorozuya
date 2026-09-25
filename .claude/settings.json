@@ -9,13 +9,7 @@
           {
             "type": "command",
             "command": "node",
-            "args": [
-              "-e",
-              "console.log(process.argv.slice(1).join('\\n'))",
-              "[コンテキストの見張り] このセッションで最初に返事をするとき、restart-sessions スキルの「コンテキストを見張る」に従い（「始める」の手順2の試運転から）、次のコマンドをリポジトリの直下から Monitor（timeout_ms は上限の 30 分。切れたら同じコマンドで張り直す）で走らせること。すでに見張りを走らせていれば、二重には始めない。",
-              "node .agents/skills/restart-sessions/scripts/watch-context.mjs",
-              "知らせは既定では確認なしで流す。閾値などの引数や、知らせのたびに確認することが CLAUDE.local.md か記憶機能に決めてあれば、それに従う。grep で落とさないこと（Claude Code のシェルの grep は走りっぱなしの入力を溜め込み、OVER が届かなくなる）。"
-            ]
+            "args": ["${CLAUDE_PROJECT_DIR}/.agents/skills/restart-sessions/scripts/session-start.mjs"]
           }
         ]
       }
