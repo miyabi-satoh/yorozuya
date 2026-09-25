@@ -110,7 +110,7 @@ export function inputDraft(pane) {
 // inputDraft の読み取りの本体。ANSI 付きの画面を受け取る。
 export function draftFromScreen(raw) {
   const lines = raw.replace(/\r/g, '').split('\n');
-  const plain = lines.map((line) => line.replace(/\x1b\[[0-9;]*[A-Za-z]/g, ''));
+  const plain = lines.map((line) => line.replace(/\x1b\[[0-9;:?<=>]*[A-Za-z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?/g, ''));
   const bottom = bottomBorder(plain);
   if (bottom < 0) return null;
   let top = bottom - 1;
@@ -121,7 +121,8 @@ export function draftFromScreen(raw) {
     .map((line) => {
       let dim = false;
       let kept = '';
-      for (const part of line.split(/(\x1b\[[0-9;]*[A-Za-z])/)) {
+      // 制御列はまとめて切り出す。コロン区切りの SGR・`?` 付きの CSI・OSC も切り出さないと、後ろの文字ごと落として書きかけを見逃す。
+      for (const part of line.split(/(\x1b\[[0-9;:?<=>]*[A-Za-z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?)/)) {
         const sgr = part.match(/^\x1b\[([0-9;]*)m$/);
         if (sgr) {
           // 色の指定（38・48・58 に続く 5;n か 2;r;g;b）の中の数は、薄字や解除の指定ではないので読み飛ばす。
