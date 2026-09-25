@@ -97,6 +97,47 @@ export function readScreen(pane) {
   return screen.replace(/\u00a0/g, ' ');
 }
 
+// 入力欄の書きかけを返す。無ければ ''、読めなければ null。
+// /exit や /clear を打ち込む前に見る。書きかけの末尾につながって、書きかけごと送信されるため
+// （2026-09-25 に実際に起きた。notes/2026-09-25-exit-into-user-draft.md）。
+// 薄字（SGR 2）はサジェストなので数えない。そのため ANSI 付きで読み、薄字の間の文字を落とす。
+// 枠は ANSI を外した行で探す。上枠は下枠から上へ見て最初の「行頭が ─ の行」（セッション名が右端に載る）。
+export function inputDraft(pane) {
+  const raw = herdr(['pane', 'read', pane, '--source', 'visible', '--format', 'ansi']);
+  return raw === null ? null : draftFromScreen(raw);
+}
+
+// inputDraft の読み取りの本体。ANSI 付きの画面を受け取る。
+export function draftFromScreen(raw) {
+  const lines = raw.replace(/\r/g, '').split('\n');
+  const plain = lines.map((line) => line.replace(/\x1b\[[0-9;]*[A-Za-z]/g, ''));
+  const bottom = bottomBorder(plain);
+  if (bottom < 0) return null;
+  let top = bottom - 1;
+  while (top >= 0 && !plain[top].startsWith('─')) top -= 1;
+  if (top < 0) return null;
+  const text = lines
+    .slice(top + 1, bottom)
+    .map((line) => {
+      let dim = false;
+      let kept = '';
+      for (const part of line.split(/(\x1b\[[0-9;]*[A-Za-z])/)) {
+        const sgr = part.match(/^\x1b\[([0-9;]*)m$/);
+        if (sgr) {
+          for (const code of (sgr[1] || '0').split(';')) {
+            if (code === '2') dim = true;
+            else if (code === '0' || code === '22') dim = false;
+          }
+        } else if (!part.startsWith('\x1b') && !dim) {
+          kept += part;
+        }
+      }
+      return kept;
+    })
+    .join('\n');
+  return text.replace(/^\s*❯/, '').trim();
+}
+
 // 入力欄の下枠: 下から見て最初の「行頭から ─ だけの行」。見つからなければ -1。
 // 行頭を見るのは、会話に映った別ペインの画面（herdr pane read の出力）の枠を拾わないため。
 // ツールの出力は字下げして表示されるので、その中の枠は行頭から始まらない。

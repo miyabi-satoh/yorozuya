@@ -21,6 +21,7 @@ import {
   backgroundWorkHint,
   herdrError,
   herdrErrorCode,
+  inputDraft,
   NAME_PATTERN,
   paneHoldingName,
   prompt,
@@ -122,6 +123,10 @@ const recovery =
 
 // 呼び出し元のセッションがこの先で死ぬと、FAIL の文も OK の行も出ない。戻る手がかりを先に出しておく。
 log(`旧セッション ${sid}（/exit の後にシェルに戻ったまま止まっていたら、ペインで claude --resume ${sid} を打てば元の会話に戻れる）`);
+// 入力欄に書きかけがあれば送らない。/exit が書きかけの末尾につながり、書きかけごと送信される。
+// 読んでから送るまでの間を短くするため、送る直前に見る。それでもその間に打ち始められたら防げない。
+const draft = inputDraft(pane);
+if (draft) skip(`ペイン ${pane} の入力欄に書きかけがある（「${draft.slice(0, 40)}」）。ユーザーが打っている最中かもしれないので止まる。送信されるか消えてから呼び直す`);
 log('終了');
 if (!prompt(pane, '/exit')) {
   // Herdr が入力を送る前に弾いたと分かるときだけ、対象は無傷と言える。
