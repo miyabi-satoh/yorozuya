@@ -14,7 +14,7 @@
 // 対象に止めてもらってから呼び直す。--allow-background は、対象がセッションを終えても動かし続けたいと明言した独立したプロセスにだけ使う。
 
 import { handoffProblem } from './lib/handoff.mjs';
-import { GUIDE, HOW_TO_PROCEED } from './lib/prompts.mjs';
+import { attachGuide, HOW_TO_PROCEED } from './lib/prompts.mjs';
 import {
   agentInfo,
   agentStatus,
@@ -51,9 +51,11 @@ const fail = (message) => {
 
 // --- /exit を送る前に、確かめられることは全部ここで確かめる ---
 
-// 進め方の文書も @ 参照で渡すので、同じ条件で確かめる。
-const problem = handoffProblem(handoff, '対象のペイン') || handoffProblem(GUIDE, '対象のペイン');
+const problem = handoffProblem(handoff, '対象のペイン');
 if (problem) skip(problem);
+// 資料の先頭に進め方を書き足す。資料は再起動のために作った一時のファイルなので、書き換えても失うものは無い。
+const guideProblem = attachGuide(handoff);
+if (guideProblem) skip(guideProblem);
 if (!NAME_PATTERN.test(name)) skip(`Herdr の名前の規則（先頭は小文字・英数と _ - のみ・32字以内）に合わない: ${name}`);
 
 // 引数の取り違え（別のペインのIDを渡す）で無関係のセッションを終了させないよう、中身を照合する。

@@ -29,7 +29,7 @@ import { parseArgs } from 'node:util';
 import { CONFIG, loadConfig } from './lib/config.mjs';
 import { AGENT_LIST_LINE, bottomBorder, herdr, herdrError, herdrJson, readScreen } from './lib/herdr.mjs';
 
-const usage = 'usage: watch-context.mjs [--pattern <正規表現>] [--threshold <使用率>] [--interval 120] [--update-pattern <正規表現>] [--idle-pattern <正規表現>] [--no-update] [--no-idle] [--start] [--once]';
+const usage = 'usage: watch-context.mjs [--pattern <正規表現>] [--threshold <使用率>] [--interval 120] [--update-pattern <正規表現>] [--idle-pattern <正規表現>] [--goal-pattern <正規表現>] [--no-update] [--no-idle] [--no-goal] [--start] [--once]\n--pattern は引数か config.local.json の watch.pattern で必ず渡す';
 
 // --pattern の既定は持たない（上の usage の説明）。
 const DEFAULTS = {
@@ -72,31 +72,44 @@ const { config, error: configError } = loadConfig();
 if (configError) fail(configError);
 const watchConfig = config.watch ?? {};
 if (typeof watchConfig !== 'object' || Array.isArray(watchConfig)) fail(`${CONFIG} の watch がオブジェクトではない`);
+// エラーの文で出どころを示すため、config から埋めた値を覚えておく。
+const fromConfig = new Set();
+const source = (key) => (fromConfig.has(key) ? `${CONFIG} の watch.${key}` : `--${key}`);
 for (const key of ['pattern', 'threshold', 'interval', 'update-pattern', 'idle-pattern', 'goal-pattern']) {
   if (options[key] !== undefined) continue;
-  const value = watchConfig[key] ?? DEFAULTS[key];
-  if (value !== undefined) options[key] = String(value);
+  const value = watchConfig[key];
+  if (value === undefined) {
+    options[key] = DEFAULTS[key];
+    continue;
+  }
+  if (typeof value !== 'string' && typeof value !== 'number') fail(`${CONFIG} の watch.${key} は文字列か数で書くこと`);
+  options[key] = String(value);
+  fromConfig.add(key);
 }
+// "true" のような文字列を黙って false と読むと、設定したつもりの値が効かない。
 for (const key of ['no-update', 'no-idle', 'no-goal']) {
-  if (options[key] === undefined) options[key] = watchConfig[key] === true;
+  if (options[key] !== undefined) continue;
+  const value = watchConfig[key] ?? false;
+  if (typeof value !== 'boolean') fail(`${CONFIG} の watch.${key} は true か false で書くこと`);
+  options[key] = value;
 }
 if (!options.pattern) {
   fail(`--pattern が無い。ステータスラインの使用率の表示に合わせて、引数で渡すか ${CONFIG} の watch.pattern に書くこと（形は config.example.json）`);
 }
 
-function compile(flag, source) {
+function compile(flag, text) {
   try {
-    return new RegExp(source);
+    return new RegExp(text);
   } catch (error) {
     fail(`${flag} を正規表現として読めない: ${error.message}`);
   }
 }
-const pattern = compile('--pattern', options.pattern);
+const pattern = compile(source('pattern'), options.pattern);
 // キャプチャが無いと、どのペインも読めない扱いになる。
-if (new RegExp(`${options.pattern}|`).exec('').length < 2) fail('--pattern に使用率を取るキャプチャが無い');
-const updatePattern = options['no-update'] ? null : compile('--update-pattern', options['update-pattern']);
-const idlePattern = options['no-idle'] ? null : compile('--idle-pattern', options['idle-pattern']);
-const goalPattern = options['no-goal'] ? null : compile('--goal-pattern', options['goal-pattern']);
+if (new RegExp(`${options.pattern}|`).exec('').length < 2) fail(`${source('pattern')} に使用率を取るキャプチャが無い`);
+const updatePattern = options['no-update'] ? null : compile(source('update-pattern'), options['update-pattern']);
+const idlePattern = options['no-idle'] ? null : compile(source('idle-pattern'), options['idle-pattern']);
+const goalPattern = options['no-goal'] ? null : compile(source('goal-pattern'), options['goal-pattern']);
 
 // 空文字は Number('') が 0 になって通ってしまうので、数の形をしているものだけ受ける。
 const toNumber = (text) => (/^\s*\d+(\.\d+)?\s*$/.test(text) ? Number(text) : NaN);
@@ -105,7 +118,7 @@ const interval = toNumber(options.interval);
 // setTimeout は 2^31-1 ms を越えるとあふれて、ほぼ間を置かずに読み続ける。
 const MAX_INTERVAL = Math.floor((2 ** 31 - 1) / 1000);
 if (!Number.isFinite(threshold) || !(interval > 0 && interval <= MAX_INTERVAL)) {
-  fail(`--threshold は数、--interval は 0 より大きく ${MAX_INTERVAL} 以下の秒数で渡すこと`);
+  fail(`${source('threshold')} は数、${source('interval')} は 0 より大きく ${MAX_INTERVAL} 以下の秒数で渡すこと`);
 }
 
 // 続けて読めなかった回数がこれに達したら WARN を出す。

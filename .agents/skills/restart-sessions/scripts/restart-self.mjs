@@ -13,7 +13,7 @@
 import { isAbsolute } from 'node:path';
 
 import { handoffProblem } from './lib/handoff.mjs';
-import { GUIDE, HOW_TO_PROCEED } from './lib/prompts.mjs';
+import { attachGuide, HOW_TO_PROCEED } from './lib/prompts.mjs';
 import {
   backgroundWorkHint,
   herdr,
@@ -46,9 +46,11 @@ const fail = (message) => {
 
 // --- 何かを変える前に、確かめられることは全部ここで確かめる ---
 
-// 進め方の文書も @ 参照で渡すので、同じ条件で確かめる。
-const problem = handoffProblem(handoff, '新セッション') || handoffProblem(GUIDE, '新セッション');
+const problem = handoffProblem(handoff, '新セッション');
 if (problem) skip(problem);
+// 資料の先頭に進め方を書き足す。資料は再起動のために作った一時のファイルなので、書き換えても失うものは無い。
+const guideProblem = attachGuide(handoff);
+if (guideProblem) skip(guideProblem);
 if (!NAME_PATTERN.test(name)) skip(`Herdr の名前の規則（先頭は小文字・英数と _ - のみ・32字以内）に合わない: ${name}`);
 
 // $HERDR_PANE_ID はペイン移動前の ID のまま残ることがあるので、現在の ID を引き直す

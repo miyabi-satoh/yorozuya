@@ -1,8 +1,10 @@
-// 再起動した新セッションに、最初のプロンプトで渡す進め方。2つのスクリプトが同じ文を送るので、ここ1つに置く。
+// 再起動した新セッションに、最初のプロンプトで渡す進め方。2つのスクリプトが同じことをするので、ここ1つに置く。
 //
-// 進め方の本文は after-restart.md に置き、プロンプトには @ 参照で添える。本文をプロンプトに直に入れると、
-// ペインの入力欄と会話に毎回長い文が出る。スキルの中を読めと書くだけでは足りない。再起動する先の多くは
-// 他のプロジェクトのセッションで、このスキルを持っていないため。
+// 進め方の本文は after-restart.md に置き、スクリプトが資料の先頭に書き足す。プロンプトはそれを指す1行にする。
+// - 本文をプロンプトに直に入れると、ペインの入力欄と会話に毎回長い文が出る。
+// - スキルの中を読めと書くだけでは足りない。再起動する先の多くは他のプロジェクトのセッションで、このスキルを持っていない。
+// - 本文を2つ目の `@` 参照で添えたら、依頼が送信されずに入力欄に残り、Enter を送っても効かなかった
+//   （notes/2026-09-17-restart-prompt-not-submitted.md の 2026-09-25 追記）。`@` は資料の1つだけにする。
 //
 // 本文の決めごとの理由:
 // - 再起動はコンテキストを入れ替えるもので、セッションがしていたことは変えない。進めていたなら続きから進め、答えを待っていたなら同じ問いで待つ。
@@ -16,8 +18,29 @@
 //   ユーザーが記憶や CLAUDE.md で前もって決めた扱いは、新セッションにもそのまま見えるので、それに従わせる。
 //   ただし記憶は旧セッションも書けるので、個々の操作を承認済みとした記録は、前もって決めた扱いに数えない。
 
+import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-export const GUIDE = fileURLToPath(new URL('../../after-restart.md', import.meta.url));
+const GUIDE = fileURLToPath(new URL('../../after-restart.md', import.meta.url));
 
-export const HOW_TO_PROCEED = `@${GUIDE} に従って引き継ぐこと。`;
+export const HOW_TO_PROCEED = '資料の先頭の「再起動した先の進め方」に従って引き継ぐこと。';
+
+// 資料の先頭に進め方を書き足す。すでに書き足してあれば（呼び直したとき）そのまま。
+// 失敗したらその理由を、うまくいけば空文字列を返す。
+export function attachGuide(handoff) {
+  let guide;
+  let body;
+  try {
+    guide = readFileSync(GUIDE, 'utf8').trimEnd();
+    body = readFileSync(handoff, 'utf8');
+  } catch (error) {
+    return `進め方か資料を読めない: ${error.message}`;
+  }
+  if (body.startsWith(guide)) return '';
+  try {
+    writeFileSync(handoff, `${guide}\n\n---\n\n${body}`, 'utf8');
+  } catch (error) {
+    return `資料に進め方を書き足せない: ${error.message}`;
+  }
+  return '';
+}
