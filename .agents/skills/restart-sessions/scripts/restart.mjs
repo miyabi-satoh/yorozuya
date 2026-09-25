@@ -105,9 +105,8 @@ if (!allowBackground) {
   }
 }
 
-// 資料の先頭に進め方を書き足す。ほかの確かめがすべて通ってからにする。途中で SKIP したときに資料を書き換えたまま残すと、
-// 呼び出し元が資料を直して呼び直したとき（先頭に状態メモを足すなど）、進め方が2重になる。
-const guideProblem = attachGuide(handoff);
+// 進め方を資料の前につないだファイルを作り、新セッションにはそちらを渡す。資料そのものは書き換えない。
+const { path: sent, error: guideProblem } = attachGuide(handoff);
 if (guideProblem) skip(guideProblem);
 
 // --- ここから後戻りできない ---
@@ -118,7 +117,7 @@ if (guideProblem) skip(guideProblem);
 // シェルに戻っても名前はすぐには外れないので、外れたのを確かめてから起動させる。
 const recovery =
   `新しいセッションで続けるなら、'herdr agent list' で名前 ${name} が消えたのを確かめてから ` +
-  `'herdr agent start ${name} --kind claude --pane ${pane}' を実行し、起動したら '@${handoff}' を打つ。` +
+  `'herdr agent start ${name} --kind claude --pane ${pane}' を実行し、起動したら '@${sent}' を打つ。` +
   `元の会話に戻るなら、ペインで 'claude --resume ${sid}'`;
 
 // 呼び出し元のセッションがこの先で死ぬと、FAIL の文も OK の行も出ない。戻る手がかりを先に出しておく。
@@ -167,11 +166,11 @@ if (!startAgent(name, pane)) {
   // agent_not_ready（起動が遅い・ダイアログが出ている）のときは claude は上がっていて名前も握っている。
   // そこへ claude --resume を打つと、新しいセッションへのプロンプトとして送られてしまう。
   fail(
-    `起動できない（${herdrError()}）。ペインを見ること。claude が上がっていれば（確認やダイアログが出ていれば答えてから）'@${handoff}' を打つ。シェルのままなら、${recovery}`,
+    `起動できない（${herdrError()}）。ペインを見ること。claude が上がっていれば（確認やダイアログが出ていれば答えてから）'@${sent}' を打つ。シェルのままなら、${recovery}`,
   );
 }
-if (!prompt(name, `@${handoff} 前セッションの引き継ぎ資料です。${HOW_TO_PROCEED}`)) {
-  fail(`起動はしたが資料を渡せなかった（${herdrError()}）。ペインで @${handoff} と打てば読める`);
+if (!prompt(name, `@${sent} 前セッションの引き継ぎ資料です。${HOW_TO_PROCEED}`)) {
+  fail(`起動はしたが資料を渡せなかった（${herdrError()}）。ペインで @${sent} と打てば読める`);
 }
 
 process.stdout.write(`OK\t${pane}\t${name}\t${handoff}\tresume:${sid}\n`);

@@ -70,8 +70,8 @@ try {
 // 数は JSON で数として書かれることもあるので、引数と同じ文字列に揃えてから検める。
 const { config, error: configError } = loadConfig();
 if (configError) fail(configError);
-const watchConfig = config.watch ?? {};
-if (typeof watchConfig !== 'object' || Array.isArray(watchConfig)) fail(`${CONFIG} の watch がオブジェクトではない`);
+const watchConfig = config.watch === undefined ? {} : config.watch;
+if (watchConfig === null || typeof watchConfig !== 'object' || Array.isArray(watchConfig)) fail(`${CONFIG} の watch がオブジェクトではない`);
 // エラーの文で出どころを示すため、config から埋めた値を覚えておく。
 const fromConfig = new Set();
 const source = (key) => (fromConfig.has(key) ? `${CONFIG} の watch.${key}` : `--${key}`);

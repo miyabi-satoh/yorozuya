@@ -1,6 +1,8 @@
 // 再起動した新セッションに、最初のプロンプトで渡す進め方。2つのスクリプトが同じことをするので、ここ1つに置く。
 //
-// 進め方の本文は after-restart.md に置き、スクリプトが資料の先頭に書き足す。プロンプトはそれを指す1行にする。
+// 進め方の本文は after-restart.md に置き、スクリプトが資料の前につないだ別のファイルを作って渡す。プロンプトはそれを指す1行にする。
+// 資料そのものは書き換えない。書き換えると、呼び直したときや、呼び出し元が資料を直して呼び直したときに、
+// 進め方が2重になったり古いまま残ったりする（見分けて差し替える判定が要り、その判定が壊れやすい）。
 // - 本文をプロンプトに直に入れると、ペインの入力欄と会話に毎回長い文が出る。
 // - スキルの中を読めと書くだけでは足りない。再起動する先の多くは他のプロジェクトのセッションで、このスキルを持っていない。
 // - 本文を2つ目の `@` 参照で添えたら、依頼が送信されずに入力欄に残り、Enter を送っても効かなかった
@@ -26,29 +28,17 @@ const GUIDE = fileURLToPath(new URL('../../after-restart.md', import.meta.url));
 
 export const HOW_TO_PROCEED = '資料の先頭の「再起動した先の進め方」に従って引き継ぐこと。';
 
-// 資料の先頭に進め方を書き足す。すでに書き足してあれば（呼び直したとき）そのまま。
-// 失敗したらその理由を、うまくいけば空文字列を返す。
+// 進め方と資料をつないだファイルを、資料と同じ場所に作る（毎回作り直す）。
+// 返すのは { path, error }。path は新セッションに @ 参照で渡すファイル。
+// 名前は資料の名前から作るので、資料の検査（絶対パス・空白なし）がそのまま効く。
 export function attachGuide(handoff) {
-  let guide;
-  let body;
+  const path = handoff.endsWith('.md') ? `${handoff.slice(0, -3)}-with-guide.md` : `${handoff}-with-guide.md`;
   try {
-    guide = readFileSync(GUIDE, 'utf8').trimEnd();
-    body = readFileSync(handoff, 'utf8');
+    const guide = readFileSync(GUIDE, 'utf8').trimEnd();
+    const body = readFileSync(handoff, 'utf8');
+    writeFileSync(path, `${guide}\n\n---\n\n${body}`, 'utf8');
   } catch (error) {
-    return `進め方か資料を読めない: ${error.message}`;
+    return { path, error: `進め方と資料をつないだファイルを作れない: ${error.message}` };
   }
-  if (body.startsWith(guide)) return '';
-  // 前に書き足した進め方が先頭に残っていれば（呼び直すまでに after-restart.md が変わったなど）、差し替える。
-  // 見るのは先頭だけ。会話ログの中に同じ見出しが出てきても触らない。
-  const heading = guide.split('\n', 1)[0];
-  const separator = '\n\n---\n\n';
-  if (body.startsWith(`${heading}\n`) && body.includes(separator)) {
-    body = body.slice(body.indexOf(separator) + separator.length);
-  }
-  try {
-    writeFileSync(handoff, `${guide}${separator}${body}`, 'utf8');
-  } catch (error) {
-    return `資料に進め方を書き足せない: ${error.message}`;
-  }
-  return '';
+  return { path, error: '' };
 }
