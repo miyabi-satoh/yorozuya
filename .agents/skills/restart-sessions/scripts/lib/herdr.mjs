@@ -116,6 +116,8 @@ export function draftFromScreen(raw) {
   let top = bottom - 1;
   while (top >= 0 && !plain[top].startsWith('─')) top -= 1;
   if (top < 0) return null;
+  // コロン区切りの SGR は薄字の入り切りを読み違えうるので、読めない扱いにする（Herdr の出力では見ていない）。
+  if (lines.slice(top + 1, bottom).some((line) => /\x1b\[[0-9;]*:[0-9;:]*m/.test(line))) return null;
   const text = lines
     .slice(top + 1, bottom)
     .map((line) => {
