@@ -13,7 +13,7 @@
 import { isAbsolute } from 'node:path';
 
 import { handoffProblem } from './lib/handoff.mjs';
-import { HOW_TO_PROCEED } from './lib/prompts.mjs';
+import { attachGuide, HOW_TO_PROCEED } from './lib/prompts.mjs';
 import {
   backgroundWorkHint,
   herdr,
@@ -85,6 +85,10 @@ const holder = paneHoldingName(name);
 if (holder === null) skip(`Herdr のエージェント一覧を取得できない（${herdrError()}）`);
 if (holder && holder !== self) skip(`名前 ${name} は ${holder} が使用中`);
 const selfHoldsName = holder === self;
+
+// 進め方を資料の前につないだファイルを作り、新セッションにはそちらを渡す。資料そのものは書き換えない。
+const { path: sent, error: guideProblem } = attachGuide(handoff);
+if (guideProblem) skip(guideProblem);
 
 // 縦長のペインは下に割る。旧を閉じれば新が元の大きさに戻る。
 // 焦点は呼び出し元に残す。旧ペインが閉じた時点で焦点は別のペインへ移る（移り先は Herdr 任せ）。
@@ -165,7 +169,7 @@ if (!startAgent(name, created)) {
 log('起動');
 
 // --wait は付けない。待っている間に旧ペインごと閉じられるため、待つ意味がない。
-const request = `@${handoff} Yorozuya 自身の再起動です。前セッション（ペイン ${self} / セッション ${sid}）は資料を書き終えて、閉じられるのを待っています。
+const request = `@${sent} Yorozuya 自身の再起動です。前セッション（ペイン ${self} / セッション ${sid}）は資料を書き終えて、閉じられるのを待っています。
 
 手順:
 1. 引き継ぎ資料を読んで現状を把握する。

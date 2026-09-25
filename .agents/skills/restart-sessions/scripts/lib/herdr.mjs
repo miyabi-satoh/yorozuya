@@ -97,6 +97,56 @@ export function readScreen(pane) {
   return screen.replace(/\u00a0/g, ' ');
 }
 
+// 入力欄の書きかけを返す。無ければ ''、読めなければ null。
+// /exit や /clear を打ち込む前に見る。書きかけの末尾につながって、書きかけごと送信されるため
+// （2026-09-25 に実際に起きた。notes/2026-09-25-exit-into-user-draft.md）。
+// 薄字（SGR 2）はサジェストなので数えない。そのため ANSI 付きで読み、薄字の間の文字を落とす。
+// 枠は ANSI を外した行で探す。上枠は下枠から上へ見て最初の「行頭が ─ の行」（セッション名が右端に載る）。
+export function inputDraft(pane) {
+  const raw = herdr(['pane', 'read', pane, '--source', 'visible', '--format', 'ansi']);
+  return raw === null ? null : draftFromScreen(raw);
+}
+
+// inputDraft の読み取りの本体。ANSI 付きの画面を受け取る。
+export function draftFromScreen(raw) {
+  const lines = raw.replace(/\r/g, '').split('\n');
+  const plain = lines.map((line) => line.replace(/\x1b\[[0-9;:?<=>]*[A-Za-z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?/g, ''));
+  const bottom = bottomBorder(plain);
+  if (bottom < 0) return null;
+  let top = bottom - 1;
+  while (top >= 0 && !plain[top].startsWith('─')) top -= 1;
+  if (top < 0) return null;
+  // コロン区切りの SGR は薄字の入り切りを読み違えうるので、読めない扱いにする（Herdr の出力では見ていない）。
+  if (lines.slice(top + 1, bottom).some((line) => /\x1b\[[0-9;]*:[0-9;:]*m/.test(line))) return null;
+  const text = lines
+    .slice(top + 1, bottom)
+    .map((line) => {
+      let dim = false;
+      let kept = '';
+      // 制御列はまとめて切り出す。コロン区切りの SGR・`?` 付きの CSI・OSC も切り出さないと、後ろの文字ごと落として書きかけを見逃す。
+      for (const part of line.split(/(\x1b\[[0-9;:?<=>]*[A-Za-z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?)/)) {
+        const sgr = part.match(/^\x1b\[([0-9;]*)m$/);
+        if (sgr) {
+          // 色の指定（38・48・58 に続く 5;n か 2;r;g;b）の中の数は、薄字や解除の指定ではないので読み飛ばす。
+          // 空の引数は 0（解除）として扱う。
+          const codes = sgr[1].split(';').map((code) => (code === '' ? 0 : Number(code)));
+          for (let i = 0; i < codes.length; i += 1) {
+            const code = codes[i];
+            if (code === 38 || code === 48 || code === 58) {
+              i += codes[i + 1] === 5 ? 2 : codes[i + 1] === 2 ? 4 : 1;
+            } else if (code === 2) dim = true;
+            else if (code === 0 || code === 22) dim = false;
+          }
+        } else if (!part.startsWith('\x1b') && !dim) {
+          kept += part;
+        }
+      }
+      return kept;
+    })
+    .join('\n');
+  return text.replace(/^\s*❯/, '').trim();
+}
+
 // 入力欄の下枠: 下から見て最初の「行頭から ─ だけの行」。見つからなければ -1。
 // 行頭を見るのは、会話に映った別ペインの画面（herdr pane read の出力）の枠を拾わないため。
 // ツールの出力は字下げして表示されるので、その中の枠は行頭から始まらない。

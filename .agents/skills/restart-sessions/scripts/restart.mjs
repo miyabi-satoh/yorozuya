@@ -14,13 +14,14 @@
 // 対象に止めてもらってから呼び直す。--allow-background は、対象がセッションを終えても動かし続けたいと明言した独立したプロセスにだけ使う。
 
 import { handoffProblem } from './lib/handoff.mjs';
-import { HOW_TO_PROCEED } from './lib/prompts.mjs';
+import { attachGuide, HOW_TO_PROCEED } from './lib/prompts.mjs';
 import {
   agentInfo,
   agentStatus,
   backgroundWorkHint,
   herdrError,
   herdrErrorCode,
+  inputDraft,
   NAME_PATTERN,
   paneHoldingName,
   prompt,
@@ -105,6 +106,10 @@ if (!allowBackground) {
   }
 }
 
+// 進め方を資料の前につないだファイルを作り、新セッションにはそちらを渡す。資料そのものは書き換えない。
+const { path: sent, error: guideProblem } = attachGuide(handoff);
+if (guideProblem) skip(guideProblem);
+
 // --- ここから後戻りできない ---
 
 // /exit を送った後に止まったときの戻り方。
@@ -113,8 +118,17 @@ if (!allowBackground) {
 // シェルに戻っても名前はすぐには外れないので、外れたのを確かめてから起動させる。
 const recovery =
   `新しいセッションで続けるなら、'herdr agent list' で名前 ${name} が消えたのを確かめてから ` +
-  `'herdr agent start ${name} --kind claude --pane ${pane}' を実行し、起動したら '@${handoff}' を打つ。` +
+  `'herdr agent start ${name} --kind claude --pane ${pane}' を実行し、起動したら '@${sent}' を打つ。` +
   `元の会話に戻るなら、ペインで 'claude --resume ${sid}'`;
+
+// 入力欄に書きかけがあれば送らない。/exit が書きかけの末尾につながり、書きかけごと送信される。
+// 読めないとき（入力欄が画面より高く上枠が見えない、読み取りの失敗）も、書きかけがありうるので止まる。
+// 読んでから送るまでの間を短くするため、送る直前に見る。それでもその間に打ち始められたら防げない。
+const draft = inputDraft(pane);
+if (draft === null) skip(`ペイン ${pane} の入力欄を読めない（${herdrError() || '枠が見つからない'}）。書きかけがあるかもしれないので止まる。ペインを見ること`);
+if (draft) {
+  skip(`ペイン ${pane} の入力欄に書きかけがある（「${draft.replace(/\s+/g, ' ').slice(0, 40)}」）。ユーザーが打っている最中かもしれないので止まる。送信されるか消えてから呼び直す`);
+}
 
 // 呼び出し元のセッションがこの先で死ぬと、FAIL の文も OK の行も出ない。戻る手がかりを先に出しておく。
 log(`旧セッション ${sid}（/exit の後にシェルに戻ったまま止まっていたら、ペインで claude --resume ${sid} を打てば元の会話に戻れる）`);
@@ -162,11 +176,11 @@ if (!startAgent(name, pane)) {
   // agent_not_ready（起動が遅い・ダイアログが出ている）のときは claude は上がっていて名前も握っている。
   // そこへ claude --resume を打つと、新しいセッションへのプロンプトとして送られてしまう。
   fail(
-    `起動できない（${herdrError()}）。ペインを見ること。claude が上がっていれば（確認やダイアログが出ていれば答えてから）'@${handoff}' を打つ。シェルのままなら、${recovery}`,
+    `起動できない（${herdrError()}）。ペインを見ること。claude が上がっていれば（確認やダイアログが出ていれば答えてから）'@${sent}' を打つ。シェルのままなら、${recovery}`,
   );
 }
-if (!prompt(name, `@${handoff} 前セッションの引き継ぎ資料です。読んで現状を把握したら、${HOW_TO_PROCEED}`)) {
-  fail(`起動はしたが資料を渡せなかった（${herdrError()}）。ペインで @${handoff} と打てば読める`);
+if (!prompt(name, `@${sent} 前セッションの引き継ぎ資料です。${HOW_TO_PROCEED}`)) {
+  fail(`起動はしたが資料を渡せなかった（${herdrError()}）。ペインで @${sent} と打てば読める`);
 }
 
 process.stdout.write(`OK\t${pane}\t${name}\t${handoff}\tresume:${sid}\n`);

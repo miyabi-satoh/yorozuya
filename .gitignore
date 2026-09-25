@@ -4,6 +4,7 @@ notes/*
 
 # このマシンだけの設定。
 .claude/settings.local.json
+.agents/skills/*/config.local.json
 
 # macOS が作るフォルダの表示情報。
 .DS_Store
