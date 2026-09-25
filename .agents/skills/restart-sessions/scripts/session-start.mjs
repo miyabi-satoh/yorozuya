@@ -13,7 +13,7 @@ const WATCH = fileURLToPath(new URL('./watch-context.mjs', import.meta.url));
 const say = (...lines) => process.stdout.write(`${lines.join('\n')}\n`);
 const { config, error } = loadConfig();
 
-// 設定の誤りは、始めさせずにここで伝える（試運転まで進ませない）。
+// 見分けやすい設定の誤り（pattern の構文、confirm の型）は、始めさせずにここで伝える。ほかの誤りは試運転で止まる。
 let problem = '';
 if (!error && config.watch?.pattern) {
   try {

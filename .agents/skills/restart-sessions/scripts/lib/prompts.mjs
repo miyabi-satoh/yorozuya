@@ -13,6 +13,7 @@
 // - バックグラウンドの処理は再起動で止まるので、資料に書かれた手順で立ち上げ直させる。
 // - 会話ログは今の会話の範囲にとどまるので、プロジェクトの大きな流れは別の置き場にある。資料が指していれば、続ける前に読ませる。
 // - 会話で決めた計画（A〜E を順に進める、など）は、一部の途中で再起動しても残りへ進ませる。要約をやめて会話ログを写すのもこのため。
+// - 状態は資料から読ませる。資料の状態メモは手順2の返信（自己再起動では自分）で書かれ、続く会話ログは発言の写し。
 // - 会話ログの末尾には再起動の依頼と返信が残るので、済んだものとして扱わせる。
 // - 承認は資料では運べないので、後戻りできない操作と外向きの操作は、新セッションが確かめ直す。
 //   ユーザーが記憶や CLAUDE.md で前もって決めた扱いは、新セッションにもそのまま見えるので、それに従わせる。
@@ -37,8 +38,15 @@ export function attachGuide(handoff) {
     return `進め方か資料を読めない: ${error.message}`;
   }
   if (body.startsWith(guide)) return '';
+  // 前に書き足した進め方が先頭に残っていれば（呼び直すまでに after-restart.md が変わったなど）、差し替える。
+  // 見るのは先頭だけ。会話ログの中に同じ見出しが出てきても触らない。
+  const heading = guide.split('\n', 1)[0];
+  const separator = '\n\n---\n\n';
+  if (body.startsWith(`${heading}\n`) && body.includes(separator)) {
+    body = body.slice(body.indexOf(separator) + separator.length);
+  }
   try {
-    writeFileSync(handoff, `${guide}\n\n---\n\n${body}`, 'utf8');
+    writeFileSync(handoff, `${guide}${separator}${body}`, 'utf8');
   } catch (error) {
     return `資料に進め方を書き足せない: ${error.message}`;
   }

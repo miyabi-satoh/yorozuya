@@ -53,9 +53,6 @@ const fail = (message) => {
 
 const problem = handoffProblem(handoff, '対象のペイン');
 if (problem) skip(problem);
-// 資料の先頭に進め方を書き足す。資料は再起動のために作った一時のファイルなので、書き換えても失うものは無い。
-const guideProblem = attachGuide(handoff);
-if (guideProblem) skip(guideProblem);
 if (!NAME_PATTERN.test(name)) skip(`Herdr の名前の規則（先頭は小文字・英数と _ - のみ・32字以内）に合わない: ${name}`);
 
 // 引数の取り違え（別のペインのIDを渡す）で無関係のセッションを終了させないよう、中身を照合する。
@@ -107,6 +104,11 @@ if (!allowBackground) {
     );
   }
 }
+
+// 資料の先頭に進め方を書き足す。ほかの確かめがすべて通ってからにする。途中で SKIP したときに資料を書き換えたまま残すと、
+// 呼び出し元が資料を直して呼び直したとき（先頭に状態メモを足すなど）、進め方が2重になる。
+const guideProblem = attachGuide(handoff);
+if (guideProblem) skip(guideProblem);
 
 // --- ここから後戻りできない ---
 

@@ -89,7 +89,7 @@ for (const key of ['pattern', 'threshold', 'interval', 'update-pattern', 'idle-p
 // "true" のような文字列を黙って false と読むと、設定したつもりの値が効かない。
 for (const key of ['no-update', 'no-idle', 'no-goal']) {
   if (options[key] !== undefined) continue;
-  const value = watchConfig[key] ?? false;
+  const value = watchConfig[key] === undefined ? false : watchConfig[key];
   if (typeof value !== 'boolean') fail(`${CONFIG} の watch.${key} は true か false で書くこと`);
   options[key] = value;
 }
@@ -117,9 +117,8 @@ const threshold = toNumber(options.threshold);
 const interval = toNumber(options.interval);
 // setTimeout は 2^31-1 ms を越えるとあふれて、ほぼ間を置かずに読み続ける。
 const MAX_INTERVAL = Math.floor((2 ** 31 - 1) / 1000);
-if (!Number.isFinite(threshold) || !(interval > 0 && interval <= MAX_INTERVAL)) {
-  fail(`${source('threshold')} は数、${source('interval')} は 0 より大きく ${MAX_INTERVAL} 以下の秒数で渡すこと`);
-}
+if (!Number.isFinite(threshold)) fail(`${source('threshold')} は数で渡すこと`);
+if (!(interval > 0 && interval <= MAX_INTERVAL)) fail(`${source('interval')} は 0 より大きく ${MAX_INTERVAL} 以下の秒数で渡すこと`);
 
 // 続けて読めなかった回数がこれに達したら WARN を出す。
 // ペインが狭くて表示が切れる、といった一時的なものは数回で戻る。

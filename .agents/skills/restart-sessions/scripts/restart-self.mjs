@@ -48,9 +48,6 @@ const fail = (message) => {
 
 const problem = handoffProblem(handoff, '新セッション');
 if (problem) skip(problem);
-// 資料の先頭に進め方を書き足す。資料は再起動のために作った一時のファイルなので、書き換えても失うものは無い。
-const guideProblem = attachGuide(handoff);
-if (guideProblem) skip(guideProblem);
 if (!NAME_PATTERN.test(name)) skip(`Herdr の名前の規則（先頭は小文字・英数と _ - のみ・32字以内）に合わない: ${name}`);
 
 // $HERDR_PANE_ID はペイン移動前の ID のまま残ることがあるので、現在の ID を引き直す
@@ -88,6 +85,11 @@ const holder = paneHoldingName(name);
 if (holder === null) skip(`Herdr のエージェント一覧を取得できない（${herdrError()}）`);
 if (holder && holder !== self) skip(`名前 ${name} は ${holder} が使用中`);
 const selfHoldsName = holder === self;
+
+// 資料の先頭に進め方を書き足す。ほかの確かめがすべて通ってからにする。途中で SKIP したときに資料を書き換えたまま残すと、
+// 呼び出し元が資料を直して呼び直したとき（先頭に状態メモを足すなど）、進め方が2重になる。
+const guideProblem = attachGuide(handoff);
+if (guideProblem) skip(guideProblem);
 
 // 縦長のペインは下に割る。旧を閉じれば新が元の大きさに戻る。
 // 焦点は呼び出し元に残す。旧ペインが閉じた時点で焦点は別のペインへ移る（移り先は Herdr 任せ）。
