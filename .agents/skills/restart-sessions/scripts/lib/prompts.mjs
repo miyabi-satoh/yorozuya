@@ -23,6 +23,7 @@
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { paceNote } from './pace.mjs';
 
 const GUIDE = fileURLToPath(new URL('../../after-restart.md', import.meta.url));
 
@@ -34,7 +35,8 @@ export const HOW_TO_PROCEED = '資料の先頭の「再起動した先の進め�
 export function attachGuide(handoff) {
   const path = handoff.endsWith('.md') ? `${handoff.slice(0, -3)}-with-guide.md` : `${handoff}-with-guide.md`;
   try {
-    const guide = readFileSync(GUIDE, 'utf8').trimEnd();
+    const note = paceNote();
+    const guide = readFileSync(GUIDE, 'utf8').trimEnd() + (note ? `\n\n${note}` : '');
     const body = readFileSync(handoff, 'utf8');
     writeFileSync(path, `${guide}\n\n---\n\n${body}`, 'utf8');
   } catch (error) {
