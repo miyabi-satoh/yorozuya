@@ -13,6 +13,7 @@
 import { isAbsolute } from 'node:path';
 
 import { handoffProblem } from './lib/handoff.mjs';
+import { paceNote } from './lib/pace.mjs';
 import { attachGuide, HOW_TO_PROCEED } from './lib/prompts.mjs';
 import {
   backgroundWorkHint,
@@ -55,6 +56,8 @@ const current = herdrJson(['pane', 'current', '--current'])?.result?.pane;
 const self = current?.pane_id ?? '';
 const sid = current?.agent_session?.value ?? '';
 if (!self || !sid) skip(`自分のペインかセッションIDを特定できない（${herdrError()}）`);
+// 時間がかかりうるので、照合の前に済ませる
+const note = paceNote(self);
 
 // このスクリプトは「自分は claude で、資料を書き終えている」前提で、新セッションに旧ペインを
 // 閉じさせる。claude 以外から呼ばれると、無関係のペインを強制終了させることになる。
@@ -87,7 +90,7 @@ if (holder && holder !== self) skip(`名前 ${name} は ${holder} が使用中`)
 const selfHoldsName = holder === self;
 
 // 進め方を資料の前につないだファイルを作り、新セッションにはそちらを渡す。資料そのものは書き換えない。
-const { path: sent, error: guideProblem } = attachGuide(handoff);
+const { path: sent, error: guideProblem } = attachGuide(handoff, note);
 if (guideProblem) skip(guideProblem);
 
 // 縦長のペインは下に割る。旧を閉じれば新が元の大きさに戻る。

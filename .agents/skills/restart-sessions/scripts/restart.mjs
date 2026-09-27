@@ -14,6 +14,7 @@
 // 対象に止めてもらってから呼び直す。--allow-background は、対象がセッションを終えても動かし続けたいと明言した独立したプロセスにだけ使う。
 
 import { handoffProblem } from './lib/handoff.mjs';
+import { paceNote } from './lib/pace.mjs';
 import { attachGuide, HOW_TO_PROCEED } from './lib/prompts.mjs';
 import {
   agentInfo,
@@ -55,6 +56,8 @@ const fail = (message) => {
 const problem = handoffProblem(handoff, '対象のペイン');
 if (problem) skip(problem);
 if (!NAME_PATTERN.test(name)) skip(`Herdr の名前の規則（先頭は小文字・英数と _ - のみ・32字以内）に合わない: ${name}`);
+// 時間がかかりうるので、対象の状態を確かめる前に済ませる
+const note = paceNote();
 
 // 引数の取り違え（別のペインのIDを渡す）で無関係のセッションを終了させないよう、中身を照合する。
 // 閉じたペインのIDは使い回されず、別ワークスペースへ移ったペインは新しいIDになる（Herdr の文書）。
@@ -107,7 +110,7 @@ if (!allowBackground) {
 }
 
 // 進め方を資料の前につないだファイルを作り、新セッションにはそちらを渡す。資料そのものは書き換えない。
-const { path: sent, error: guideProblem } = attachGuide(handoff);
+const { path: sent, error: guideProblem } = attachGuide(handoff, note);
 if (guideProblem) skip(guideProblem);
 
 // --- ここから後戻りできない ---
