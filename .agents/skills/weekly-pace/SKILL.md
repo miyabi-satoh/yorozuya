@@ -9,7 +9,7 @@ description: Claude・Codex 双方の週次使用ペースを判定する。Clau
 
 ## 手順（Claude側）
 
-1. claude ペインの画面を読む。Claude から使うなら自分のペイン（`$HERDR_PANE_ID`）でよい。ステータスラインは会話の文脈には入らないが、画面には出ている。Codex から使うなら、`herdr agent list` で claude のペインを選ぶ（どれでもよい、値は共有されている）。
+1. claude ペインの画面を読む。Claude から使うなら自分のペインでよい（`herdr pane current --current` の `result.pane.pane_id`。`$HERDR_PANE_ID` はペインを移すと古いまま残ることがある）。ステータスラインは会話の文脈には入らないが、画面には出ている。Codex から使うなら、`herdr agent list` で claude のペインを選ぶ（どれでもよい、値は共有されている）。
    ```
    herdr pane read <pane_id> --source visible
    ```

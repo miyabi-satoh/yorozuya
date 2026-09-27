@@ -55,9 +55,9 @@ const fail = (message) => {
 
 const problem = handoffProblem(handoff, '対象のペイン');
 if (problem) skip(problem);
+if (!NAME_PATTERN.test(name)) skip(`Herdr の名前の規則（先頭は小文字・英数と _ - のみ・32字以内）に合わない: ${name}`);
 // 時間がかかりうるので、対象の状態を確かめる前に済ませる
 const note = paceNote();
-if (!NAME_PATTERN.test(name)) skip(`Herdr の名前の規則（先頭は小文字・英数と _ - のみ・32字以内）に合わない: ${name}`);
 
 // 引数の取り違え（別のペインのIDを渡す）で無関係のセッションを終了させないよう、中身を照合する。
 // 閉じたペインのIDは使い回されず、別ワークスペースへ移ったペインは新しいIDになる（Herdr の文書）。
