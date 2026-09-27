@@ -1,6 +1,5 @@
 #!/usr/bin/env node
-// Codex CLI の app-server(JSON-RPC over stdio)に account/rateLimits/read を投げ、
-// primary(5時間枠)・secondary(週次枠)の使用率とリセット時刻をJSONで出す。
+// Codex CLI の app-server(JSON-RPC over stdio)に account/rateLimits/read を投げ、primary(5時間枠)・secondary(週次枠)の使用率とリセット時刻をJSONで出す。
 // クォータは消費しない(既存ツール cclimits・codex-cli-usage も同じ前提で使っている)。
 //
 // usage: codex-usage.mjs

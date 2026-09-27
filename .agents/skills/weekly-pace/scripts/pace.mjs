@@ -1,6 +1,5 @@
 #!/usr/bin/env node
-// ステータスラインの「Weekly: X% | Weekly Reset: Ndd Hhr Mmin」から、週次サイクル（7日=168h）を
-// 線形・比例で消費していくと仮定した場合の着地見込み%を概算する。あくまで目安。
+// ステータスラインの「Weekly: X% | Weekly Reset: Nd Hhr Mm」から、週次サイクル（7日=168h）を線形・比例で消費していくと仮定した場合の着地見込み%を概算する。あくまで目安。
 //
 // usage: pace.mjs [--text '<画面のテキスト>'] [--json]
 //   --text を省けば stdin から読む（herdr pane read の出力をそのままパイプしてよい）。

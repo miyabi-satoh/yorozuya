@@ -118,5 +118,9 @@ Claude Code の更新の知らせ（再起動で反映される）や、放置�
 - `herdr pane read --source visible` で、ステータスラインまで含めた画面が読める（見張り）
 - `herdr agent wait --until` が指定した状態になるまで待ち、時間切れなら `timeout` のエラーを返す。`herdr agent send-keys <name> Enter` で入力欄の中身が送信される（再起動の後に、資料を読ませる依頼が送信されたかの確認）
 
+**Codex**（週次枠のペースを添えるときだけ）
+
+- `codex app-server` の `account/rateLimits/read`（詳しくは [weekly-pace](../weekly-pace/README.md)）。取れなければ何も添えずに再起動を続ける
+
 壊れたときは、このどれが変わったかから当たりを付ける。
 止まり方は SKIP と FAIL で、どちらも**対象のセッションには手を付けていない**か、`claude --resume <ID>` で戻せる状態で止まる。

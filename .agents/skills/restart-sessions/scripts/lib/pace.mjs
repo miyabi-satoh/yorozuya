@@ -1,12 +1,14 @@
 // 再起動した新セッションに、週次枠のペースの一文を添える。数字は weekly-pace スキルのスクリプトで取る。
 //
 // Claude がハイペースで Codex に余裕があるときだけ、任せられる作業を Codex に回すよう書く。
-// 再起動はどのセッションにも1〜2時間おきに来るので、毎回のプロンプトで差し込む hook を各セッションに置かずに済む。
+// 再起動のたびに入るので、毎回のプロンプトで差し込む hook を各セッションに置かずに済む。
+// codex の問い合わせに最長12秒かかるので、呼び出し側は事前の確かめより前に呼ぶ（確かめてから /exit までを空けない）。
 // 読み違えても、新セッションが作業をどちらに回すかが変わるだけで、後戻りできない操作には進まない。
 // 取れないとき（Herdr の外・ステータスラインに Weekly が無い・codex が無い）は何も添えない。
 
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { herdrJson } from './herdr.mjs';
 
 const SCRIPTS = fileURLToPath(new URL('../../../weekly-pace/scripts/', import.meta.url));
 // Codex の5時間枠がここまで埋まっていたら、回しても rate limit で落ちるので添えない
@@ -27,8 +29,8 @@ function pace(script, input, timeout) {
 }
 
 // Weekly% はアカウント全体で共有されるので、呼び出し元の自分のペインを読めば足りる。
-export function paceNote() {
-  const pane = process.env.HERDR_PANE_ID;
+// $HERDR_PANE_ID はペイン移動前の ID のまま残ることがあるので、渡されなければ現在の ID を引く。
+export function paceNote(pane = herdrJson(['pane', 'current', '--current'])?.result?.pane?.pane_id) {
   if (!pane) return '';
   let screen;
   try {

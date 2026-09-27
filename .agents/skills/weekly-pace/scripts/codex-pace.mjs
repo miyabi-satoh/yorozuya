@@ -3,8 +3,7 @@
 //
 // usage: node codex-usage.mjs | node codex-pace.mjs [--json]
 //   stdin が無ければ codex-usage.mjs を自分で叩く。
-//   --json なら {pct, elapsedHours, remainingHours, projected, primaryPct} を出す
-//   （判定不可のとき projected は null。primaryPct は5時間枠の使用率）。
+//   --json なら {pct, elapsedHours, remainingHours, projected, primaryPct} を出す（判定不可のとき projected は null。primaryPct は5時間枠の使用率）。
 
 import { execFileSync } from 'node:child_process';
 import { text } from 'node:stream/consumers';

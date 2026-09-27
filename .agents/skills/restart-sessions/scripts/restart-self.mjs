@@ -13,6 +13,7 @@
 import { isAbsolute } from 'node:path';
 
 import { handoffProblem } from './lib/handoff.mjs';
+import { paceNote } from './lib/pace.mjs';
 import { attachGuide, HOW_TO_PROCEED } from './lib/prompts.mjs';
 import {
   backgroundWorkHint,
@@ -87,7 +88,7 @@ if (holder && holder !== self) skip(`名前 ${name} は ${holder} が使用中`)
 const selfHoldsName = holder === self;
 
 // 進め方を資料の前につないだファイルを作り、新セッションにはそちらを渡す。資料そのものは書き換えない。
-const { path: sent, error: guideProblem } = attachGuide(handoff);
+const { path: sent, error: guideProblem } = attachGuide(handoff, paceNote(self));
 if (guideProblem) skip(guideProblem);
 
 // 縦長のペインは下に割る。旧を閉じれば新が元の大きさに戻る。

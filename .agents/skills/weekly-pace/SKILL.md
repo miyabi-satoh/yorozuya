@@ -3,7 +3,7 @@ name: weekly-pace
 description: Claude・Codex 双方の週次使用ペースを判定する。Claude側はステータスラインの Weekly%/Weekly Reset、Codex側は app-server の account/rateLimits/read から直接取る。ユーザーが「ペースどう」「ハイペースか」「Codex に投げたほうがいい？」と尋ねたときや、委譲できる作業をどちらに回すか自分で判断したいときに使う。
 ---
 
-`Weekly: X% | Weekly Reset: Ndd Hhr Mm` は、**アカウント全体で共有される週次（7日=168h）の使用量**。
+`Weekly: X% | Weekly Reset: Nd Hhr Mm` は、**アカウント全体で共有される週次（7日=168h）の使用量**。
 どの claude ペインを読んでも同じ値になる。これを線形・比例で消費していくと仮定し、リセットまでの着地見込み%を概算する。
 あくまで目安・参考程度。ペースそのもの（%/h）ではなく、着地見込みが100%を超えるかどうかだけを見る。
 
@@ -28,13 +28,11 @@ Codex CLI の app-server（JSON-RPC、`account/rateLimits/read`）から直接�
 node <このスキルのディレクトリ>/scripts/codex-usage.mjs | node <このスキルのディレクトリ>/scripts/codex-pace.mjs
 ```
 
-`codex-usage.mjs` 単体は `{accountId, planType, primary, secondary}` のJSONを返す
-（`primary`=5時間枠、`secondary`=週次枠、それぞれ `usedPercent`・`resetsAt`（UNIX秒）・`windowDurationMins`）。
+`codex-usage.mjs` 単体は `{accountId, planType, primary, secondary}` のJSONを返す（`primary`=5時間枠、`secondary`=週次枠、それぞれ `usedPercent`・`resetsAt`（UNIX秒）・`windowDurationMins`）。
 リセット時刻はUIには出ないが、APIには載っている。
 
 ## 両方を見て判断する
 
-ユーザーから「Claude と Codex のウィークリーリミットを無駄なく使いたい、判断は Claude でしてほしい」という方針を受けている（2026-09-23）。
 この節は Claude から使うときの話。Codex から使うときは、ペースを伝えるだけにとどめる。
 両方のWeeklyペースを見て、片方がハイペース・もう片方に余裕があるなら、委譲できる作業（コードレビュー・機械的な変換・文書チェックなど、判断の質が落ちにくいもの）を余裕がある側に回してよい。Codex に任せる手順（スキルなど）を持っていれば、それに従う。
 実装そのものの主担当を割り込みなく変える、というような大きな切り替えは、これまでどおり一声かける。

@@ -4,8 +4,8 @@ Claude と Codex の週次使用ペースを概算する。
 
 ## 読む前に
 
-- **Claude 側は ccstatusline 系の表示（`Weekly: X% | Weekly Reset: Ndd Hhr Mm`）と Herdr が前提。** claude ペインの画面を `herdr pane read` で読むので、どちらかが無ければ使えない
-- **Codex 側は `codex` CLI が PATH に要る。** `codex app-server` の `account/rateLimits/read` から取る（クォータは消費しない）。codex-cli 0.155.1 で確認
+- **Claude 側は ccstatusline 系の表示（`Weekly: X% | Weekly Reset: Nd Hhr Mm`）と Herdr が前提。** claude ペインの画面を `herdr pane read` で読むので、どちらかが無ければ使えない
+- **Codex 側は `codex` CLI が PATH に要る。** `codex app-server` の `account/rateLimits/read` から取る（クォータは消費しない）。codex-cli 0.157.0 で確認
 - **線形・比例で消費すると仮定した、あくまで目安。** 実際の消費は波があるので、外れることがある
 - **週の頭（経過が短い）ほど数字が跳ねる。** 経過2時間未満は判定不可として返す
 - **Weekly% はアカウント全体で共有される値。** どの claude ペインを読んでも同じで、自分のペインを読んでもよい
