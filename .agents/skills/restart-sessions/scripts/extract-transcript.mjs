@@ -182,7 +182,8 @@ const WITH_GUIDE = /-with-guide\.md$/;
 // ユーザーが手で `@<ファイル> …` と打って始めたセッションを、前の資料と取り違えないため。
 const HANDOFF_PROMPT = /前セッションの引き継ぎ資料です|Yorozuya 自身の再起動です|\/clear で消えた前任/;
 // 前の資料の中で、そのまた前の資料が始まる見出し。この抜き出しが書くものと、手でつないだときの見出し。
-const NESTED = /\n# (?:前の資料|その前の|それより前の)/;
+// どちらも `---` の行の直後に置いている。会話の中の見出しと取り違えないよう、それに限る。
+const NESTED = /\n---\n\n# (?:前の資料|その前の|それより前の)/;
 function previousHandoff() {
   const first = filtered.find((e) => e.role === 'User');
   // 自己再起動の依頼は、ユーザーの貼り付けとして <pasted_content> に包まれて JSONL に残る（2.1.285 で実測）。
@@ -216,7 +217,7 @@ function fitPrevious(text) {
   if (text.length <= PREV_LIMIT) return { kept: text, omitted: 0 };
   const at = text.search(NESTED);
   const own = at >= 0 ? text.slice(0, at) : text;
-  if (own.length < PREV_LIMIT) {
+  if (own.length <= PREV_LIMIT) {
     return { kept: text.slice(0, PREV_LIMIT) + `\n\n[ここから後（古い世代）の約${text.length - PREV_LIMIT}文字は省いた]`, omitted: text.length - PREV_LIMIT };
   }
   const tail = own.slice(own.length - (PREV_LIMIT - PREV_HEAD));
