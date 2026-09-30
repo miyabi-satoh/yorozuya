@@ -4,6 +4,8 @@
 // （量が大きい上、再起動の引き継ぎに要るのは「何が話されたか」であって「何を実行したか」ではないため）。
 // 繰り返し出るシステムリマインダー（<system-reminder>...）はボイラープレートなので落とす。
 //
+// 最初の発言で前の資料を `@<パス>` で読んでいれば、その先頭を末尾につなぐ（下の previousHandoff）。
+//
 // usage: extract-transcript.mjs <session-id> [--out <path>]
 //   --out を省けば stdout に書く。
 //
@@ -168,18 +170,90 @@ const LABELS = {
   Notification: 'バックグラウンドの処理の知らせ',
   Other: 'その他',
 };
+// 前の資料をつなぐ。再起動や /clear の後のセッションは、最初の発言で前の資料を `@<パス>` で読んでいる。
+// `@` の添付はツールの実行結果の扱いで上の抜き出しから外れるので、そのままでは前の経緯が次の資料に入らない。
+// 前の資料もそのまた前をつないでいるので、つなぐたびに膨らむ。PREV_LIMIT 文字に収める。
+// 資料が大きいと、読ませただけで新セッションの使用率が上がり、次の OVER・IDLE までが短くなる（2026-09-30 に 224KB まで育った）。
+const PREV_LIMIT = 20000;
+// 前の資料そのものの節（状態メモ＋そのセッションの会話ログ）が上限を超えたときに、頭から残す分。状態メモを落とさないため。
+const PREV_HEAD = 3000;
+const WITH_GUIDE = /-with-guide\.md$/;
+// 新セッションへの依頼の定型（restart.mjs・restart-self.mjs・SKILL.md「放置のあとの /clear」）。
+// ユーザーが手で `@<ファイル> …` と打って始めたセッションを、前の資料と取り違えないため。
+const HANDOFF_PROMPT = /前セッションの引き継ぎ資料です|Yorozuya 自身の再起動です|\/clear で消えた前任/;
+// 前の資料の中で、そのまた前の資料が始まる見出し。この抜き出しが書くものと、手でつないだときの見出し。
+// どちらも `---` の行の直後に置いている。会話の中の見出しと取り違えないよう、それに限る。
+const NESTED = /\n---\n\n# (?:前の資料|その前の|それより前の)/;
+function previousHandoff() {
+  const first = filtered.find((e) => e.role === 'User');
+  // 自己再起動の依頼は、ユーザーの貼り付けとして <pasted_content> に包まれて JSONL に残る（2.1.285 で実測）。
+  const match = first?.text.match(/^(?:<pasted_content[^>]*>\s*)?@(\/\S+)\s+(.*)/s);
+  if (!match || !HANDOFF_PROMPT.test(match[2])) return null;
+  const path = match[1];
+  // 進め方をつないだファイルなら、進め方の無い元の資料を読む（進め方を世代ごとに重ねないため）。
+  // 元の資料が消えていれば、つないだファイルから進め方を外して使う（進め方と資料は `---` の行でつないでいる。lib/prompts.mjs）。
+  const read = (p) => {
+    try {
+      return readFileSync(p, 'utf8');
+    } catch {
+      return null;
+    }
+  };
+  if (WITH_GUIDE.test(path)) {
+    const original = path.replace(WITH_GUIDE, '.md');
+    const text = read(original);
+    if (text !== null) return { path: original, text: text.trim() };
+    const joined = read(path);
+    const sep = joined?.indexOf('\n\n---\n\n') ?? -1;
+    if (sep >= 0) return { path, text: joined.slice(sep + 7).trim() };
+    return { path, text: joined?.trim() ?? null };
+  }
+  const text = read(path);
+  return { path, text: text === null ? null : text.trim() };
+}
+// 前の資料の節は丸ごと残し、余った分だけそのまた前を頭から残す（そのまた前も同じ形なので、状態メモと新しい世代が残る）。
+// 前の資料の節だけで上限を超えたら、頭（状態メモ）と末尾（そのセッションの最後のやり取り）を残して中を省き、そのまた前はつながない。
+function fitPrevious(text) {
+  if (text.length <= PREV_LIMIT) return { kept: text, omitted: 0 };
+  const at = text.search(NESTED);
+  const own = at >= 0 ? text.slice(0, at) : text;
+  if (own.length <= PREV_LIMIT) {
+    return { kept: text.slice(0, PREV_LIMIT) + `\n\n[ここから後（古い世代）の約${text.length - PREV_LIMIT}文字は省いた]`, omitted: text.length - PREV_LIMIT };
+  }
+  const tail = own.slice(own.length - (PREV_LIMIT - PREV_HEAD));
+  const middle = own.length - PREV_HEAD - tail.length;
+  const older = text.length - own.length;
+  return {
+    kept: `${own.slice(0, PREV_HEAD)}\n\n[中略: 約${middle}文字]\n\n${tail}${older ? `\n\n[ここから後（古い世代）の約${older}文字は省いた]` : ''}`,
+    omitted: middle + older,
+  };
+}
+const prev = previousHandoff();
+let prevSection = '';
+let prevKept = 0;
+if (prev?.text === null) {
+  prevSection = `\n\n---\n\n# 前の資料\n\n最初の発言で読んでいた ${prev.path} は、もう無かった。つないでいない。\n`;
+} else if (prev) {
+  const { kept, omitted } = fitPrevious(prev.text);
+  prevKept = kept.length;
+  const note = omitted ? `（一部を省いた。全文は ${prev.path}）` : '';
+  prevSection = `\n\n---\n\n# 前の資料（最初の発言で読んでいた ${prev.path}）${note}\n\n${kept}\n`;
+}
+
 const totalChars = filtered.reduce((n, e) => n + e.text.length, 0);
 const header =
   `<!-- 自動抽出: ${jsonlPath} / セッション ${sessionId} / 元${entries.length}件→${filtered.length}件・約${totalChars}文字。` +
   'ツール実行結果・thinking・system-reminder・skill の本文は含めない。定型文の機械的な間引きあり（要約はしていない）。' +
-  '発言の区切りは「===== 話者 =====」の行。末尾にある再起動の依頼と返信は、済んだやり取り -->\n\n';
+  '発言の区切りは「===== 話者 =====」の行。末尾にある再起動の依頼と返信は、済んだやり取り。' +
+  '最初の発言で読んだ前の資料があれば、末尾につなぐ -->\n\n';
 // 区切りを Markdown の見出しにしないのは、発言の中の見出しと見分けるため。
 const body = filtered.map((e) => `===== ${LABELS[e.role] ?? e.role} =====\n\n${e.text}`).join('\n\n');
-const output = header + body + '\n';
+const output = header + body + '\n' + prevSection;
 
 if (outPath) {
   writeFileSync(outPath, output, 'utf8');
-  process.stderr.write(`書いた: ${outPath}（${filtered.length}件・約${totalChars}文字）\n`);
+  const prevNote = prev ? `、前の資料 ${prev.text === null ? 'は無かった' : `${prevKept}文字をつないだ`}` : '';
+  process.stderr.write(`書いた: ${outPath}（${filtered.length}件・約${totalChars}文字${prevNote}）\n`);
 } else {
   process.stdout.write(output);
 }
