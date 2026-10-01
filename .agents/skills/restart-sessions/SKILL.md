@@ -17,7 +17,7 @@ description: Herdr 上の Claude セッションを、会話ログを引き継�
 
 - コンテキストの見張りを始める・知らせを受ける: [watch.md](watch.md)
 - 放置で大きくなった会話を `/clear` して続ける（`IDLE` の知らせ）: [idle-clear.md](idle-clear.md)
-- 自分自身（Yorozuya）を再起動する: [restart-self.md](restart-self.md)
+- 自分自身を再起動する: [restart-self.md](restart-self.md)
 
 ## やらないこと
 
@@ -51,7 +51,7 @@ description: Herdr 上の Claude セッションを、会話ログを引き継�
 ## 手順
 
 1. `herdr agent list` で対象のペインID・Herdr の名前・セッションID（`agent_session.value`。手順4で使う）を引く。
-   `ListAgents` で自分の名前と対象の名前を引く（`yorozuya-XX` の XX はセッションごとに変わる。引き継ぎ資料の名前は使わない）。
+   `ListAgents` で自分の名前と対象の名前を引く（`<名前>-XX` の XX はセッションごとに変わる。引き継ぎ資料の名前は使わない）。
    `ListAgents` の名前は Herdr の名前とは別物で、`herdr agent list` の `terminal_title_stripped`（`<マシン>/<名前>` の形）の名前の部分と同じ。
 
 2. 手順1で見た `agent_status` が `blocked`（承認や選択式の問いの待ち）なら、依頼を送らずユーザーにそのペインで答えてもらう

@@ -44,7 +44,7 @@ Windows では `curl` を `curl.exe` にする。fork したなら、URL の `mi
 
 > ~/machine-setup-progress.md を読んで続けて
 
-このリポジトリを clone してあるマシンでも、作業用のディレクトリで `claude` を起動し、URL の代わりに clone した `SKILL.md` のパスを渡して読ませる。skill として読み込ませたなら、`/machine-setup` で呼ぶ（Codex では `$machine-setup`）。グローバルなインストールを含むので、頼むだけでは呼ばれない（`disable-model-invocation: true`。Codex 向けには `agents/openai.yaml` の `allow_implicit_invocation: false`）。このリポジトリのディレクトリで起動すると、`AGENTS.md` の Yorozuya セッションの決まり（ほかのプロジェクトのファイルは編集しない、など）が読み込まれる。
+このリポジトリを clone してあるマシンでも、作業用のディレクトリで `claude` を起動し、URL の代わりに clone した `SKILL.md` のパスを渡して読ませる。skill として読み込ませたなら、`/machine-setup` で呼ぶ（Codex では `$machine-setup`）。グローバルなインストールを含むので、頼むだけでは呼ばれない（`disable-model-invocation: true`。Codex 向けには `agents/openai.yaml` の `allow_implicit_invocation: false`）。
 
 ## 中身
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Yorozuya 自身のセッションを、自ペインを分割した新ペインで立て直す。
+// 呼び出し元自身のセッションを、自ペインを分割した新ペインで立て直す。
 // usage: restart-self.mjs [--allow-background] <資料の絶対パス> [name]
 //
 // 対象セッションの再起動とは手順が逆になる。死ぬ側が /exit を送るとスクリプトも道連れに
@@ -10,7 +10,7 @@
 //   SKIP — 何も変えずに止まった。
 //   FAIL — 新ペインを立てた後に止まった。何が残ったかをメッセージに書く。
 
-import { isAbsolute } from 'node:path';
+import { basename, isAbsolute } from 'node:path';
 
 import { handoffProblem } from './lib/handoff.mjs';
 import { paceNote } from './lib/pace.mjs';
@@ -29,7 +29,7 @@ import {
 
 const rawArgs = process.argv.slice(2);
 const allowBackground = rawArgs.includes('--allow-background');
-const [handoff, name = 'yorozuya'] = rawArgs.filter((arg) => arg !== '--allow-background');
+const [handoff, nameArg] = rawArgs.filter((arg) => arg !== '--allow-background');
 if (!handoff) {
   process.stderr.write('usage: restart-self.mjs [--allow-background] <資料の絶対パス> [name]\n');
   process.exit(1);
@@ -49,7 +49,6 @@ const fail = (message) => {
 
 const problem = handoffProblem(handoff, '新セッション');
 if (problem) skip(problem);
-if (!NAME_PATTERN.test(name)) skip(`Herdr の名前の規則（先頭は小文字・英数と _ - のみ・32字以内）に合わない: ${name}`);
 
 // $HERDR_PANE_ID はペイン移動前の ID のまま残ることがあるので、現在の ID を引き直す
 const current = herdrJson(['pane', 'current', '--current'])?.result?.pane;
@@ -70,6 +69,20 @@ if (current.agent !== 'claude') skip(`このペインで動いているのは cl
 const cwd = [current.cwd, current.foreground_cwd].find((value) => typeof value === 'string' && isAbsolute(value));
 if (!cwd) skip('ペインの cwd を Herdr から取れない。新ペインをどこで起動するか決められないので止まる');
 
+// 新ペインの名前。指定が無ければ旧ペインの名前を引き継ぎ、名前が無ければ cwd のフォルダ名から作る。
+// 呼び出し元への依頼は名前で届くので、立て直しの前後で名前を変えない。
+const agents = herdrJson(['agent', 'list'])?.result?.agents;
+const ownName = Array.isArray(agents) ? agents.find((agent) => agent.pane_id === self)?.name : undefined;
+const name =
+  nameArg ??
+  ownName ??
+  basename(cwd)
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, '-')
+    .replace(/^[^a-z]+/, '')
+    .slice(0, 32);
+if (!NAME_PATTERN.test(name)) skip(`Herdr の名前の規則（先頭は小文字・英数と _ - のみ・32字以内）に合わない: ${name || '（空）'}。2つ目の引数で名前を渡すこと`);
+
 // 自分の申告（「見張りは止めた」など）も、自分自身の記憶違いで実際の追跡と食い違いうる。
 // モードラインは記憶に頼らない表示なので、旧ペインを道連れにする前にここで機械的に照合する。
 if (!allowBackground) {
@@ -86,7 +99,7 @@ if (!allowBackground) {
 // Herdr の名前は一意なので、起動の直前に外し、失敗したら戻す。
 const holder = paneHoldingName(name);
 if (holder === null) skip(`Herdr のエージェント一覧を取得できない（${herdrError()}）`);
-if (holder && holder !== self) skip(`名前 ${name} は ${holder} が使用中`);
+if (holder && holder !== self) skip(`名前 ${name} は ${holder} が使用中。別の名前を2つ目の引数で渡すこと`);
 const selfHoldsName = holder === self;
 
 // 進め方を資料の前につないだファイルを作り、新セッションにはそちらを渡す。資料そのものは書き換えない。
@@ -172,7 +185,7 @@ if (!startAgent(name, created)) {
 log('起動');
 
 // --wait は付けない。待っている間に旧ペインごと閉じられるため、待つ意味がない。
-const request = `@${sent} Yorozuya 自身の再起動です。前セッション（ペイン ${self} / セッション ${sid}）は資料を書き終えて、閉じられるのを待っています。
+const request = `@${sent} このセッション自身の再起動です。前セッション（ペイン ${self} / セッション ${sid}）は資料を書き終えて、閉じられるのを待っています。
 
 手順:
 1. 引き継ぎ資料を読んで現状を把握する。
