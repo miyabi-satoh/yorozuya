@@ -7,8 +7,9 @@ import { fileURLToPath } from 'node:url';
 
 import { CONFIG, loadConfig } from './lib/config.mjs';
 
-// 差し込む文のコマンドは絶対パスにする。セッションをどこで起動しても、そのまま走らせられる。
+// 差し込む文のコマンドと手順のファイルは絶対パスにする。セッションをどこで起動しても、そのまま走らせられる。
 const WATCH = fileURLToPath(new URL('./watch-context.mjs', import.meta.url));
+const GUIDE = fileURLToPath(new URL('../watch.md', import.meta.url));
 
 const say = (...lines) => process.stdout.write(`${lines.join('\n')}\n`);
 const { config, error } = loadConfig();
@@ -34,7 +35,7 @@ if (error || problem || !config.watch?.pattern) {
   );
 } else {
   say(
-    '[コンテキストの見張り] このセッションで最初に返事をするとき、restart-sessions スキルの「コンテキストを見張る」に従い（「始める」の手順2の試運転から）、次のコマンドを Monitor（timeout_ms は上限の 30 分。切れたら同じコマンドで張り直す）で走らせること。すでに見張りを走らせていれば、二重には始めない。',
+    `[コンテキストの見張り] このセッションで最初に返事をするとき、restart-sessions スキルの ${GUIDE}（コンテキストを見張る）に従い（「始める」の手順2の試運転から）、次のコマンドを Monitor（timeout_ms は上限の 30 分。切れたら同じコマンドで張り直す）で走らせること。すでに見張りを走らせていれば、二重には始めない。`,
     `node "${WATCH}"`,
     config.confirm === true
       ? '知らせのたびに、再起動や /clear に進んでよいかをユーザーに確認する（config.local.json の confirm）。'

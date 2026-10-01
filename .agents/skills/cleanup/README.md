@@ -23,16 +23,13 @@
 
 ## 使い方
 
-この skill を読み込んだ `claude` に頼む。
-
-> ゴミ掃除して
->
-> ディスクが足りないので空けて
+この skill を読み込んだ `claude` で `/cleanup` と打つ（Codex では `$cleanup`）。消す操作を含むので、「ゴミ掃除して」と頼むだけでは呼ばれない（`disable-model-invocation: true`。Codex 向けには `agents/openai.yaml` の `allow_implicit_invocation: false`）。
 
 ## 中身
 
 | | |
 | --- | --- |
 | `SKILL.md` | 決まりと手順 |
+| `agents/openai.yaml` | Codex で、頼まれただけでは呼ばれないようにする設定 |
 | `references/survey.md` | 調査を任されたサブエージェントの手順と測り方 |
 | `references/catalog.md` | 消してよいものの目録。場所・消し方・失うもの |
