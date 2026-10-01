@@ -122,7 +122,7 @@ description: Herdr 上の Claude セッションを、会話ログを引き継�
   残っていて確認画面（`Background work is running` → `scheduled task ...`）が出ることがある（2026-09-23 に別プロジェクトで実際に発生）。
   これはシェル・Monitorの食い違い（手順5のモードライン照合）とは別物で、今のところ画面から検知する手段が無い。
   ユーザーに内容を伝えて選んでもらう。「Runs once in 0s」のようにほぼ即時実行なら、止めても実害は小さいことが多い。
-  `EnterWorktree` で入った worktree に対象がいたままなら、`Exiting worktree session`（Keep worktree / Remove worktree）が出る（2026-10-01 に実際に発生）。ユーザーに Keep を選んでもらい、シェルに戻って名前が外れたのを確かめてから `herdr agent start`、起動したら `@<資料>-with-guide.md` を送る。資料に worktree のパスとブランチが無ければ足しておく。
+  `EnterWorktree` で入った worktree に対象がいたままなら、`Exiting worktree session`（Keep worktree / Remove worktree）が出る（2026-10-01 に実際に発生）。ユーザーに Keep を選んでもらい、シェルに戻って名前が外れたのを確かめてから `herdr agent start`、起動したら `@<資料>-with-guide.md` を送る。渡す `-with-guide.md` に worktree のパスとブランチが無ければ、送る前にそちらへ足す（`-with-guide.md` は `/exit` の前に作られるので、元の資料に足しても届かない）。
 - **FAIL で `/exit` を送った後に止まった** — claude が終了してシェルに戻った後は、**同じ引数で再実行しても通らない。** エージェントのいないペインは pre-flight で SKIP になる。メッセージに書いてある手順で手で起動し直す（名前が外れたのを確かめてから `herdr agent start`、起動したら `@<資料>-with-guide.md`。または `claude --resume <ID>` で元の会話）。確認画面でキャンセルして claude が動き続けているなら、何も変わっていないので再実行できる。
 - **対象が `blocked` で依頼が届かない** — 直前の再起動で新セッションが出した問い（出し直した問いや、状態を聞く問い）や、再開した作業の権限の確認に、まだ答えていないことがある。ユーザーにそのペインで答えてもらってから、手順1からやり直す。
 - **FAIL で起動の段が `agent_pane_busy`** — `/exit` の後にシェルへ戻ったのを確かめてから起動しているので、旧セッションは終わっている。Herdr がそのペインをまだ使用中と見ているだけ。**まずペインを見る。** claude が上がっていれば、確認やダイアログが出ていないか見て、出ていれば答えてもらってから `@<資料>-with-guide.md` を渡す。シェルのプロンプトに戻っていれば、メッセージに書いてある手順（名前が外れたのを確かめてから `herdr agent start`、起動したら `@<資料>-with-guide.md`）で起動し直す。
