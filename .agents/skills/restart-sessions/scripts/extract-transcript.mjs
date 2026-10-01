@@ -180,7 +180,7 @@ const PREV_HEAD = 3000;
 const WITH_GUIDE = /-with-guide\.md$/;
 // 新セッションへの依頼の定型（restart.mjs・restart-self.mjs・idle-clear.md）。
 // ユーザーが手で `@<ファイル> …` と打って始めたセッションを、前の資料と取り違えないため。
-const HANDOFF_PROMPT = /前セッションの引き継ぎ資料です|Yorozuya 自身の再起動です|\/clear で消えた前任/;
+const HANDOFF_PROMPT = /前セッションの引き継ぎ資料です|自身の再起動です|\/clear で消えた前任/;
 // 前の資料の中で、そのまた前の資料が始まる見出し。この抜き出しが書くものと、手でつないだときの見出し。
 // どちらも `---` の行の直後に置いている。会話の中の見出しと取り違えないよう、それに限る。
 const NESTED = /\n---\n\n# (?:前の資料|その前の|それより前の)/;

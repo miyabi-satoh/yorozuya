@@ -14,9 +14,9 @@
 - **区切りの確認を頼まれた側は、プロジェクトの全体の流れの置き場（roadmap・issue・外部のノートなど）を今の状態に直してから返信する。** 外向きの置き場への書き込みは、そのプロジェクトの決まりどおりに確かめる。置き場が CLAUDE.md などから辿れなければ、1行足してよいかをユーザーに聞く
 - **会話ログの抽出は、Claude Code が `~/.claude/projects/<project>/<session-id>.jsonl` に保存する内部形式に頼っている。** 公式に文書化された形式ではない（[頼っている外部の振る舞い](#頼っている外部の振る舞い)）
 - **資料を読ませる入力が、送信されずに入力欄に残ることがある。** 原因は分かっていない。再起動した側のセッションが確かめ、残っていれば Enter を送る。自己再起動では確かめる者がいないので、残っていたら手で Enter を押す
-- **`config.local.json` を置いたうえでこのリポジトリで起動すると、コンテキストの見張りが自動で始まり、知らせは確認なしで流す。** 見張るのは Herdr 上の claude ペインすべて（他のプロジェクトのものも）。使用率が閾値（既定 30%）以上になるか更新の知らせが出たセッションは会話ログを引き継いで再起動し、放置のヒントが出たセッションには `/clear` を送る。知らせのたびに確認させたいなら、`config.local.json` の `confirm` を `true` にする
+- **`config.local.json` を置き、使う側に SessionStart の hook を置くと、起動のたびにコンテキストの見張りが始まり、知らせは確認なしで流す。** 見張るのは Herdr 上の claude ペインすべて（他のプロジェクトのものも）。使用率が閾値（既定 30%）以上になるか更新の知らせが出たセッションは会話ログを引き継いで再起動し、放置のヒントが出たセッションには `/clear` を送る。知らせのたびに確認させたいなら、`config.local.json` の `confirm` を `true` にする
 - **コンテキストの見張りは、ステータスラインに使用率が出ていることが前提。** 出していなければ、見張りだけ使えない。ステータスラインは自分で設定するもので、[ccstatusline](https://github.com/sirmalloc/ccstatusline) などで出せる
-- **見張りには `config.local.json` が要る。** スキルのディレクトリで `cp config.example.json config.local.json` として作り、`watch.pattern` をステータスラインの使用率の表示に合わせる（例は ccstatusline の `Ctx Used: 12.3%` 用）。無ければ見張りは始まらない。git 管理の外なので、pull しても上書きされない
+- **見張りには `config.local.json` が要る。** スキルのディレクトリで `cp config.example.json config.local.json` として作り、`watch.pattern` をステータスラインの使用率の表示に合わせる（例は ccstatusline の `Ctx Used: 12.3%` 用）。無ければ見張りは始まらない。このリポジトリの `.gitignore` で除外しているので、pull しても上書きされない（skill を symlink でなく写したなら、使う側の `.gitignore` に足す）
 - **再起動の依頼に、週次枠のペースの一文を添えることがある。** Claude がハイペースで Codex に余裕があるとき（[weekly-pace](../weekly-pace/README.md) の判定）、判断の質が落ちにくい作業を Codex に回すよう新セッションに書く。取れなければ（ステータスラインに Weekly が無い・`codex` が無い）何も添えない
 - **見張りは、見張る側のセッションが起きている間だけ動く。** そのセッションを閉じれば見張りも止まる。一定時間で切れるので、そのたびに張り直させる
 - **`/exit` を送る直前に対象の入力欄を読み、書きかけがあれば止まる。** 書きかけの末尾に `/exit` がつながって送信されるため。読んでから送るまでの1秒ほどの間に打ち始められたら防げないので、再起動の最中は対象のペインで打たないこと
@@ -40,7 +40,7 @@ Claude Code の更新の知らせ（再起動で反映される）や、放置�
 知らせを受けたセッションが、上と同じ手順で再起動の区切りを尋ねる。区切りの判断は対象に残る。
 既定では、知らせを受けると確認なしで再起動の手順に進む（放置のヒントなら `/clear` を送る）。知らせのたびにユーザーに確認させることもできる。
 
-このリポジトリで起動すると、見張りを始めさせる（`.claude/settings.json` の SessionStart hook が `scripts/session-start.mjs` を呼ぶ。hook の `args` を使うので Claude Code 2.1.139 以降。中身は `watch.md`）。
+使う側の `.claude/settings.json` に SessionStart の hook を置くと、起動のたびに見張りを始めさせる（hook が `scripts/session-start.mjs` を呼ぶ。置き方は[使い方](#使い方)、中身は `watch.md`）。
 起動しただけでは始まらず、最初に何か送ったときに始まる。再開（resume）したセッションでは始まらない。
 
 ## 仕組み
@@ -64,9 +64,29 @@ Claude Code の更新の知らせ（再起動で反映される）や、放置�
 
 ## 使い方
 
-1. ターミナルで [Herdr](https://herdr.dev) を起動する
-2. このリポジトリを clone したディレクトリに移動する
-3. `claude` を起動する
+1. このディレクトリを、使う側のプロジェクトの `.claude/skills/restart-sessions/` に置く（clone した先への symlink にする。写したなら、`config.local.json` を使う側の `.gitignore` に足す）。週次枠のペースを添えるなら、`weekly-pace` も隣に置く
+2. 見張りを起動のたびに始めるなら、使う側の `.claude/settings.json` に SessionStart の hook を置く（`args` を使うので Claude Code 2.1.139 以降）。見張りはマシンの Herdr 上の claude ペインすべてを見るので、hook は1つのプロジェクトにだけ置き、そこでセッションを1つだけ起動する（複数のセッションが見張ると、同じ知らせで二重に動く）
+
+   ```json
+   {
+     "hooks": {
+       "SessionStart": [
+         {
+           "matcher": "startup",
+           "hooks": [
+             {
+               "type": "command",
+               "command": "node",
+               "args": ["${CLAUDE_PROJECT_DIR}/.claude/skills/restart-sessions/scripts/session-start.mjs"]
+             }
+           ]
+         }
+       ]
+     }
+   }
+   ```
+
+3. ターミナルで [Herdr](https://herdr.dev) を起動し、使う側のプロジェクトのディレクトリで `claude` を起動する
 
 あとは Claude に頼む。**スクリプトを直接叩く必要はない。**
 
@@ -89,7 +109,6 @@ Claude Code の更新の知らせ（再起動で反映される）や、放置�
 | `after-restart.md` | 再起動した先のセッションに渡す進め方 |
 | `config.example.json` | 環境ごとの設定（`config.local.json`）の形。`config.local.json` は git 管理外 |
 | `scripts/` | 後戻りできない連鎖と、コンテキストの見張り（読むだけ） |
-| `../../../AGENTS.md` | このリポジトリでの運用ルール。`CLAUDE.md` から import している |
 
 スクリプトが外部に呼び出すのは `herdr` と `node` だけ（週次枠のペースを添えるときは、[weekly-pace](../weekly-pace/README.md) を通じて `codex` も）。Claude Code は「読む前に」のとおり別に要る。
 
