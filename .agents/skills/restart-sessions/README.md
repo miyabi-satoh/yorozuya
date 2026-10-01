@@ -107,6 +107,7 @@ Claude Code の更新の知らせ（再起動で反映される）や、放置�
 - `SendMessage` はツール呼び出しの切れ目で読まれる（区切りの確認の依頼が、作業中の対象にも届く）
 - 画面の最下部のモードラインに、バックグラウンドのシェル・Monitor の数が `N shells`・`N monitor` の形で出る（`/exit` の前の照合）
 - ステータスラインが、入力欄の下枠より下にふだんは表示される（見張り。承認や選択式の問いの間は隠れる）
+- 選択式の問いの間、画面の末尾の数行に `Esc to cancel` が出る（見張りが、Herdr が `blocked` と返さない問いを見分ける）
 - バックグラウンドのエージェントの一覧が、ステータスラインの下に、字下げか `❯` の後に丸印（`⏺`・`●`・`◯`）が続く行で並ぶ（見張りが読み飛ばす）
 - 更新の知らせが、入力欄の上枠のすぐ上の行に出る（見張りの `--update-pattern`）
 - 放置から戻ったときのヒント（`new task? /clear to save …`）が同じ行に出る（見張りの `--idle-pattern`）
@@ -116,6 +117,7 @@ Claude Code の更新の知らせ（再起動で反映される）や、放置�
 
 - `herdr agent list` / `agent get` / `agent prompt` / `agent start` / `pane process-info` / `pane current` / `pane split` の JSON 出力の構造
 - 終了の確認画面が出れば `blocked` と判定する
+- Claude Code の選択式の問いを `blocked` と判定しないことがある（0.9.1 で `idle`・`done`。見張りは画面から拾って補う）
 - 承認・質問ダイアログ待ちの相手には `agent prompt` が届かない（`agent_blocked` で弾かれる）
 - エージェント終了後に名前が外れる
 - 閉じたペインのIDは使い回されない（照合したペインと `/exit` や `pane close` を送るペインが同じであることは、これに頼っている）
