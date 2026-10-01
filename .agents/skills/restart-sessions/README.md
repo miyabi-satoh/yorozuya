@@ -40,7 +40,7 @@ Claude Code の更新の知らせ（再起動で反映される）や、放置�
 知らせを受けたセッションが、上と同じ手順で再起動の区切りを尋ねる。区切りの判断は対象に残る。
 既定では、知らせを受けると確認なしで再起動の手順に進む（放置のヒントなら `/clear` を送る）。知らせのたびにユーザーに確認させることもできる。
 
-このリポジトリで起動すると、見張りを始めさせる（`.claude/settings.json` の SessionStart hook が `scripts/session-start.mjs` を呼ぶ。hook の `args` を使うので Claude Code 2.1.139 以降。中身は SKILL.md の「コンテキストを見張る」）。
+このリポジトリで起動すると、見張りを始めさせる（`.claude/settings.json` の SessionStart hook が `scripts/session-start.mjs` を呼ぶ。hook の `args` を使うので Claude Code 2.1.139 以降。中身は `watch.md`）。
 起動しただけでは始まらず、最初に何か送ったときに始まる。再開（resume）したセッションでは始まらない。
 
 ## 仕組み
@@ -83,6 +83,9 @@ Claude Code の更新の知らせ（再起動で反映される）や、放置�
 | | |
 | --- | --- |
 | `SKILL.md` | 手順と判断の基準 |
+| `watch.md` | コンテキストの見張り |
+| `idle-clear.md` | 放置のあとの `/clear` |
+| `restart-self.md` | 呼び出し元のセッション自身の再起動 |
 | `after-restart.md` | 再起動した先のセッションに渡す進め方 |
 | `config.example.json` | 環境ごとの設定（`config.local.json`）の形。`config.local.json` は git 管理外 |
 | `scripts/` | 後戻りできない連鎖と、コンテキストの見張り（読むだけ） |
