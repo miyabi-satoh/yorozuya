@@ -237,7 +237,8 @@ if (prev?.text === null) {
   const { kept, omitted } = fitPrevious(prev.text);
   prevKept = kept.length;
   const note = omitted ? `（一部を省いた。全文は ${prev.path}）` : '';
-  prevSection = `\n\n---\n\n# 前の資料（最初の発言で読んでいた ${prev.path}）${note}\n\n${kept}\n`;
+  // 見出しで最新の位置を示す。新セッションがファイルの末尾（古い世代の最後）を最新と読み、済んだ頼みを出し直したため（2026-10-03）。
+  prevSection = `\n\n---\n\n# 前の資料（ここから下は古い世代。最新のやり取りは、この見出しの直前まで。最初の発言で読んでいた ${prev.path}）${note}\n\n${kept}\n`;
 }
 
 const totalChars = filtered.reduce((n, e) => n + e.text.length, 0);
@@ -245,7 +246,7 @@ const header =
   `<!-- 自動抽出: ${jsonlPath} / セッション ${sessionId} / 元${entries.length}件→${filtered.length}件・約${totalChars}文字。` +
   'ツール実行結果・thinking・system-reminder・skill の本文は含めない。定型文の機械的な間引きあり（要約はしていない）。' +
   '発言の区切りは「===== 話者 =====」の行。末尾にある再起動の依頼と返信は、済んだやり取り。' +
-  '最初の発言で読んだ前の資料があれば、末尾につなぐ -->\n\n';
+  '最初の発言で読んだ前の資料（古い世代）があれば、「# 前の資料」の見出しの下につなぐ。最新のやり取りは、その見出しの直前まで -->\n\n';
 // 区切りを Markdown の見出しにしないのは、発言の中の見出しと見分けるため。
 const body = filtered.map((e) => `===== ${LABELS[e.role] ?? e.role} =====\n\n${e.text}`).join('\n\n');
 const output = header + body + '\n' + prevSection;
