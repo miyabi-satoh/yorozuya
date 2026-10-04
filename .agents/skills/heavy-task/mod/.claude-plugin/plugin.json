@@ -1,0 +1,6 @@
+{
+  "name": "heavy-wait",
+  "version": "0.1.0",
+  "description": "guard-heavy-commands の hook が CPU の厳しさで止めた重い処理を、空くまで測り続け、空いたらセッションに知らせる",
+  "types": "./types/index.d.ts"
+}
