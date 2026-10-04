@@ -86,7 +86,8 @@ Claude Code の更新の知らせ（再起動で反映される）や、放置�
    }
    ```
 
-3. ターミナルで [Herdr](https://herdr.dev) を起動し、使う側のプロジェクトのディレクトリで `claude` を起動する
+3. 見張りを Monitor でなく mod（Claude Code の function hooks。早期アクセスの API で、版ごとに変わりうる。2.1.289 で確かめた）で走らせるなら、`mod/` をプラグインのフォルダとして読み込ませる（`claude --plugin-dir <このディレクトリ>/mod`、または `~/.claude/settings.json` の `env` の `CLAUDE_CODE_PLUGIN_DIRS`）。hook の指示で、セッションが `mcp__context-watch__start` を呼んで始める。Monitor と違って30分で切れないので、張り直さずに済む
+4. ターミナルで [Herdr](https://herdr.dev) を起動し、使う側のプロジェクトのディレクトリで `claude` を起動する
 
 あとは Claude に頼む。**スクリプトを直接叩く必要はない。**
 
@@ -130,6 +131,7 @@ Claude Code の更新の知らせ（再起動で反映される）や、放置�
 - 更新の知らせが、入力欄の上枠のすぐ上の行に出る（見張りの `--update-pattern`）
 - 放置から戻ったときのヒント（`new task? /clear to save …`）が同じ行に出る（見張りの `--idle-pattern`）
 - 見張りの出力を受ける Monitor が、一定時間で切れる（張り直させる）
+- mod の `$.clock.every` から `$.process.spawn` で立ち上げた子プロセスが、モジュールを読み直すまで動き続ける。ツール呼び出しの中で立ち上げた子は、その呼び出しが終わると止まる（mod の見張り。2.1.289 で実測）
 
 **Herdr**
 
