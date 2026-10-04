@@ -3,6 +3,9 @@
 // hook から Monitor は呼べないので、始めるのはセッションが最初に返事をするとき。
 // 知らせのたびに確認するか（confirm）は、ここで文に織り込む。セッションに設定ファイルを読みに行かせない。
 
+import { existsSync, readdirSync, realpathSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { delimiter, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { CONFIG, loadConfig } from './lib/config.mjs';
@@ -12,6 +15,26 @@ const WATCH = fileURLToPath(new URL('./watch-context.mjs', import.meta.url));
 const GUIDE = fileURLToPath(new URL('../watch.md', import.meta.url));
 
 const say = (...lines) => process.stdout.write(`${lines.join('\n')}\n`);
+
+// mod（context-watch）が読み込まれていれば、各セッションが自分を見張るので、外の見張りは始めさせない。
+// CLAUDE_CODE_PLUGIN_DIRS の各フォルダは、それ自身か中のフォルダがプラグインになる。
+const real = (path) => {
+  try {
+    return realpathSync(path);
+  } catch {
+    return '';
+  }
+};
+const MOD = real(fileURLToPath(new URL('../mod', import.meta.url)));
+const pluginDirs = (process.env.CLAUDE_CODE_PLUGIN_DIRS ?? '')
+  .split(delimiter)
+  .filter(Boolean)
+  .map((dir) => dir.replace(/^~(?=$|[\\/])/, homedir()));
+const hasMod = pluginDirs.some(
+  (dir) => real(dir) === MOD || (existsSync(dir) && readdirSync(dir).some((name) => real(join(dir, name)) === MOD)),
+);
+if (MOD && hasMod) process.exit(0);
+
 const { config, error } = loadConfig();
 
 // 見分けやすい設定の誤り（pattern の構文、confirm の型）は、始めさせずにここで伝える。ほかの誤りは試運転で止まる。

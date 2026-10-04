@@ -1,85 +1,107 @@
 import type { EngineInterface, Register } from 'claude-code'
 import { atom, read, update } from 'claude-code'
 
-// 見張りを始めたかはセッションの状態に持つ。読み込み直し（mod の保存・更新）で子プロセスが止まっても、session.start で立て直せる。
-const isWanted = atom({ plugin: 'context-watch', key: 'isWanted' } as const, false)
+import type { ContextWatchTold } from '../types'
 
-// 子プロセスはモジュールの命と同じだけ生きる。読み込み直すとモジュールの変数は初めからになり、子は止まる。
-let isRunning = false
+// 各セッションが自分を見張り、ターンの終わりに閾値を超えていれば、自分で再起動するよう自分に知らせる。
+// ターンの終わりは区切りなので、ほかのセッションが区切りを尋ねて返信を待つ仲介が要らない。
+// 知らせたかはセッションの状態に持つ。読み込み直し（mod の保存・更新）でも、同じ知らせを二度出さない。
+const told = atom({ plugin: 'context-watch', key: 'told' } as const, { over: false, update: null, idle: false } as ContextWatchTold)
+
+const DEFAULT_THRESHOLD = 50
+const GOAL_PATTERN = '/goal active'
+// 放置の目安は Claude Code の「放置から戻ったときのヒント」に合わせる（10万トークン以上で、最後の応答から75分。2.1.278 のコードで確認）。
+export const IDLE_AFTER_MS = 75 * 60 * 1000
+export const IDLE_MIN_TOKENS = 100_000
+const IDLE_CHECK_EVERY_MS = 60 * 1000
+const IDLE_RETRY_AFTER_MS = 10 * 60 * 1000
+
+// 最後に応答した時刻と、放置の /clear を見送った時刻。読み込み直すと初めからになり、待ちが延びるだけで済む。
+let lastAnswerAt = 0
+let idleSkippedAt = 0
 
 async function skillDir($: EngineInterface) {
   const { realPath } = await $.fs.stat($.plugin.root, { resolve: true })
   return `${realPath ?? $.plugin.root}/..`
 }
 
-async function tell($: EngineInterface, text: string) {
-  await $.prompt.submit({ text: `[コンテキストの見張り] ${text}` })
-}
-
-// 子の出力は行の途中で切れて届くことがある。前の切れ端につないで行に分け、最後の切れ端は次へ回す。
-export function splitLines(rest: string, text: string) {
-  const lines = (rest + text).split('\n')
-  return { lines: lines.slice(0, -1).filter(line => line.trim() !== ''), rest: lines.at(-1) ?? '' }
-}
-
-// 見張りのスクリプトを走らせ、出した行を1行ずつセッションに渡す。子が終われば、そのこともセッションに知らせる。
-async function watch($: EngineInterface) {
-  if (isRunning) return
-  isRunning = true
-  const dir = await skillDir($)
-  const guide = `${dir}/watch.md`
-  const stream = $.process.spawn({ argv: ['node', `${dir}/scripts/watch-context.mjs`] })
-  const pieces = stream[Symbol.asyncIterator]()
-  let rest = ''
-  let errors = ''
-  let ended
+// 閾値は config.local.json の watch.threshold。無い・読めなければ既定値。
+export function thresholdOf(text: string | undefined) {
   try {
-    for (;;) {
-      const piece = await pieces.next()
-      if (piece.done) {
-        ended = piece.value
-        break
-      }
-      const { stream: pipe, text } = piece.value
-      if (pipe === 'stderr') {
-        errors += text
-        continue
-      }
-      const split = splitLines(rest, text)
-      rest = split.rest
-      for (const line of split.lines) await tell($, `${line}\n${guide} の「知らせが来たら」に従って扱う。`)
-    }
-  } finally {
-    isRunning = false
+    const value = Number(JSON.parse(text ?? '{}')?.watch?.threshold)
+    return Number.isFinite(value) && value > 0 ? value : DEFAULT_THRESHOLD
+  } catch {
+    return DEFAULT_THRESHOLD
   }
-  // シグナルで止められたのは、mod の読み直しで外から止められたとき。始めたい状態を残し、session.start のタイマーに立ち上げ直させる。
-  if (ended.signal !== null) return
-  // スクリプトが自分で終わったのは、設定の誤りなど。立ち上げ直しても同じなので、止めて知らせる。
-  await update($, isWanted, () => false)
-  await tell($, `見張りのスクリプトが終わった（終了コード ${ended.code}）。${errors.trim()}\n${guide} の「始める」からやり直すかを決める。`)
+}
+
+// `claude --version` の出力（`2.1.290 (Claude Code)`）から版を取る。
+export const versionOf = (stdout: string) => stdout.trim().split(/\s+/)[0] || undefined
+
+// `/goal` が動いている間は知らせない（区切りの確かめで、目標追従を途中で止めることになるため）。
+async function isGoalActive($: EngineInterface, pane: string) {
+  const { exitCode, stdout } = await $.process.run(['herdr', 'pane', 'read', pane, '--source', 'visible'])
+  return exitCode === 0 && stdout.includes(GOAL_PATTERN)
+}
+
+async function check($: EngineInterface) {
+  const pane = await $.env.get('HERDR_PANE_ID')
+  if ((await $.env.get('HERDR_ENV')) !== '1' || pane === undefined) return
+  const dir = await skillDir($)
+  const guide = `${dir}/restart-self.md に従って、このセッション自身を再起動する。`
+  const current = await read($, told)
+
+  if (!current.over) {
+    const config = await $.fs.read(`${dir}/config.local.json`).catch(() => undefined)
+    const threshold = thresholdOf(typeof config === 'string' ? config : undefined)
+    const { percent } = (await $.session.usage()).context
+    if (percent !== undefined && percent >= threshold && !(await isGoalActive($, pane))) {
+      await update($, told, t => ({ ...t, over: true }))
+      await $.prompt.submit({ text: `[コンテキストの見張り] OVER ${percent}%（閾値 ${threshold}%）。${guide}` })
+      return
+    }
+  }
+
+  const { exitCode, stdout } = await $.process.run(['claude', '--version'])
+  const installed = exitCode === 0 ? versionOf(stdout) : undefined
+  const { version: running } = await $.session.version()
+  if (installed !== undefined && installed !== running && current.update !== installed && !(await isGoalActive($, pane))) {
+    await update($, told, t => ({ ...t, update: installed }))
+    await $.prompt.submit({ text: `[コンテキストの見張り] UPDATE ${running} → ${installed}。Claude Code の更新を反映するため、${guide}` })
+  }
+}
+
+// 放置されて大きくなったら、モデルのターンを使わずに自分のペインで /clear して続ける（idle-clear-self.mjs）。
+async function checkIdle($: EngineInterface) {
+  const pane = await $.env.get('HERDR_PANE_ID')
+  if ((await $.env.get('HERDR_ENV')) !== '1' || pane === undefined) return
+  const now = await $.clock.now()
+  if (now - lastAnswerAt < IDLE_AFTER_MS || now - idleSkippedAt < IDLE_RETRY_AFTER_MS) return
+  if ((await read($, told)).idle) return
+  const { tokens } = (await $.session.usage()).context
+  if (tokens === undefined || tokens < IDLE_MIN_TOKENS || (await isGoalActive($, pane))) return
+  const { exitCode } = await $.process.run(['node', `${await skillDir($)}/scripts/idle-clear-self.mjs`])
+  if (exitCode === 0) await update($, told, t => ({ ...t, idle: true }))
+  else idleSkippedAt = now
 }
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
-    await $.tool.register({
-      name: 'start',
-      description:
-        'restart-sessions のコンテキストの見張りを、このセッションの間ずっと走らせる。Monitor と違って30分で切れないので、張り直さない。知らせ（OVER・UPDATE・IDLE・WARN）は、このプラグインからのメッセージとして届く。すでに走っていれば何もしない。',
-    })
-    // 子プロセスは session.start の $ から立ち上げる。ツール呼び出しの中で立ち上げると、その呼び出しが終わるときに止められる。
-    // ツールは始めたいことを状態に書くだけにし、このタイマーが拾って立ち上げる。
-    $.clock.every(5000, () => {
-      void read($, isWanted).then(wanted => {
-        if (wanted) void watch($)
-      })
+    lastAnswerAt = await $.clock.now()
+    $.clock.every(IDLE_CHECK_EVERY_MS, () => {
+      void checkIdle($)
     })
     return started
   })
 
-  on('tool.call', { tool: 'mcp__context-watch__start' }, async $ => {
-    if (isRunning) return { result: '見張りはもう走っている。' }
-    await update($, isWanted, () => true)
-    return { result: '見張りを始めた（数秒のうちに立ち上がる）。知らせは、このプラグインからのメッセージとして届く。' }
+  on('turn.complete', async ($, e, next) => {
+    const result = await next(e)
+    // サブエージェントのターンと、ユーザーが止めたターンでは見ない。
+    if (e.agentId === undefined && !e.isAborted) {
+      lastAnswerAt = await $.clock.now()
+      await check($)
+    }
+    return result
   })
 }
