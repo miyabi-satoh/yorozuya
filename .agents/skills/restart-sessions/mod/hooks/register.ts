@@ -29,10 +29,18 @@ async function watch($: EngineInterface) {
   const dir = await skillDir($)
   const guide = `${dir}/watch.md`
   const stream = $.process.spawn({ argv: ['node', `${dir}/scripts/watch-context.mjs`] })
+  const pieces = stream[Symbol.asyncIterator]()
   let rest = ''
   let errors = ''
+  let ended
   try {
-    for await (const { stream: pipe, text } of stream) {
+    for (;;) {
+      const piece = await pieces.next()
+      if (piece.done) {
+        ended = piece.value
+        break
+      }
+      const { stream: pipe, text } = piece.value
       if (pipe === 'stderr') {
         errors += text
         continue
@@ -44,8 +52,11 @@ async function watch($: EngineInterface) {
   } finally {
     isRunning = false
   }
+  // シグナルで止められたのは、mod の読み直しで外から止められたとき。始めたい状態を残し、session.start のタイマーに立ち上げ直させる。
+  if (ended.signal !== null) return
+  // スクリプトが自分で終わったのは、設定の誤りなど。立ち上げ直しても同じなので、止めて知らせる。
   await update($, isWanted, () => false)
-  await tell($, `見張りのスクリプトが終わった。${errors.trim()}\n${guide} の「始める」からやり直すかを決める。`)
+  await tell($, `見張りのスクリプトが終わった（終了コード ${ended.code}）。${errors.trim()}\n${guide} の「始める」からやり直すかを決める。`)
 }
 
 export const register: Register = on => {
