@@ -31,6 +31,7 @@
    ```
 
 3. mod を使うなら、`mod/` をプラグインのフォルダとして読み込ませる（`claude --plugin-dir <このディレクトリ>/mod`、または `~/.claude/settings.json` の `env` の `CLAUDE_CODE_PLUGIN_DIRS`）
+   - 新しく足した mod は、そのとき動いているセッションには、起動し直すまで読み込まれない（読み込み済みの mod のファイルは、保存すれば読み直される）。動いているセッションは再起動する。再起動しないと、hook は重い処理を止めるのに、空いた知らせは届かない
 4. 重いコマンドを、プロジェクトの `.claude/heavy-commands.json` に書く
 
    ```json
