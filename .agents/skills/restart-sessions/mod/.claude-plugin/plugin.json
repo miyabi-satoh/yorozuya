@@ -1,0 +1,6 @@
+{
+  "name": "context-watch",
+  "version": "0.1.0",
+  "description": "restart-sessions のコンテキストの見張りを、セッションの間ずっと走らせ、知らせをセッションに渡す",
+  "types": "./types/index.d.ts"
+}

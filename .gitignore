@@ -4,3 +4,6 @@
 
 # macOS が作るフォルダの表示情報。
 .DS_Store
+
+# Claude Code が mod を読み込むたびに書き出す型定義。
+.agents/skills/*/mod/.claude-plugin/types/
