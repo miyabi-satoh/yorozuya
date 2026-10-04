@@ -123,7 +123,7 @@ if (!(interval > 0 && interval <= MAX_INTERVAL)) fail(`${source('interval')} は
 // 続けて読めなかった回数がこれに達したら WARN を出す。
 // ペインが狭くて表示が切れる、といった一時的なものは数回で戻る。
 // 戻らないならステータスラインの形が変わっている。黙っていると、閾値以上になっても永久に知らせない。
-// blocked（承認や選択式の問いの待ち）はダイアログがステータスラインを隠すので数えない。
+// blocked（承認や選択式の問いの待ち）はダイアログがステータスラインを隠すので数えない。Herdr が blocked と返さない選択式の問いも、dialogOpen で拾って数えない。
 // 答えを待つ間は依頼も打ち込めないので、読めなくても失うものは無い。
 const MISS_LIMIT = 3;
 
@@ -163,6 +163,21 @@ function readUsage(screen) {
   if (!captured) return null;
   const value = Number(captured);
   return Number.isFinite(value) ? value : null;
+}
+
+// Claude Code の選択式の問い（AskUserQuestion）は、Herdr 0.9.1 が blocked でなく idle・done と返す（notes/2026-09-25-herdr-dialog-not-blocked.md）。
+// 問いの間はダイアログがステータスラインを隠すので、blocked と同じく WARN の数に入れない（IDLE・UPDATE の判定は止めない。問いの画面では当たらない）。
+// 問いの最下部には `Enter to select · ↑/↓ to navigate · Esc to cancel` が出る（2.1.286 で実測）。その下にはタイトルの罫線の行しか無い。
+// 会話に同じ文言が映っても、入力欄とステータスラインがその下に来るので、末尾の数行には入らない。
+// 入力欄の無い画面（トランスクリプト表示など）では、会話の末尾の文言を拾いうる。ユーザーが見ている画面なので、WARN が出なくても困らない。
+// 読み違えても、そのペインの WARN が出ないか遅れるだけで済む。使用率が読めたペインには当てない。
+const DIALOG_FOOTER = /Esc to cancel/;
+const DIALOG_TAIL = 3;
+
+function dialogOpen(screen) {
+  if (screen === null) return false;
+  const tail = screen.split('\n').filter((line) => line.trim() !== '').slice(-DIALOG_TAIL);
+  return tail.some((line) => DIALOG_FOOTER.test(line));
 }
 
 // 更新の知らせは、入力欄の上枠のすぐ上の行に右寄せで出る（2.1.272 で実測）。その1行だけを返す。
@@ -238,6 +253,10 @@ function tick() {
     }
 
     const used = readUsage(screen);
+    if (used === null && dialogOpen(screen)) {
+      readings.push(`${label}=blocked`);
+      continue;
+    }
     if (used === null) {
       readings.push(`${label}=?`);
       const count = (misses.get(key) ?? 0) + 1;
