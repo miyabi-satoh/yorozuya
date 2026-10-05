@@ -21,6 +21,16 @@
 
 調査の間も、呼び出したセッションには別の頼みごとができる。セッションの動いているプロジェクトの成果物は消さず、そのセッションに頼む。スクリプトは持たない。
 
+## 空きの見張り（disk-watch の mod）
+
+`mod/` を Claude Code に読み込ませると（`CLAUDE_CODE_PLUGIN_DIRS` のフォルダに symlink を置くなど）、各セッションが起動の1分後と10分おきにホームのあるボリュームの空きを測る。ラインを切ると、そのセッションに「自分のリポジトリを片付ける」よう知らせ、セッションは `self-clean.md` に従ってユーザーに聞かずに片付ける。
+
+- 同じリポジトリ（worktree を含む）を開くセッションが複数あっても、知らせるのは1つ。空きが戻るまで知らせ直さず、戻らなければ1日おきに知らせ直す
+- ラインと、共有のキャッシュ（npm・pnpm など）を片付ける担当のリポジトリは、`config.local.json` の `diskWatch` で決める（`config.example.json`）。既定は 20GB を切ったら知らせ、30GB で戻ったとみる。担当は無し
+- Rust は、14日使っていないプロファイル・ターゲットと incremental を消し、それでも戻らなければ `debug/` を丸ごと消す。node_modules は消さない
+- ユーザーに聞かずに消すので、権限の設定で `cargo clean` などが止められると、その行は飛ばして報告する
+- 実機で確かめたのは macOS（Claude Code 2.1.289）のみ
+
 ## 使い方
 
 この skill を読み込んだ `claude` で `/cleanup` と打つ（Codex では `$cleanup`）。消す操作を含むので、「ゴミ掃除して」と頼むだけでは呼ばれない（`disable-model-invocation: true`。Codex 向けには `agents/openai.yaml` の `allow_implicit_invocation: false`）。
@@ -33,3 +43,6 @@
 | `agents/openai.yaml` | Codex で、頼まれただけでは呼ばれないようにする設定 |
 | `references/survey.md` | 調査を任されたサブエージェントの手順と測り方 |
 | `references/catalog.md` | 消してよいものの目録。場所・消し方・失うもの |
+| `self-clean.md` | disk-watch の知らせを受けたセッションが、自分のリポジトリを片付ける手順 |
+| `mod/` | disk-watch の mod。空きを測り、ラインを切ったらセッションに知らせる |
+| `config.example.json` | disk-watch のラインと共有のキャッシュの担当の例 |

@@ -41,6 +41,8 @@
 | もの | 探し方 | 消し方 | 失うもの |
 | --- | --- | --- | --- |
 | Rust `target/` | `find <dir> -type d -name target -prune`（隣に `Cargo.toml` があるもの） | `cargo clean` | 次のビルド時間 |
+| Rust `target/<profile>/incremental/` | `target/` の中 | 削除 | ワークスペースのクレートの次のビルド時間（依存は作り直さない） |
+| Rust `target/` の中の `debug` 以外のプロファイル・ターゲット | `target/` 直下のフォルダ | `cargo clean --release`、`cargo clean --profile <名前>`（`dev` は `debug/`）、`cargo clean --target <三つ組>` | そのプロファイル・ターゲットの次のビルド時間。動いているバイナリがあれば、その再起動 |
 | `node_modules/` | `find <dir> -type d -name node_modules -prune`（隣に lockfile があるもの） | 削除 | 次の `install` |
 | `.next/` `.nuxt/` `.svelte-kit/` `.turbo/` | 同上 | 削除 | 次のビルド時間 |
 

@@ -13,7 +13,7 @@ skill は、決まったコマンドを順に叩くスクリプトではなく�
 | [restart-sessions](.agents/skills/restart-sessions/README.md) | [Herdr](https://herdr.dev) 上のセッションを、会話ログを引き継いで再起動する。SessionStart の hook を置いたプロジェクトで起動すると、コンテキストの使用率を見張り、知らせの出たセッションを確認なしで再起動する | Herdr。見張りには、使用率を出すステータスラインと `config.local.json`。実機確認は macOS・Windows 11 |
 | [weekly-pace](.agents/skills/weekly-pace/README.md) | Claude と Codex の週次枠の使用ペースを概算する。restart-sessions が、Claude がハイペースのとき再起動した先に Codex へ作業を回すよう書き添えるのに使う | Claude 側は Herdr と、Weekly を出すステータスライン。Codex 側は `codex` CLI |
 | [heavy-task](.agents/skills/heavy-task/README.md) | 重い処理を始める前に CPU とメモリを測り、始めるか待つかを決める。hook が CPU の厳しいときに重いコマンドを止め、mod が空いたらセッションに知らせる | 何が重いかを書く、使う側の `.claude/heavy-commands.json`。hook と mod は Claude Code 用（mod は 2.1.289 の function hooks）。実機確認は macOS のみ |
-| [cleanup](.agents/skills/cleanup/README.md) | ディスクのゴミの候補を調べてレポートし、選んだものだけ消す | 削除まで通したのは Windows のみ |
+| [cleanup](.agents/skills/cleanup/README.md) | ディスクのゴミの候補を調べてレポートし、選んだものだけ消す。mod が空きを見張り、ラインを切ったら各セッションに自分のリポジトリを片付けさせる | 削除まで通したのは Windows のみ。mod は Claude Code 用で、実機確認は macOS のみ |
 | [machine-setup](.agents/skills/machine-setup/README.md) | 新しいマシンにアプリ・ツールを入れ、設定ファイルを取り込む | Claude Code。最後まで通したのは Ubuntu（Docker）のみ |
 
 各 skill の前提・仕組み・使い方は、リンク先の README にある。skill に手を入れるときの決まりは [AGENTS.md](AGENTS.md) にある。
