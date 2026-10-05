@@ -19,7 +19,7 @@ const skip = (message) => {
   process.exit(1);
 };
 
-const [, , mode, pane, handoff] = process.argv;
+const [, , mode, pane, handoff, shells] = process.argv;
 
 // 切り離した子: /clear を送り、画面が入れ替わるのを待ってから続きを送る。
 if (mode === '--send') {
@@ -27,7 +27,7 @@ if (mode === '--send') {
   sleep(3);
   prompt(
     pane,
-    `@${handoff} /clear で消えた前任（このペインの直前のセッション）の会話ログです。最新のやり取りは「# 前の資料」の見出しの直前までで、見出しの下は古い世代です。読んで状況を短く確かめ、ユーザーの答え待ちだったなら同じ問いを出し直し、そうでなければ指示を待ってください（作業は始めない）。`,
+    `@${handoff} /clear で消えた前任（このペインの直前のセッション）の会話ログです。最新のやり取りは「# 前の資料」の見出しの直前までで、見出しの下は古い世代です。読んで状況を短く確かめ、ユーザーの答え待ちだったなら同じ問いを出し直し、そうでなければ指示を待ってください（作業は始めない）。${shells === 'yes' ? '前任のバックグラウンドのシェルが残っています。その終わりの知らせが届いたら、会話ログにある予定に沿って続けてかまいません。' : ''}`,
   );
   process.exit(0);
 }
@@ -44,8 +44,12 @@ if (status !== 'idle') skip(`ペインが idle でない（${status || '取れ�
 const draft = inputDraft(self);
 if (draft === null) skip('入力欄を読めない');
 if (draft !== '') skip('入力欄に書きかけがある');
+// シェルは /clear の後も動き続け、終わりの知らせは /clear の後の小さい会話に届く（2.1.289 で確認）。
+// 見送ると、知らせが冷えた大きい会話のターンを起こして読み直しになるので、シェルだけなら流す。
+// Monitor・バックグラウンドのサブエージェントは /clear の後を確かめていないので見送る。
 const background = backgroundWorkHint(self);
-if (background) skip(`バックグラウンドの処理が動いている（${background}）`);
+if (background && /\d+\s+(?:monitors?|tasks?)\b/.test(background)) skip(`バックグラウンドの処理が動いている（${background}）`);
+const hasShells = background ? 'yes' : 'no';
 
 const dir = join(tmpdir(), 'restart-sessions');
 mkdirSync(dir, { recursive: true });
@@ -57,6 +61,6 @@ try {
   skip(`会話ログを抜き出せない: ${String(error.stderr ?? error).trim()}`);
 }
 
-const child = spawn(process.execPath, [fileURLToPath(import.meta.url), '--send', self, out], { detached: true, stdio: 'ignore' });
+const child = spawn(process.execPath, [fileURLToPath(import.meta.url), '--send', self, out, hasShells], { detached: true, stdio: 'ignore' });
 child.unref();
 process.stdout.write(`${out}\n`);
