@@ -1,0 +1,7 @@
+{
+  "diskWatch": {
+    "minFreeGB": 20,
+    "recoverGB": 30,
+    "sharedCachesRepo": "dotfiles"
+  }
+}
