@@ -41,15 +41,19 @@ async function skillDir($: EngineInterface) {
 }
 
 // ホームのあるボリュームの空き。macOS / Linux は df、Windows は PowerShell。測れなければ null。
+// Windows では df を使わない。uutils の df は、パスを渡しても最初のボリューム（EFI の領域など）を返すことがあるため。
 async function measureFree($: EngineInterface) {
+  if ((await $.env.get('OS')) === 'Windows_NT') {
+    const ps = await $.process
+      .run(['powershell', '-NoProfile', '-Command', '(Get-Item $env:USERPROFILE).PSDrive.Free'])
+      .catch(() => undefined)
+    const out = ps?.stdout.trim()
+    const free = Number(out)
+    return ps?.exitCode === 0 && out && Number.isFinite(free) ? free : null
+  }
   const home = (await $.env.get('HOME')) ?? (await $.session.cwd())
   const df = await $.process.run(['df', '-kP', home]).catch(() => undefined)
-  if (df?.exitCode === 0) return freeBytesOfDf(df.stdout)
-  const ps = await $.process
-    .run(['powershell', '-NoProfile', '-Command', '(Get-Item $env:USERPROFILE).PSDrive.Free'])
-    .catch(() => undefined)
-  const free = Number(ps?.stdout.trim())
-  return ps?.exitCode === 0 && Number.isFinite(free) ? free : null
+  return df?.exitCode === 0 ? freeBytesOfDf(df.stdout) : null
 }
 
 // リポジトリの元の clone のパス。worktree からも同じになるので、同じリポジトリのセッションを1つにまとめられる。
