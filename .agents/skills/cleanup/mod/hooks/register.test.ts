@@ -10,7 +10,7 @@ const dfOf = (freeGB: number) =>
   `Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/disk3s5 239362496 179000000 ${freeGB * 1024 * 1024} 86% /System/Volumes/Data\n`
 
 // df が返す空きを順に決め、git が返すリポジトリを決め、セッションに届いた知らせを集める。
-function setUp(on: any, frees: number[], opts: { repo?: string; config?: string } = {}) {
+function setUp(on: any, frees: number[], opts: { repo?: string; config?: string; windows?: boolean } = {}) {
   const sent: string[] = []
   const store: Record<string, unknown> = {}
   on('store.get', (_$: any, e: any) => ({ value: store[e.key] }))
@@ -20,9 +20,14 @@ function setUp(on: any, frees: number[], opts: { repo?: string; config?: string 
   })
   on('fs.stat', () => ({ value: { realPath: '/skills/cleanup/mod' } }))
   on('fs.read', () => (opts.config === undefined ? { error: 'ENOENT' } : { value: opts.config }))
-  on('env.get', (_$: any, e: any) => ({ value: e.name === 'HOME' ? '/Users/me' : undefined }))
+  on('env.get', (_$: any, e: any) => ({
+    value: e.name === 'HOME' ? '/Users/me' : e.name === 'OS' && opts.windows ? 'Windows_NT' : undefined,
+  }))
   on('process.run', (_$: any, e: any) => {
-    if (e.argv[0] === 'df') return { value: { exitCode: 0, stdout: dfOf(frees.shift() ?? 100), stderr: '' } }
+    // Windows の df（uutils）は、パスを渡しても最初のボリュームを返すことがある。
+    if (e.argv[0] === 'df') return { value: { exitCode: 0, stdout: opts.windows ? dfOf(0) : dfOf(frees.shift() ?? 100), stderr: '' } }
+    if (e.argv[0] === 'powershell') return { value: { exitCode: 0, stdout: `${(frees.shift() ?? 100) * GB}
+`, stderr: '' } }
     if (e.argv[0] === 'git') return { value: { exitCode: 0, stdout: `${opts.repo ?? '/Users/me/Works/app'}/.git\n`, stderr: '' } }
     return { value: { exitCode: 1, stdout: '', stderr: '' } }
   })
@@ -72,6 +77,17 @@ describe('見張り', () => {
     await clock.advance(TICK)
     await clock.advance(TICK)
     expect(sent.length).toBe(1)
+  })
+
+  test('Windows では df を使わず PowerShell で測る', async ($, on) => {
+    const sent = setUp(on, [25, 18], { windows: true })
+    const clock = mock.clock(on, { now: 0 })
+    await ($.session as any).start({ source: 'startup', cwd: '/Users/me/Works/app' })
+    await clock.advance(FIRST)
+    expect(sent).toEqual([])
+    await clock.advance(TICK)
+    expect(sent.length).toBe(1)
+    expect(sent[0]).toContain('空きが 18.0GB で')
   })
 
   test('30GB に戻れば、次にラインを切ったときにまた知らせる', async ($, on) => {
