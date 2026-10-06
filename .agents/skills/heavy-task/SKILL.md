@@ -51,7 +51,7 @@ description: 重い処理を始める前に、マシンの負荷を確かめて�
 
 - `guard-heavy-commands.cjs` に止められたときは、heavy-wait の mod（このスキルの `mod/`）が1分ごとに空きを測り、空いたとき（15分たっても厳しいときも）にプラグインのメッセージで知らせる。自分で測り直して待たず、知らせを待つ間に軽い作業を進める。
 - mod が無いときや、hook を通らずに自分で測って待つときは、foreground の `sleep` が使えないので、`Monitor` などで待つ。
-- Claude Code は、OS からメモリ逼迫の通知を受けると、バックグラウンドの Bash を "stopped because the system is running low on memory" で打ち切る（ユーザーの最後の操作から30分以上たち、メインの処理が止まっているとき）。フォアグラウンドの Bash と Monitor は対象外。
+- macOS と Linux の Claude Code は、OS からメモリ逼迫の通知を受けると、バックグラウンドの Bash を "stopped because the system is running low on memory" で打ち切る（セッションが30分以上アイドルで、ターンもサブエージェントも動いていないとき）。フォアグラウンドの Bash と Monitor は対象外。Windows では打ち切られないので、下の2つは要らない。
   - 10分以内に終わる処理は、`run_in_background` を使わず、フォアグラウンドで `timeout: 600000` を付けて走らせる。時間切れでバックグラウンドに回ると打ち切りの対象になる。
   - 10分を超える処理はバックグラウンドで走らせ、打ち切られたら負荷を測り直してから流し直す。
 - 打ち切られたら、流し直す前に、その場でマシンの状態を採取する。直後の値が打ち切り直前の状態に近い。結果は scratchpad に保存し、打ち切られた時刻と要約をユーザーに報告する。
