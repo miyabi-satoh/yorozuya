@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 
-import { configOf, freeBytesOfDf } from './register'
+import { configOf, freeBytesOfDf, shouldNotify } from './register'
 
 const GB = 1024 ** 3
 const TICK = 10 * 60 * 1000
@@ -58,6 +58,25 @@ describe('freeBytesOfDf', () => {
     expect(freeBytesOfDf(dfOf(29))).toBe(29 * GB)
     expect(freeBytesOfDf('')).toBe(null)
   })
+})
+
+describe('shouldNotify', () => {
+  const HOUR = 60 * 60 * 1000
+  const MIN = 60 * 1000
+  const cases: [string, Parameters<typeof shouldNotify>[0], number, number, boolean][] = [
+    ['まだ知らせていない', undefined, 0, 15, true],
+    ['1時間たって 1.9GB 減', { at: 0, free: 15 * GB }, HOUR, 13.1, false],
+    ['1時間たって 2GB 減', { at: 0, free: 15 * GB }, HOUR, 13, true],
+    ['59分で 3GB 減', { at: 0, free: 15 * GB }, 59 * MIN, 12, false],
+    ['1日たって減りなし', { at: 0, free: 15 * GB }, 24 * HOUR, 15, true],
+    ['前の版の時刻だけの記録で、1時間たって大きく減った', 0, HOUR, 5, false],
+    ['前の版の時刻だけの記録で、1日たった', 0, 24 * HOUR, 15, true],
+  ]
+  for (const [name, last, now, freeGB, expected] of cases) {
+    test(name, () => {
+      expect(shouldNotify(last, now, freeGB * GB)).toBe(expected)
+    })
+  }
 })
 
 describe('見張り', () => {
