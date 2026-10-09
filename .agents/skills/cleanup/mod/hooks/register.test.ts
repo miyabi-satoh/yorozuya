@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 
-import { configOf, freeBytesOfDf, RENOTIFY_AFTER_MS } from './register'
+import { configOf, freeBytesOfDf, shouldNotify } from './register'
 
 const GB = 1024 ** 3
 const TICK = 10 * 60 * 1000
@@ -19,7 +19,7 @@ function setUp(on: any, frees: number[], opts: { repo?: string; config?: string;
     return { value: undefined }
   })
   on('fs.stat', () => ({ value: { realPath: '/skills/cleanup/mod' } }))
-  on('fs.read', () => (opts.config === undefined ? { error: 'ENOENT' } : { value: opts.config }))
+  on('fs.read', () => (opts.config === undefined ? { deny: 'ENOENT' } : { value: opts.config }))
   on('env.get', (_$: any, e: any) => ({
     value: e.name === 'HOME' ? '/Users/me' : e.name === 'OS' && opts.windows ? 'Windows_NT' : undefined,
   }))
@@ -58,6 +58,25 @@ describe('freeBytesOfDf', () => {
     expect(freeBytesOfDf(dfOf(29))).toBe(29 * GB)
     expect(freeBytesOfDf('')).toBe(null)
   })
+})
+
+describe('shouldNotify', () => {
+  const HOUR = 60 * 60 * 1000
+  const MIN = 60 * 1000
+  const cases: [string, Parameters<typeof shouldNotify>[0], number, number, boolean][] = [
+    ['まだ知らせていない', undefined, 0, 15, true],
+    ['1時間たって 1.9GB 減', { at: 0, free: 15 * GB }, HOUR, 13.1, false],
+    ['1時間たって 2GB 減', { at: 0, free: 15 * GB }, HOUR, 13, true],
+    ['59分で 3GB 減', { at: 0, free: 15 * GB }, 59 * MIN, 12, false],
+    ['1日たって減りなし', { at: 0, free: 15 * GB }, 24 * HOUR, 15, true],
+    ['前の版の時刻だけの記録で、1時間たって大きく減った', 0, HOUR, 5, false],
+    ['前の版の時刻だけの記録で、1日たった', 0, 24 * HOUR, 15, true],
+  ]
+  for (const [name, last, now, freeGB, expected] of cases) {
+    test(name, () => {
+      expect(shouldNotify(last, now, freeGB * GB)).toBe(expected)
+    })
+  }
 })
 
 describe('見張り', () => {
@@ -104,8 +123,26 @@ describe('見張り', () => {
     const clock = mock.clock(on, { now: 0 })
     await ($.session as any).start({ source: 'startup', cwd: '/Users/me/Works/app' })
     await clock.advance(FIRST)
-    for (let i = 0; i < RENOTIFY_AFTER_MS / TICK + 1; i++) await clock.advance(TICK)
+    expect(sent.length).toBe(1)
+    // 最初の知らせは起動の1分後。1440分の見張りではまだ1439分なので知らせず、1450分で知らせ直す。
+    for (let i = 0; i < 144; i++) await clock.advance(TICK)
+    expect(sent.length).toBe(1)
+    await clock.advance(TICK)
     expect(sent.length).toBe(2)
+  })
+
+  test('前に知らせたときより2GB減っていれば、1時間たったところで知らせ直す', async ($, on) => {
+    const sent = setUp(on, [15, ...Array(5).fill(14), 13, 13])
+    const clock = mock.clock(on, { now: 0 })
+    await ($.session as any).start({ source: 'startup', cwd: '/Users/me/Works/app' })
+    await clock.advance(FIRST)
+    expect(sent.length).toBe(1)
+    // 50分までは1GB減っただけ。60分で2GB減ったが、知らせてから59分なのでまだ知らせない。
+    for (let i = 0; i < 6; i++) await clock.advance(TICK)
+    expect(sent.length).toBe(1)
+    await clock.advance(TICK)
+    expect(sent.length).toBe(2)
+    expect(sent[1]).toContain('空きが 13.0GB で')
   })
 
   test('共有のキャッシュの担当のリポジトリには、それも片付けるよう書き添える', async ($, on) => {

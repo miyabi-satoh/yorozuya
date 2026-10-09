@@ -3,7 +3,8 @@ import type { EngineInterface, Register } from 'claude-code'
 // 各セッションがディスクの空きを測り、ラインを切ったら、自分のリポジトリを片付けるよう自分に知らせる。
 // 片付けるのは持ち主のセッション自身なので、使用中かどうかを外から推し量らずに済む。
 // 知らせたリポジトリは、セッションをまたぐ $.store に持つ。同じリポジトリを開く複数のセッションのうち1つだけに知らせ、
-// 空きが戻るまで（戻らなければ1日おきに）知らせ直さない。
+// 空きが戻るまでは、前に知らせたときより空きが 2GB 以上減って1時間たったときか、1日たったときだけ知らせ直す。
+// 時間だけで頻繁に知らせ直すと、空きを食っているのがリポジトリの外のとき、片付けのたびに Rust の dev の成果物が消えて作り直しになる。
 
 const GB = 1024 ** 3
 const DEFAULT_MIN_FREE_GB = 20
@@ -11,6 +12,10 @@ const DEFAULT_RECOVER_GB = 30
 const FIRST_CHECK_AFTER_MS = 60 * 1000
 const CHECK_EVERY_MS = 10 * 60 * 1000
 export const RENOTIFY_AFTER_MS = 24 * 60 * 60 * 1000
+// 片付けた後も空きが減り続けるときは、新しく溜まった分を早めに片付けさせる。間を1時間置くのは、ビルドの途中の一時的な減りで続けて知らせないため。
+export const RENOTIFY_ON_DROP_AFTER_MS = 60 * 60 * 1000
+// ビルド1回分の揺れでは知らせ直さない大きさ。
+export const RENOTIFY_ON_DROP_GB = 2
 const NOTIFIED_KEY = 'notified'
 
 export type DiskWatchConfig = { minFreeGB: number; recoverGB: number; sharedCachesRepo: string | undefined }
@@ -63,13 +68,23 @@ async function repoRoot($: EngineInterface) {
   return stdout.trim().replace(/[\\/]\.git[\\/]?$/, '') || null
 }
 
+// 前の版は知らせた時刻だけを数で持っていた。その形は空きが分からないので、時間だけで判断する。
+type Notified = number | { at: number; free: number }
+
+export function shouldNotify(last: Notified | undefined, now: number, free: number) {
+  if (last === undefined) return true
+  const { at, free: lastFree } = typeof last === 'number' ? { at: last, free: undefined } : last
+  if (now - at >= RENOTIFY_AFTER_MS) return true
+  return lastFree !== undefined && now - at >= RENOTIFY_ON_DROP_AFTER_MS && lastFree - free >= RENOTIFY_ON_DROP_GB * GB
+}
+
 export async function check($: EngineInterface) {
   const free = await measureFree($)
   if (free === null) return
   const dir = await skillDir($)
   const text = await $.fs.read(`${dir}/config.local.json`).catch(() => undefined)
   const config = configOf(typeof text === 'string' ? text : undefined)
-  const notified = ((await $.store.get(NOTIFIED_KEY)) ?? {}) as Record<string, number>
+  const notified = ((await $.store.get(NOTIFIED_KEY)) ?? {}) as Record<string, Notified>
 
   if (free >= config.recoverGB * GB) {
     if (Object.keys(notified).length > 0) await $.store.set(NOTIFIED_KEY, {})
@@ -80,9 +95,8 @@ export async function check($: EngineInterface) {
   const root = await repoRoot($)
   if (root === null) return
   const now = await $.clock.now()
-  const last = notified[root]
-  if (last !== undefined && now - last < RENOTIFY_AFTER_MS) return
-  await $.store.set(NOTIFIED_KEY, { ...notified, [root]: now })
+  if (!shouldNotify(notified[root], now, free)) return
+  await $.store.set(NOTIFIED_KEY, { ...notified, [root]: { at: now, free } })
 
   const name = root.split(/[\\/]/).pop()
   const shared = name === config.sharedCachesRepo ? ' このリポジトリは共有のキャッシュの担当なので、それも片付ける。' : ''
