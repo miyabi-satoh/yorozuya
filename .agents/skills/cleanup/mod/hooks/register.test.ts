@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 
-import { configOf, freeBytesOfDf, RENOTIFY_AFTER_MS } from './register'
+import { configOf, freeBytesOfDf } from './register'
 
 const GB = 1024 ** 3
 const TICK = 10 * 60 * 1000
@@ -99,13 +99,31 @@ describe('見張り', () => {
     expect(sent.length).toBe(2)
   })
 
-  test('戻らないままでも、1時間たてば知らせ直す', async ($, on) => {
+  test('戻らないままでも、1日たてば知らせ直す', async ($, on) => {
     const sent = setUp(on, Array(200).fill(15))
     const clock = mock.clock(on, { now: 0 })
     await ($.session as any).start({ source: 'startup', cwd: '/Users/me/Works/app' })
     await clock.advance(FIRST)
-    for (let i = 0; i < RENOTIFY_AFTER_MS / TICK + 1; i++) await clock.advance(TICK)
+    expect(sent.length).toBe(1)
+    // 最初の知らせは起動の1分後。1440分の見張りではまだ1439分なので知らせず、1450分で知らせ直す。
+    for (let i = 0; i < 144; i++) await clock.advance(TICK)
+    expect(sent.length).toBe(1)
+    await clock.advance(TICK)
     expect(sent.length).toBe(2)
+  })
+
+  test('前に知らせたときより2GB減っていれば、1時間たったところで知らせ直す', async ($, on) => {
+    const sent = setUp(on, [15, ...Array(5).fill(14), 13, 13])
+    const clock = mock.clock(on, { now: 0 })
+    await ($.session as any).start({ source: 'startup', cwd: '/Users/me/Works/app' })
+    await clock.advance(FIRST)
+    expect(sent.length).toBe(1)
+    // 50分までは1GB減っただけ。60分で2GB減ったが、知らせてから59分なのでまだ知らせない。
+    for (let i = 0; i < 6; i++) await clock.advance(TICK)
+    expect(sent.length).toBe(1)
+    await clock.advance(TICK)
+    expect(sent.length).toBe(2)
+    expect(sent[1]).toContain('空きが 13.0GB で')
   })
 
   test('共有のキャッシュの担当のリポジトリには、それも片付けるよう書き添える', async ($, on) => {
