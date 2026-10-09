@@ -19,7 +19,7 @@ function setUp(on: any, frees: number[], opts: { repo?: string; config?: string;
     return { value: undefined }
   })
   on('fs.stat', () => ({ value: { realPath: '/skills/cleanup/mod' } }))
-  on('fs.read', () => (opts.config === undefined ? { error: 'ENOENT' } : { value: opts.config }))
+  on('fs.read', () => (opts.config === undefined ? { deny: 'ENOENT' } : { value: opts.config }))
   on('env.get', (_$: any, e: any) => ({
     value: e.name === 'HOME' ? '/Users/me' : e.name === 'OS' && opts.windows ? 'Windows_NT' : undefined,
   }))
@@ -99,7 +99,7 @@ describe('見張り', () => {
     expect(sent.length).toBe(2)
   })
 
-  test('戻らないままでも、1日たてば知らせ直す', async ($, on) => {
+  test('戻らないままでも、1時間たてば知らせ直す', async ($, on) => {
     const sent = setUp(on, Array(200).fill(15))
     const clock = mock.clock(on, { now: 0 })
     await ($.session as any).start({ source: 'startup', cwd: '/Users/me/Works/app' })

@@ -3,14 +3,15 @@ import type { EngineInterface, Register } from 'claude-code'
 // 各セッションがディスクの空きを測り、ラインを切ったら、自分のリポジトリを片付けるよう自分に知らせる。
 // 片付けるのは持ち主のセッション自身なので、使用中かどうかを外から推し量らずに済む。
 // 知らせたリポジトリは、セッションをまたぐ $.store に持つ。同じリポジトリを開く複数のセッションのうち1つだけに知らせ、
-// 空きが戻るまで（戻らなければ1日おきに）知らせ直さない。
+// 空きが戻るまで（戻らなければ1時間おきに）知らせ直さない。
 
 const GB = 1024 ** 3
 const DEFAULT_MIN_FREE_GB = 20
 const DEFAULT_RECOVER_GB = 30
 const FIRST_CHECK_AFTER_MS = 60 * 1000
 const CHECK_EVERY_MS = 10 * 60 * 1000
-export const RENOTIFY_AFTER_MS = 24 * 60 * 60 * 1000
+// 片付けても戻らないときに、ほかのセッションの片付けや新しく増えた分を早めに拾い直すため。10分おきの見張りより長くし、片付けを繰り返させすぎない。
+export const RENOTIFY_AFTER_MS = 60 * 60 * 1000
 const NOTIFIED_KEY = 'notified'
 
 export type DiskWatchConfig = { minFreeGB: number; recoverGB: number; sharedCachesRepo: string | undefined }
