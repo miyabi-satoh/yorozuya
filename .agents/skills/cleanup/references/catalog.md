@@ -33,6 +33,8 @@
 | Electron | macOS `~/Library/Caches/electron`、Linux `~/.cache/electron` | 削除 | 再ダウンロード |
 | Xcode DerivedData | `~/Library/Developer/Xcode/DerivedData` | 削除 | 次のビルド時間 |
 | 使えないシミュレータ | `xcrun simctl list` | `xcrun simctl delete unavailable` | 無し |
+| シミュレータの中身（起動していないもの） | `xcrun simctl list devices`。大きさは `~/Library/Developer/CoreSimulator/Devices/<UDID>` | `xcrun simctl erase <UDID>` | そのシミュレータに入れたアプリ・データ・設定。シミュレータ自体は残る |
+| iOS DeviceSupport の版ごとのフォルダ | `~/Library/Developer/Xcode/iOS DeviceSupport` の中のフォルダ（親のフォルダは消さない） | 削除 | その版の実機を次につないだときの取り直し（数GB・数分）。取り直すまでは、その版の実機のクラッシュログをシンボル化できない |
 
 ## ビルド成果物
 
