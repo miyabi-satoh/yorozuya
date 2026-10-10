@@ -5,15 +5,16 @@
 // - メモリの逼迫は止めず、値を Claude に知らせるだけにする。
 //
 // 何が重いかはプロジェクトによるので、プロジェクトの `.claude/heavy-commands.json` に書く。
-// このファイルが無いプロジェクトでは何もしない。
+// このファイルが無いプロジェクトでは、既定だけを見る (置き忘れたプロジェクトで何も止まらないのを避ける)。
 //
 //   {
-//     "defaults": true,                        // 下の DEFAULT_HEAVY と Workflow・pre-push のある git push も重いとみなす
+//     "defaults": true,                        // 下の DEFAULT_HEAVY と Workflow・pre-push のある git push も重いとみなす。書かなければ true
 //     "heavy": ["just ci", "node e2e/run.mjs"], // コマンドの頭の語の並び。語の並びで書けないものは { "regex": "..." }
 //     "light": ["cargo check"]                  // heavy や既定から外すもの
 //   }
 //
 // 引用の中身と heredoc・here-string の本文は見ず、コマンドの位置 (行頭、`;` `&` `|` `(` の後) に来たものだけを見る。
+// 例外は `herdr pane run <ペイン> <コマンド>` で、ペインへ送るコマンドも同じように見る (ビルドやテストもペインで流すことがあるため)。
 // 測れないときや入力が読めないときは、何もせずに通す (hook の不具合で作業を止めないため)。
 // 3つの OS で同じに動くよう、負荷は node の os モジュールで測る (macOS のメモリだけ sysctl)。
 
@@ -39,7 +40,8 @@ const DEFAULT_HEAVY = [
 ];
 
 // heredoc・here-string の本文と引用の中身は、コミットメッセージや検索語なので見ない。
-function stripLiterals(command) {
+// quoted を渡すと、空にした引用の中身を、出てきた順に足す。
+function stripLiterals(command, quoted = []) {
   const lines = command.replace(/@(['"])\r?\n[\s\S]*?\r?\n\1@/g, "''").split('\n');
   const kept = [];
   for (let i = 0; i < lines.length; i++) {
@@ -58,6 +60,8 @@ function stripLiterals(command) {
     if (c === "'" || c === '"') {
       let j = i + 1;
       while (j < text.length && text[j] !== c) j += c === '"' && text[j] === '\\' ? 2 : 1;
+      const content = text.slice(i + 1, j);
+      quoted.push(c === '"' ? content.replace(/\\(["\\$`])/g, '$1') : content);
       out += c + c;
       i = j;
     } else {
@@ -70,27 +74,49 @@ function stripLiterals(command) {
 // コマンドの頭に来ても、それ自体はコマンドの名前ではない語。
 const WRAPPERS = new Set(['time', 'env', 'nohup', 'exec', 'command', 'then', 'do', 'else', '{', '!']);
 
-// コマンドの位置ごとに、環境変数の前置や time・timeout などを除いた語の並びにする。
-function commandSegments(command) {
-  return stripLiterals(command)
-    .split(/[;&|()\n]/)
-    .map((segment) => {
-      const words = segment.trim().split(/\s+/).filter(Boolean);
-      for (;;) {
-        if (/^[A-Za-z_]\w*=/.test(words[0] ?? '') || WRAPPERS.has(words[0])) {
-          words.shift();
-        } else if (words[0] === 'timeout' || words[0] === 'nice') {
-          // timeout [-k 5] [-s KILL] 600 …、nice -n 10 …
-          words.shift();
-          while (words[0]?.startsWith('-')) words.splice(0, ['-k', '-s', '-n'].includes(words[0]) ? 2 : 1);
-          if (words[0] !== undefined && /^\d/.test(words[0])) words.shift();
-        } else {
-          break;
-        }
-      }
-      return words;
-    })
-    .filter((words) => words.length > 0);
+// 環境変数の前置や time・timeout などを除いた語の並びにする。
+function commandWords(segment) {
+  const words = segment.trim().split(/\s+/).filter(Boolean);
+  for (;;) {
+    if (/^[A-Za-z_]\w*=/.test(words[0] ?? '') || WRAPPERS.has(words[0])) {
+      words.shift();
+    } else if (words[0] === 'timeout' || words[0] === 'nice') {
+      // timeout [-k 5] [-s KILL] 600 …、nice -n 10 …
+      words.shift();
+      while (words[0]?.startsWith('-')) words.splice(0, ['-k', '-s', '-n'].includes(words[0]) ? 2 : 1);
+      if (words[0] !== undefined && /^\d/.test(words[0])) words.shift();
+    } else {
+      break;
+    }
+  }
+  return words;
+}
+
+// `herdr pane run <ペイン> <コマンド>` なら、ペインへ送るコマンドを返す。引用で渡していれば、その中身に戻す。
+// quotes は、この区切りに出てくる引用の中身 (出てきた順)。
+function paneCommand(segment, quotes) {
+  const sent = segment.match(/^(.*?\bherdr\s+pane\s+run\s+\S+\s+)(\S.*)$/s);
+  if (!sent) return null;
+  let next = (sent[1].match(/''|""/g) ?? []).length;
+  return sent[2].replace(/''|""/g, () => quotes[next++] ?? '');
+}
+
+// コマンドの位置ごとの語の並びにする。
+function commandSegments(command, nested = false) {
+  const quoted = [];
+  const segments = [];
+  let seen = 0;
+  for (const segment of stripLiterals(command, quoted).split(/[;&|()\n]/)) {
+    const quotes = quoted.slice(seen, (seen += (segment.match(/''|""/g) ?? []).length));
+    const words = commandWords(segment);
+    if (words.length === 0) continue;
+    segments.push(words);
+    // ペインへ送るコマンドの中の `herdr pane run` までは追わない。
+    const sent = !nested && words[0] === 'herdr' ? paneCommand(segment, quotes) : null;
+    if (sent === null) continue;
+    for (const inner of commandSegments(sent, true)) segments.push(Object.assign(inner, { inPane: true }));
+  }
+  return segments;
 }
 
 function toMatcher(spec) {
@@ -138,24 +164,24 @@ function specList(raw, key) {
   return value.map(toMatcher);
 }
 
-// 設定を読んで、判定に使う形にする。ファイルが無ければ null。形が違えば throw する。
+// 設定を読んで、判定に使う形にする。ファイルが無ければ既定だけ。形が違えば throw する。
 function loadConfig(projectDir) {
-  let text;
+  let text = '{}';
   try {
     text = fs.readFileSync(path.join(projectDir, CONFIG_PATH), 'utf8');
   } catch {
-    return null;
+    // 無ければ既定だけを見る。
   }
   const raw = JSON.parse(text);
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('オブジェクトで書く');
-  const defaults = raw.defaults ?? false;
+  const defaults = raw.defaults ?? true;
   if (typeof defaults !== 'boolean') throw new Error('defaults は true か false で書く');
   const heavy = [...(defaults ? DEFAULT_HEAVY.map(toMatcher) : []), ...specList(raw, 'heavy')];
   return { defaults, heavy, light: specList(raw, 'light') };
 }
 
 // 重い処理なら true。prePush(dir) は、dir (空ならいまの場所) のリポジトリに pre-push のフックがあるかを返す。
-// cd の後や、-C の先が引用で読めないときは、どのリポジトリか分からないので重いとみなす。
+// cd の後や、-C の先が引用で読めないとき、ペインへ送る push は、どのリポジトリか分からないので重いとみなす。
 function isHeavy(input, config, prePush) {
   if (JSON.stringify(input.tool_input ?? {}).includes(FORCE_MARK)) return false;
   if (input.tool_name === 'Workflow') return config.defaults;
@@ -168,7 +194,7 @@ function isHeavy(input, config, prePush) {
     if (config.heavy.some((match) => match(words))) return true;
     const pushDir = config.defaults ? gitPushDir(words) : null;
     if (pushDir === null) return false;
-    if (movedDir || pushDir.includes('""') || pushDir.includes("''")) return true;
+    if (movedDir || words.inPane || pushDir.includes('""') || pushDir.includes("''")) return true;
     return prePush(pushDir);
   });
 }
@@ -270,7 +296,7 @@ async function main() {
     return;
   }
   const cwd = input.cwd || projectDir;
-  if (!config || !isHeavy(input, config, (dir) => hasPrePushHook(path.resolve(cwd, dir)))) return;
+  if (!isHeavy(input, config, (dir) => hasPrePushHook(path.resolve(cwd, dir)))) return;
 
   const idle = await cpuIdlePercent();
   const memory = memoryPressure();

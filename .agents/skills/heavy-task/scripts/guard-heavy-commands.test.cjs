@@ -67,8 +67,24 @@ test('引用・heredoc・here-string の中の語や、軽いものは見逃す'
     'ls just-ci',
     'cargo check',
     'node scripts/check.mjs',
+    'git commit -m "herdr pane run w1:p1 just ci を足す"',
+    'herdr pane run w1:p1 "just fmt"',
+    'herdr pane read w1:p1',
   ]) {
     assert.equal(heavy(bash(command)), false, command);
+  }
+});
+
+test('herdr pane run でペインへ送るコマンドも見る', () => {
+  for (const command of [
+    'herdr pane run w1:p1 "just ci"',
+    "herdr pane run w1:p1 'cd app && pnpm build'",
+    'herdr pane run w1:p1 pnpm test',
+    'herdr pane run "w1:p1" "PORT=3000 just test"',
+    'cd /tmp && herdr pane run w1:p1 "just ci"',
+    'echo "start" && herdr pane run w1:p1 "echo \\"x\\"; just ci"',
+  ]) {
+    assert.equal(heavy(bash(command)), true, command);
   }
 });
 
@@ -109,8 +125,14 @@ test('強行の印があれば通す', () => {
   assert.equal(heavy({ tool_name: 'Workflow', tool_input: { script: '// CLAUDE_FORCE_HEAVY=1' } }), false);
 });
 
-test('defaults が無ければ、書いたものだけを見る', () => {
-  const own = loadConfig(projectWith(JSON.stringify({ heavy: ['just ci'] })));
+test('ペインへ送る git push は、pre-push を見ずに重いとみなす', () => {
+  // ペインがどのリポジトリにいるかは分からない。
+  assert.equal(heavy(bash('herdr pane run w1:p1 "git push"'), false), true);
+  assert.equal(heavy(bash('git push'), false), false);
+});
+
+test('defaults が false なら、書いたものだけを見る', () => {
+  const own = loadConfig(projectWith(JSON.stringify({ defaults: false, heavy: ['just ci'] })));
   assert.equal(isHeavy(bash('just ci'), own, () => true), true);
   assert.equal(isHeavy(bash('cargo build'), own, () => true), false);
   assert.equal(isHeavy(bash('git push'), own, () => true), false);
@@ -125,8 +147,20 @@ function runHook(projectDir, command) {
   });
 }
 
-test('設定ファイルが無いプロジェクトでは何もしない', () => {
-  const result = runHook(projectWith(), 'cargo build');
+test('defaults を書かなければ、既定も見る', () => {
+  const own = loadConfig(projectWith(JSON.stringify({ heavy: ['just ci'] })));
+  assert.equal(isHeavy(bash('just ci'), own, () => true), true);
+  assert.equal(isHeavy(bash('cargo build'), own, () => true), true);
+});
+
+test('設定ファイルが無いプロジェクトでは、既定だけを見る', () => {
+  const none = loadConfig(projectWith());
+  assert.equal(isHeavy(bash('cargo build'), none, () => true), true);
+  assert.equal(isHeavy(bash('git push'), none, () => true), true);
+  assert.equal(isHeavy(bash('git push'), none, () => false), false);
+  assert.equal(isHeavy({ tool_name: 'Workflow', tool_input: {} }, none, () => true), true);
+  assert.equal(isHeavy(bash('just ci'), none, () => true), false);
+  const result = runHook(projectWith(), 'git status');
   assert.equal(result.status, 0);
   assert.equal(result.stdout, '');
 });

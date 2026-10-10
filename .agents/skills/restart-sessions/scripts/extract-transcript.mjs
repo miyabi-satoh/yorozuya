@@ -186,7 +186,7 @@ const HANDOFF_PROMPT = /前セッションの引き継ぎ資料です|自身の�
 const NESTED = /\n---\n\n# (?:前の資料|その前の|それより前の)/;
 function previousHandoff() {
   const first = filtered.find((e) => e.role === 'User');
-  // 自己再起動の依頼は、ユーザーの貼り付けとして <pasted_content> に包まれて JSONL に残る（2.1.285 で実測）。
+  // 複数行だったころの自己再起動の依頼は、ユーザーの貼り付けとして <pasted_content> に包まれて JSONL に残る（2.1.285 で実測）。
   const match = first?.text.match(/^(?:<pasted_content[^>]*>\s*)?@(\/\S+)\s+(.*)/s);
   if (!match || !HANDOFF_PROMPT.test(match[2])) return null;
   const path = match[1];
