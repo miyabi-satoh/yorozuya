@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 // PreToolUse の hook。マシンが厳しいときに、重い処理 (ビルド・テスト・push など) を始めさせない。
 // 目安は heavy-task skill（このスキルの SKILL.md）に合わせる。
-// - CPU の空きが 10% を切っていれば止める。
-// - メモリの逼迫は止めず、値を Claude に知らせるだけにする。
+// CPU の空きが 10% を切っていれば止める。
 //
 // 何が重いかはプロジェクトによるので、プロジェクトの `.claude/heavy-commands.json` に書く。
 // このファイルが無いプロジェクトでは、既定だけを見る (置き忘れたプロジェクトで何も止まらないのを避ける)。
@@ -16,7 +15,7 @@
 // 引用の中身と heredoc・here-string の本文は見ず、コマンドの位置 (行頭、`;` `&` `|` `(` の後) に来たものだけを見る。
 // 例外は `herdr pane run <ペイン> <コマンド>` で、ペインへ送るコマンドも同じように見る (ビルドやテストもペインで流すことがあるため)。
 // 測れないときや入力が読めないときは、何もせずに通す (hook の不具合で作業を止めないため)。
-// 3つの OS で同じに動くよう、負荷は node の os モジュールで測る (macOS のメモリだけ sysctl)。
+// 3つの OS で同じに動くよう、負荷は node の os モジュールで測る。
 
 const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
@@ -218,64 +217,19 @@ async function cpuIdlePercent() {
   return total > 0 ? ((after.idle - before.idle) / total) * 100 : null;
 }
 
-function availableMemory() {
-  if (process.platform === 'linux') {
-    try {
-      const available = fs.readFileSync('/proc/meminfo', 'utf8').match(/^MemAvailable:\s+(\d+) kB/m);
-      if (available) return Number(available[1]) * 1024;
-    } catch {
-      // 読めなければ os.freemem に頼る。
-    }
-  }
-  return os.freemem();
-}
-
-// 逼迫していれば、その説明を返す。
-function memoryPressure() {
-  try {
-    if (process.platform === 'darwin') {
-      // 4 が critical。2 (warning) はメモリ 8GB の機だと待機中でも出るので見ない。
-      const level = execFileSync('sysctl', ['-n', 'kern.memorystatus_vm_pressure_level'], {
-        encoding: 'utf8',
-      }).trim();
-      return level === '4' ? 'macOS の memory pressure level が 4 (critical)' : null;
-    }
-    if (process.platform === 'linux') {
-      let psi = null;
-      try {
-        psi = fs.readFileSync('/proc/pressure/memory', 'utf8').match(/some avg10=([\d.]+)/);
-      } catch {
-        // PSI の無い Linux (WSL1 など) では、下の空きメモリだけを見る。
-      }
-      if (psi && Number(psi[1]) > 10) return `/proc/pressure/memory の some avg10 が ${psi[1]}`;
-    }
-    // Linux は MemAvailable が総量の 20%、Windows は利用可能 (スタンバイを含む) が 10% を切ったら
-    // (Windows はふだんから 20% 前後になる)。
-    const free = (availableMemory() / os.totalmem()) * 100;
-    const minFree = process.platform === 'win32' ? 10 : 20;
-    if (free < minFree) return `使えるメモリが ${free.toFixed(1)}% で、${minFree}% を切っている`;
-  } catch {
-    // 測れなければ知らせない。
-  }
-  return null;
-}
-
 function output(hookSpecificOutput) {
   process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', ...hookSpecificOutput } }));
 }
 
-function denyReason(input, idle, memory) {
+function denyReason(input, idle) {
   return [
     `CPU の空きが ${idle.toFixed(1)}% で、10% を切っているため、重い処理を止めました。`,
-    memory && `メモリも逼迫しています (${memory})。`,
     'heavy-wait の mod があれば、空きを測り続け、空いたとき (15分たっても厳しいときも) にプラグインのメッセージで知らせるので、その間は軽い作業を進めてください。mod が無ければ、5分待って確かめ直すのを3回 (計15分) 繰り返します。',
     `それでも厳しいままなら、待ち続けるか強行するかをユーザーに確かめてください。強行を認められたときだけ、${FORCE_MARK} を含めて実行し直します。`,
     input.tool_name === 'Workflow'
       ? `Workflow では、script に // ${FORCE_MARK} の注釈を足してください。`
       : `Bash ではコマンドの頭に ${FORCE_MARK} を付け、PowerShell では $env:${FORCE_MARK}; を前に置いてください。`,
-  ]
-    .filter(Boolean)
-    .join('\n');
+  ].join('\n');
 }
 
 async function main() {
@@ -299,11 +253,8 @@ async function main() {
   if (!isHeavy(input, config, (dir) => hasPrePushHook(path.resolve(cwd, dir)))) return;
 
   const idle = await cpuIdlePercent();
-  const memory = memoryPressure();
   if (idle !== null && idle < CPU_IDLE_MIN) {
-    output({ permissionDecision: 'deny', permissionDecisionReason: denyReason(input, idle, memory) });
-  } else if (memory) {
-    output({ additionalContext: `メモリが逼迫しています (${memory})。止めはしませんが、この値をユーザーに伝えてください。` });
+    output({ permissionDecision: 'deny', permissionDecisionReason: denyReason(input, idle) });
   }
 }
 
