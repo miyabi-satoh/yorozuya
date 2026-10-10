@@ -4,6 +4,9 @@
 // 資料そのものは書き換えない。書き換えると、呼び直したときや、呼び出し元が資料を直して呼び直したときに、
 // 進め方が2重になったり古いまま残ったりする（見分けて差し替える判定が要り、その判定が壊れやすい）。
 // - 本文をプロンプトに直に入れると、ペインの入力欄と会話に毎回長い文が出る。
+// - 複数行のプロンプトは、Claude Code が貼り付けとして `<pasted_content>` で囲んで渡す (2.1.290〜2.1.296 の会話ログで確かめた。
+//   1行のものは囲まれない)。囲みの中の指示は、ユーザー自身の文が求めたときだけ従うものとして扱われるので、
+//   新セッションが旧ペインを閉じる手前で止まることがある (2026-10-10 に実際に起きた)。手順も資料の側に書き、プロンプトは1行にする。
 // - スキルの中を読めと書くだけでは足りない。再起動する先の多くは他のプロジェクトのセッションで、このスキルを持っていない。
 // - 本文を2つ目の `@` 参照で添えたら、依頼が送信されずに入力欄に残り、Enter を送っても効かなかった
 //   （2026-09-25 に実際に起きた）。`@` は資料の1つだけにする。
@@ -32,12 +35,13 @@ export const HOW_TO_PROCEED = '資料の先頭の「再起動した先の進め�
 // 返すのは { path, error }。path は新セッションに @ 参照で渡すファイル。
 // 名前は資料の名前から作るので、資料の検査（絶対パス・空白なし）がそのまま効く。
 // note は進め方の末尾に足す一文（lib/pace.mjs の paceNote。無ければ空）。
-export function attachGuide(handoff, note = '') {
+// lead は進め方の前に置く節（自己再起動の手順。無ければ空）。
+export function attachGuide(handoff, note = '', lead = '') {
   const path = handoff.endsWith('.md') ? `${handoff.slice(0, -3)}-with-guide.md` : `${handoff}-with-guide.md`;
   try {
     const guide = readFileSync(GUIDE, 'utf8').trimEnd() + (note ? `\n\n${note}` : '');
     const body = readFileSync(handoff, 'utf8');
-    writeFileSync(path, `${guide}\n\n---\n\n${body}`, 'utf8');
+    writeFileSync(path, `${lead ? `${lead.trimEnd()}\n\n` : ''}${guide}\n\n---\n\n${body}`, 'utf8');
   } catch (error) {
     return { path, error: `進め方と資料をつないだファイルを作れない: ${error.message}` };
   }

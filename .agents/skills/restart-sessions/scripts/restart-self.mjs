@@ -14,7 +14,7 @@ import { basename, isAbsolute } from 'node:path';
 
 import { handoffProblem } from './lib/handoff.mjs';
 import { paceNote } from './lib/pace.mjs';
-import { attachGuide, HOW_TO_PROCEED } from './lib/prompts.mjs';
+import { attachGuide } from './lib/prompts.mjs';
 import {
   backgroundWorkHint,
   herdr,
@@ -103,7 +103,17 @@ if (holder && holder !== self) skip(`名前 ${name} は ${holder} が使用中�
 const selfHoldsName = holder === self;
 
 // 進め方を資料の前につないだファイルを作り、新セッションにはそちらを渡す。資料そのものは書き換えない。
-const { path: sent, error: guideProblem } = attachGuide(handoff, note);
+// 手順は資料の側に書き、新セッションへ送る依頼は1行にする（lib/prompts.mjs の先頭）。
+const steps = `# 自己再起動の手順
+
+このセッション自身の再起動。前セッション（ペイン ${self} / セッション ${sid}）は資料を書き終えて、閉じられるのを待っている。
+
+1. この資料を読んで現状を把握する。
+2. 把握できたら 'herdr pane close ${self}' で前セッションのペインを閉じる。閉じると前セッションは強制終了になる（資料は書けているので問題ない。戻りたくなったら 'claude --resume ${sid}'）。読み終える前に閉じないこと。
+3. ユーザーに再起動の結果を報告し、下の「再起動した先の進め方」に従って引き継ぐ。
+
+1 と 2 は確認を挟まずに進める。3 は、どれも（処理の立ち上げ直しも、作業の再開も、問いの出し直しや状態を聞く問いも）旧ペインを閉じてから行う。先に問いを出すと、答えを待つ間ずっと旧ペインが残る。`;
+const { path: sent, error: guideProblem } = attachGuide(handoff, note, steps);
 if (guideProblem) skip(guideProblem);
 
 // 縦長のペインは下に割る。旧を閉じれば新が元の大きさに戻る。
@@ -185,14 +195,7 @@ if (!startAgent(name, created)) {
 log('起動');
 
 // --wait は付けない。待っている間に旧ペインごと閉じられるため、待つ意味がない。
-const request = `@${sent} このセッション自身の再起動です。前セッション（ペイン ${self} / セッション ${sid}）は資料を書き終えて、閉じられるのを待っています。
-
-手順:
-1. 引き継ぎ資料を読んで現状を把握する。
-2. 把握できたら 'herdr pane close ${self}' で前セッションのペインを閉じる。閉じると前セッションは強制終了になる（資料は書けているので問題ない。戻りたくなったら 'claude --resume ${sid}'）。読み終える前に閉じないこと。
-3. ユーザーに再起動の結果を報告し、${HOW_TO_PROCEED}
-
-1 と 2 は確認を挟まずに進めること。3 は、どれも（処理の立ち上げ直しも、作業の再開も、問いの出し直しや状態を聞く問いも）旧ペインを閉じてから行う。先に問いを出すと、答えを待つ間ずっと旧ペインが残る。`;
+const request = `@${sent} このセッション自身の再起動です。資料の先頭の「自己再起動の手順」を、確認を挟まずに 1 から順に進めること。`;
 
 // ここは起動済みで、資料だけが渡っていない。ユーザーが答えれば進む状態ではないので、
 // 閉じて元の一枚に戻す。

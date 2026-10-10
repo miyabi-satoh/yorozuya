@@ -1,6 +1,6 @@
 ---
 name: heavy-task
-description: 重い処理を始める前に、マシンの負荷を確かめて始めてよいかを決める手順。フルビルド・全体テスト・docker build・依存の一括インストール・大規模なインデックス作成や変換・多数のエージェントを並列に起動する Workflow・重い pre-push フック付きの git push など、CPU・メモリ・ディスクを長時間大きく使う処理のうち、guard-heavy-commands の hook が拾わないもの（hook の無いエージェント、`.claude/heavy-commands.json` に無いコマンド）を始めるときと、重い処理がメモリ不足で打ち切られたときに使う。
+description: 重い処理を始める前に、マシンの負荷を確かめて始めてよいかを決める手順。フルビルド・全体テスト・docker build・依存の一括インストール・大規模なインデックス作成や変換・多数のエージェントを並列に起動する Workflow・重い pre-push フック付きの git push など、CPU・メモリ・ディスクを長時間大きく使う処理のうち、guard-heavy-commands の hook が拾わないもの（hook の無いエージェント、hook の既定にも `.claude/heavy-commands.json` にも無いコマンド）を始めるときと、重い処理がメモリ不足で打ち切られたときに使う。
 ---
 
 # 重い処理を始める前の負荷の確かめ方
@@ -48,8 +48,8 @@ description: 重い処理を始める前に、マシンの負荷を確かめて�
 ## Claude Code では
 
 - `guard-heavy-commands.cjs` hook（このスキルの `scripts/`）が、重いコマンドを流す瞬間に手順 1〜3 と同じ目安で測り、CPU が厳しければ止め、メモリが目安に当たれば値を知らせる。hook が拾うコマンドは、この手順で測らずにそのまま流す。hook も、測れないときは止めずに通す。
-  - 拾うコマンドは、プロジェクトの `.claude/heavy-commands.json` で決まる（書き方と既定は `README.md` の「使い方」）。
-  - 拾わないのは、`.claude/heavy-commands.json` が無いプロジェクトのコマンド、一覧に無いコマンド、ほかのコマンドの引数として渡すコマンド（`herdr pane run <ペイン> "pnpm dev"` など）。これらは手順 1〜3 で測る。繰り返し流すコマンドは `heavy-commands.json` に足す。
+  - 拾うコマンドは、hook の既定と、プロジェクトの `.claude/heavy-commands.json` で決まる（既定と書き方は `README.md` の「使い方」）。
+  - 拾わないのは、既定にも `heavy-commands.json` にも無いコマンドと、ほかのコマンドの引数として渡すコマンド（`herdr pane run` でペインへ送るものは拾う）。これらは手順 1〜3 で測る。繰り返し流すコマンドは `heavy-commands.json` に足す。
 - hook に止められたときは、heavy-wait の mod（このスキルの `mod/`）が1分ごとに空きを測り、空いたとき（15分たっても厳しいときも）にプラグインのメッセージで知らせる。自分で測り直して待たず、知らせを待つ間に軽い作業を進める。
 - mod が無いときや、hook が拾わないコマンドを自分で測って待つときは、foreground の `sleep` が使えないので、`Monitor` などで待つ。
 - macOS と Linux の Claude Code は、OS からメモリ逼迫の通知を受けると、バックグラウンドの Bash を "stopped because the system is running low on memory" で打ち切る（セッションが30分以上アイドルで、ターンもサブエージェントも動いていないとき）。フォアグラウンドの Bash と Monitor は対象外。Windows では打ち切られないので、下の2つは要らない。
