@@ -36,7 +36,7 @@ description: 重い処理を始める前に、マシンの負荷を確かめて�
 1. 始める直前に CPU の空きを測る。load average は使わない。重い処理が始まってから跳ね上がるため、始める前の値では見分けられない。
    - macOS: `top -l 2 -n 0 -s 1 | grep 'CPU usage' | tail -1`
    - Linux: `vmstat 1 2 | tail -1`
-   - Windows（PowerShell）: `(Get-CimInstance Win32_Processor | Measure-Object LoadPercentage -Average).Average`
+   - Windows（PowerShell）: `(Get-CimInstance Win32_Processor | Measure-Object LoadPercentage -Average).Average`（空きでなく使用率が出る）
 2. CPU の空きが 10% を切っていれば「厳しい」とみなし、始めない（macOS は `idle`、Linux は `vmstat` の `id`、Windows は使用率 90% 以上）。
    - すぐにはユーザーに聞かない。5分待って測り直すのを3回（計15分）繰り返し、それでも厳しいときに初めて、待ち続けるか強行するかを聞く。
    - 待つ間は先に軽い作業を進めてよい。
@@ -50,7 +50,7 @@ description: 重い処理を始める前に、マシンの負荷を確かめて�
 - mod が無いときや、hook が拾わないコマンドを自分で測って待つときは、foreground の `sleep` が使えないので、`Monitor` などで待つ。
 - macOS と Linux の Claude Code は、OS からメモリ逼迫の通知を受けると、バックグラウンドの Bash を "stopped because the system is running low on memory" で打ち切る（セッションが30分以上アイドルで、ターンもサブエージェントも動いていないとき）。フォアグラウンドの Bash と Monitor は対象外。Windows では打ち切られないので、下の2つは要らない。
   - 10分以内に終わる処理は、`run_in_background` を使わず、フォアグラウンドで `timeout: 600000` を付けて走らせる。時間切れでバックグラウンドに回ると打ち切りの対象になる。
-  - 10分を超える処理はバックグラウンドで走らせ、打ち切られたら負荷を測り直してから流し直す。
+  - 10分を超える処理はバックグラウンドで走らせ、打ち切られたら、下の採取をしてから流し直す。
 - 打ち切られたら、流し直す前に、その場でマシンの状態を採取する。直後の値が打ち切り直前の状態に近い。結果は scratchpad に保存し、打ち切られた時刻と要約をユーザーに報告する。
   - macOS: `sysctl -n kern.memorystatus_vm_pressure_level`、`vm_stat`、`sysctl -n vm.swapusage`、`ps -Ao rss,comm | sort -rn | head -15`、`pgrep -x node | wc -l`
   - macOS のカーネルログ: `/usr/bin/log show --last 30m --style compact --predicate 'sender == "kernel" AND eventMessage CONTAINS "memorystatus"'`。`memorystatus_available_pages` と `compressor_size` の推移で、逼迫に至る流れを追える。zsh では `log` が組み込みコマンドに奪われるため、フルパスで呼ぶ。
