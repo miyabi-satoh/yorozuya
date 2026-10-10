@@ -125,6 +125,12 @@ test('強行の印があれば通す', () => {
   assert.equal(heavy({ tool_name: 'Workflow', tool_input: { script: '// CLAUDE_FORCE_HEAVY=1' } }), false);
 });
 
+test('ペインへ送る git push は、pre-push を見ずに重いとみなす', () => {
+  // ペインがどのリポジトリにいるかは分からない。
+  assert.equal(heavy(bash('herdr pane run w1:p1 "git push"'), false), true);
+  assert.equal(heavy(bash('git push'), false), false);
+});
+
 test('defaults が false なら、書いたものだけを見る', () => {
   const own = loadConfig(projectWith(JSON.stringify({ defaults: false, heavy: ['just ci'] })));
   assert.equal(isHeavy(bash('just ci'), own, () => true), true);

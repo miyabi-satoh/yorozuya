@@ -14,7 +14,7 @@
 //   }
 //
 // 引用の中身と heredoc・here-string の本文は見ず、コマンドの位置 (行頭、`;` `&` `|` `(` の後) に来たものだけを見る。
-// 例外は `herdr pane run <ペイン> <コマンド>` で、ペインへ送るコマンドも同じように見る (開発サーバーなどはペインで流すため)。
+// 例外は `herdr pane run <ペイン> <コマンド>` で、ペインへ送るコマンドも同じように見る (ビルドやテストもペインで流すことがあるため)。
 // 測れないときや入力が読めないときは、何もせずに通す (hook の不具合で作業を止めないため)。
 // 3つの OS で同じに動くよう、負荷は node の os モジュールで測る (macOS のメモリだけ sysctl)。
 
@@ -113,7 +113,8 @@ function commandSegments(command, nested = false) {
     segments.push(words);
     // ペインへ送るコマンドの中の `herdr pane run` までは追わない。
     const sent = !nested && words[0] === 'herdr' ? paneCommand(segment, quotes) : null;
-    if (sent !== null) segments.push(...commandSegments(sent, true));
+    if (sent === null) continue;
+    for (const inner of commandSegments(sent, true)) segments.push(Object.assign(inner, { inPane: true }));
   }
   return segments;
 }
@@ -180,7 +181,7 @@ function loadConfig(projectDir) {
 }
 
 // 重い処理なら true。prePush(dir) は、dir (空ならいまの場所) のリポジトリに pre-push のフックがあるかを返す。
-// cd の後や、-C の先が引用で読めないときは、どのリポジトリか分からないので重いとみなす。
+// cd の後や、-C の先が引用で読めないとき、ペインへ送る push は、どのリポジトリか分からないので重いとみなす。
 function isHeavy(input, config, prePush) {
   if (JSON.stringify(input.tool_input ?? {}).includes(FORCE_MARK)) return false;
   if (input.tool_name === 'Workflow') return config.defaults;
@@ -193,7 +194,7 @@ function isHeavy(input, config, prePush) {
     if (config.heavy.some((match) => match(words))) return true;
     const pushDir = config.defaults ? gitPushDir(words) : null;
     if (pushDir === null) return false;
-    if (movedDir || pushDir.includes('""') || pushDir.includes("''")) return true;
+    if (movedDir || words.inPane || pushDir.includes('""') || pushDir.includes("''")) return true;
     return prePush(pushDir);
   });
 }

@@ -51,7 +51,7 @@
 ## hook の見方
 
 - 引用符の中身と heredoc の本文は見ず、コマンドの位置（行頭、`;` `&` `|` `(` の後）に来たものだけを見る
-- ほかのコマンドの引数として渡したコマンドは拾わない（`ssh <ホスト> "pnpm build"` など）。例外は `herdr pane run <ペイン> <コマンド>` で、ペインへ送るコマンドも同じように見る
+- ほかのコマンドの引数として渡したコマンドは拾わない（`ssh <ホスト> "pnpm build"` など）。例外は `herdr pane run <ペイン> <コマンド>` で、ペインへ送るコマンドも同じように見る（ペインの ID を `$(...)` でその場に書いた形は拾わない。直に書くか変数で渡す）
 - 止めた理由の文は、`CPU の空きが N% で、10% を切っているため、重い処理を止めました` で始まる。Claude Code はツールの結果の頭に `PreToolUse:<ツール> hook error: ` を付けて返す（2.1.289 で実測）。mod はこの形で見分ける
 - ユーザーが強行を認めたときは、コマンドの頭に `CLAUDE_FORCE_HEAVY=1` を付けると通る（PowerShell は `$env:CLAUDE_FORCE_HEAVY=1;`、Workflow は script に `// CLAUDE_FORCE_HEAVY=1` の注釈）
 - `node scripts/guard-heavy-commands.cjs --idle` で、hook と同じ測り方の CPU の空き（%）を1行出す（mod が使う）
