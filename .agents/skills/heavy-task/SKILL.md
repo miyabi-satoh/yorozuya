@@ -9,7 +9,7 @@ description: 重い処理を始める前に、マシンの負荷を確かめて�
 
 ## 仕事
 
-始める直前に CPU とメモリの負荷を測り、始める・待つ・ユーザーに聞くのどれかを決める。
+始める直前に CPU の空きを測り、始める・待つ・ユーザーに聞くのどれかを決める。
 
 ## やらないこと
 
@@ -19,7 +19,7 @@ description: 重い処理を始める前に、マシンの負荷を確かめて�
 
 ## 出力
 
-始めるか待つかの判断。メモリが逼迫の目安に当たったときは、その値をユーザーに伝える。打ち切られたときは、採取したマシンの状態（scratchpad に保存）と、打ち切られた時刻・要約の報告。
+始めるか待つかの判断。打ち切られたときは、採取したマシンの状態（scratchpad に保存）と、打ち切られた時刻・要約の報告。
 
 ## 終わる条件
 
@@ -33,23 +33,19 @@ description: 重い処理を始める前に、マシンの負荷を確かめて�
 
 ## 手順
 
-1. 始める直前に負荷を測る。load average は使わない。重い処理が始まってから跳ね上がるため、始める前の値では見分けられない。
-   - macOS: `top -l 2 -n 0 -s 1 | grep 'CPU usage' | tail -1` と `sysctl -n kern.memorystatus_vm_pressure_level`
-   - Linux: `vmstat 1 2 | tail -1`、`cat /proc/pressure/memory`、`free -m`
-   - Windows（PowerShell）: `$os = Get-CimInstance Win32_OperatingSystem; "CPU $((Get-CimInstance Win32_Processor | Measure-Object LoadPercentage -Average).Average)% / MemFree $([math]::Round($os.FreePhysicalMemory / $os.TotalVisibleMemorySize * 100))%"`
+1. 始める直前に CPU の空きを測る。load average は使わない。重い処理が始まってから跳ね上がるため、始める前の値では見分けられない。
+   - macOS: `top -l 2 -n 0 -s 1 | grep 'CPU usage' | tail -1`
+   - Linux: `vmstat 1 2 | tail -1`
+   - Windows（PowerShell）: `(Get-CimInstance Win32_Processor | Measure-Object LoadPercentage -Average).Average`
 2. CPU の空きが 10% を切っていれば「厳しい」とみなし、始めない（macOS は `idle`、Linux は `vmstat` の `id`、Windows は使用率 90% 以上）。
    - すぐにはユーザーに聞かない。5分待って測り直すのを3回（計15分）繰り返し、それでも厳しいときに初めて、待ち続けるか強行するかを聞く。
    - 待つ間は先に軽い作業を進めてよい。
-3. メモリは参考にとどめ、逼迫していても止めない。目安に当たったら、その値をユーザーに伝えてから始める。
-   - macOS: pressure level が 4（critical）。2（warning）はメモリ 8GB のマシンだと待機中でも出るので目安にしない。`memory_pressure` の空き % は圧縮とスワップを空きに数え、詰まっていても 30〜40% と出るので使わない。
-   - Linux: `/proc/pressure/memory` の `some avg10` が 10 を超える、または `free -m` の `available` が総量の 20% を切っている。
-   - Windows: 上のコマンドの `MemFree` が 10% を切っている（スタンバイを空きに数えないので、Linux より低い値にしてある）。
 
 ## Claude Code では
 
-- `guard-heavy-commands.cjs` hook（このスキルの `scripts/`）が、重いコマンドを流す瞬間に手順 1〜3 と同じ目安で測り、CPU が厳しければ止め、メモリが目安に当たれば値を知らせる。hook が拾うコマンドは、この手順で測らずにそのまま流す。hook も、測れないときは止めずに通す。
+- `guard-heavy-commands.cjs` hook（このスキルの `scripts/`）が、重いコマンドを流す瞬間に手順と同じ目安で測り、CPU が厳しければ止める。hook が拾うコマンドは、この手順で測らずにそのまま流す。hook も、測れないときは止めずに通す。
   - 拾うコマンドは、hook の既定と、プロジェクトの `.claude/heavy-commands.json` で決まる（既定と書き方は `README.md` の「使い方」）。
-  - 拾わないのは、既定にも `heavy-commands.json` にも無いコマンドと、ほかのコマンドの引数として渡すコマンド（`herdr pane run` でペインへ送るものは拾う）。これらは手順 1〜3 で測る。繰り返し流すコマンドは `heavy-commands.json` に足す。
+  - 拾わないのは、既定にも `heavy-commands.json` にも無いコマンドと、ほかのコマンドの引数として渡すコマンド（`herdr pane run` でペインへ送るものは拾う）。これらは手順で測る。繰り返し流すコマンドは `heavy-commands.json` に足す。
 - hook に止められたときは、heavy-wait の mod（このスキルの `mod/`）が1分ごとに空きを測り、空いたとき（15分たっても厳しいときも）にプラグインのメッセージで知らせる。自分で測り直して待たず、知らせを待つ間に軽い作業を進める。
 - mod が無いときや、hook が拾わないコマンドを自分で測って待つときは、foreground の `sleep` が使えないので、`Monitor` などで待つ。
 - macOS と Linux の Claude Code は、OS からメモリ逼迫の通知を受けると、バックグラウンドの Bash を "stopped because the system is running low on memory" で打ち切る（セッションが30分以上アイドルで、ターンもサブエージェントも動いていないとき）。フォアグラウンドの Bash と Monitor は対象外。Windows では打ち切られないので、下の2つは要らない。
@@ -63,5 +59,5 @@ description: 重い処理を始める前に、マシンの負荷を確かめて�
 
 ## 合格条件
 
-- 人が見る: hook が拾わない重い処理は、始める前の CPU とメモリの値を測ってから始めている。厳しいときに15分待たずに聞いていない。
+- 人が見る: hook が拾わない重い処理は、始める前に CPU の空きを測ってから始めている。厳しいときに15分待たずに聞いていない。
 - 機械が見る: 無い（hook が拾うコマンドは、CPU の厳しいときの開始を hook が止める）。
