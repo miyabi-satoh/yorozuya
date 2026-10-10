@@ -33,7 +33,7 @@ description: 重い処理を始める前に、マシンの負荷を確かめて�
 
 ## 手順
 
-1. 始める直前に CPU の空きを測る。load average は使わない。重い処理が始まってから跳ね上がるため、始める前の値では見分けられない。
+1. 始める直前に、次のコマンドで CPU の空きを測る。
    - macOS: `top -l 2 -n 0 -s 1 | grep 'CPU usage' | tail -1`
    - Linux: `vmstat 1 2 | tail -1`
    - Windows（PowerShell）: `(Get-CimInstance Win32_Processor | Measure-Object LoadPercentage -Average).Average`（空きでなく使用率が出る）
