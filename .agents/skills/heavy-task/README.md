@@ -6,13 +6,14 @@
 
 - **何が重いかは、使う側のプロジェクトの `.claude/heavy-commands.json` に書く。** このファイルが無いプロジェクトでは、hook は何もしない（書き方は下の「hook」）
 - **hook と mod は Claude Code 用。** `SKILL.md` の手順そのものは、ほかのエージェントでも読める
+- **hook が拾うコマンドには、`SKILL.md` の手順は要らない。** hook が同じ目安で測って止める。手順を使うのは、hook の無いエージェントと、hook が拾わないコマンド（下の「hook の見方」）
 - **mod は Claude Code の function hooks（早期アクセスの API）に頼っている。** 版ごとに変わりうる。Claude Code 2.1.289 で確かめた
-- **実物で通したのは macOS だけ。** hook が CPU の厳しさで止め、mod が空きを測り続けて知らせるところまで、macOS（Claude Code 2.1.289）で確かめた。Linux・Windows の測り方（`/proc`・`os.cpus()`）はコードにあるが、実物では試していない
+- **止めて知らせるところまで実物で通したのは macOS だけ。** hook が CPU の厳しさで止め、mod が空きを測り続けて知らせるところまで、macOS（Claude Code 2.1.289）で確かめた。Windows 11（Claude Code 2.1.296・Node.js 26.5.0）では、`--idle` が CPU の空きを返すところまで確かめた。hook が止めるところと mod は試していない。Linux の測り方（`/proc`・`os.cpus()`）はコードにあるが、実物では試していない
 - **CPU だけで止める。** メモリの逼迫は止めず、値を Claude に知らせるだけ。測れないとき・入力が読めないときは、止めずに通す
 
 ## できること
 
-- `SKILL.md`: 始める直前に CPU とメモリを測る手順。CPU の空きが 10% を切っていれば、5分おきに3回（計15分）測り直し、それでも厳しければユーザーに聞く。打ち切られたときにマシンの状態を採取する手順もある
+- `SKILL.md`: hook が拾わない重い処理を始める直前に、CPU とメモリを測る手順。CPU の空きが 10% を切っていれば、5分おきに3回（計15分）測り直し、それでも厳しければユーザーに聞く。打ち切られたときにマシンの状態を採取する手順もある
 - `scripts/guard-heavy-commands.cjs`: Claude Code の PreToolUse の hook。重いコマンドを、CPU の空きが 10% を切っているときに止める
 - `mod/`（heavy-wait）: hook が止めたのを見て、1分ごとに空きを測り、空いたら（15分たっても厳しければそのことも）セッションに知らせる。セッションは自分で測り直して待たずに、知らせを待つ間に軽い作業を進められる
 
@@ -49,6 +50,7 @@
 ## hook の見方
 
 - 引用符の中身と heredoc の本文は見ず、コマンドの位置（行頭、`;` `&` `|` `(` の後）に来たものだけを見る
+- ほかのコマンドの引数として渡したコマンドは拾わない（`herdr pane run <ペイン> "pnpm dev"` のように、端末のペインへ送るものなど）
 - 止めた理由の文は、`CPU の空きが N% で、10% を切っているため、重い処理を止めました` で始まる。Claude Code はツールの結果の頭に `PreToolUse:<ツール> hook error: ` を付けて返す（2.1.289 で実測）。mod はこの形で見分ける
 - ユーザーが強行を認めたときは、コマンドの頭に `CLAUDE_FORCE_HEAVY=1` を付けると通る（PowerShell は `$env:CLAUDE_FORCE_HEAVY=1;`、Workflow は script に `// CLAUDE_FORCE_HEAVY=1` の注釈）
 - `node scripts/guard-heavy-commands.cjs --idle` で、hook と同じ測り方の CPU の空き（%）を1行出す（mod が使う）
