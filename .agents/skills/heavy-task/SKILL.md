@@ -23,7 +23,7 @@ description: 重い処理を始める前に、マシンの負荷を確かめて�
 
 ## 終わる条件
 
-処理を始めたとき、またはユーザーに待つか強行するかを聞いたとき。打ち切られたときは、採取と報告を済ませて流し直したとき。
+処理を始めたとき、またはユーザーに待つか強行するかを聞いたとき。打ち切られたときは、採取と報告を済ませたとき（流し直すのは、ユーザーに頼まれてから）。
 
 ## 止まる条件
 
@@ -48,14 +48,24 @@ description: 重い処理を始める前に、マシンの負荷を確かめて�
   - 拾わないのは、既定にも `heavy-commands.json` にも無いコマンドと、ほかのコマンドの引数として渡すコマンド（`herdr pane run` でペインへ送るものは拾う）。これらは手順で測る。繰り返し流すコマンドは `heavy-commands.json` に足す。
 - hook に止められたときは、heavy-wait の mod（このスキルの `mod/`）が1分ごとに空きを測り、空いたとき（15分たっても厳しいときも）にプラグインのメッセージで知らせる。自分で測り直して待たず、知らせを待つ間に軽い作業を進める。
 - mod が無いときや、hook が拾わないコマンドを自分で測って待つときは、foreground の `sleep` が使えないので、`Monitor` などで待つ。
-- macOS と Linux の Claude Code は、OS からメモリ逼迫の通知を受けると、バックグラウンドの Bash を "stopped because the system is running low on memory" で打ち切る（セッションが30分以上アイドルで、ターンもサブエージェントも動いていないとき）。フォアグラウンドの Bash と Monitor は対象外。Windows では打ち切られないので、下の2つは要らない。
+- Claude Code は、OS からメモリ逼迫の通知を受けると、バックグラウンドの Bash・PowerShell を "stopped because the system is running low on memory" で打ち切る（セッションが30分以上アイドルで、ターンもサブエージェントも動いていないとき）。フォアグラウンドの Bash と Monitor は対象外。macOS・Linux・Windows のどれでも起きる（Windows 11 では 2026-10-10 と 10-11 に、ビルドの最中に実際に起きた）。
   - 10分以内に終わる処理は、`run_in_background` を使わず、フォアグラウンドで `timeout: 600000` を付けて走らせる。時間切れでバックグラウンドに回ると打ち切りの対象になる。
-  - 10分を超える処理はバックグラウンドで走らせ、打ち切られたら、下の採取をしてから流し直す。
-- 打ち切られたら、流し直す前に、その場でマシンの状態を採取する。直後の値が打ち切り直前の状態に近い。結果は scratchpad に保存し、打ち切られた時刻と要約をユーザーに報告する。
+  - 10分を超える処理は、Herdr の中（`HERDR_ENV=1`）なら Herdr の別のタブで流す（下の「Herdr のタブで流す」）。タブの中の処理は Claude Code のバックグラウンドの処理でないので、打ち切られず、時間の上限も無い。Herdr の外では、バックグラウンドで走らせる。
+- 打ち切られたら、その場でマシンの状態を採取する。結果は scratchpad に保存し、打ち切られた時刻と要約をユーザーに報告する。自分からは流し直さず、流し直すかをユーザーに聞く。打ち切りの知らせが、メモリがまだ足りないかもしれないので、頼まれたときだけ流し直すよう求めるため。
   - macOS: `sysctl -n kern.memorystatus_vm_pressure_level`、`vm_stat`、`sysctl -n vm.swapusage`、`ps -Ao rss,comm | sort -rn | head -15`、`pgrep -x node | wc -l`
   - macOS のカーネルログ: `/usr/bin/log show --last 30m --style compact --predicate 'sender == "kernel" AND eventMessage CONTAINS "memorystatus"'`。`memorystatus_available_pages` と `compressor_size` の推移で、逼迫に至る流れを追える。zsh では `log` が組み込みコマンドに奪われるため、フルパスで呼ぶ。
   - macOS の Jetsam レポート: `/Library/Logs/DiagnosticReports/JetsamEvent-*.ips` に同じ時刻のものがあれば、OS がプロセスを強制終了している。全プロセスのメモリ使用量が載っている。
   - Linux: `cat /proc/pressure/memory`、`free -m`、`ps aux --sort=-rss | head -15`、`journalctl -k --since '-30min' | grep -iE 'oom|out of memory'`
+  - Windows（PowerShell）: `Get-CimInstance Win32_OperatingSystem | Select-Object TotalVisibleMemorySize,FreePhysicalMemory,TotalVirtualMemorySize,FreeVirtualMemory`（KB。物理メモリとコミットの空き）、`Get-Process | Group-Object Name | ForEach-Object { [pscustomobject]@{ Name = $_.Name; MB = [int](($_.Group | Measure-Object PrivateMemorySize64 -Sum).Sum / 1MB) } } | Sort-Object MB -Descending | Select-Object -First 15`
+
+### Herdr のタブで流す
+
+1. `herdr tab create --workspace "$HERDR_WORKSPACE_ID" --cwd <リポジトリ> --label "<名前>" --no-focus` でタブを作り、返った `pane_id` と `tab_id` を控える。
+2. `herdr pane run <pane-id> '<コマンド> > "<ログ>" 2>&1; echo "FIN exit=$?"'` で流す。出力はログへ書き、画面には終わりの印と終了コードだけを出す。
+   - タブのシェルが PowerShell なら `'<コマンド> *> "<ログ>"; "FIN exit=$LASTEXITCODE"'`。ログの日本語の行は文字化けすることがある（Windows 11 の PowerShell 7 で 2026-10-11 に起きた）。
+3. `herdr pane wait-output <pane-id> --regex 'FIN exit=[0-9]' --source recent-unwrapped --timeout <ミリ秒>` を `run_in_background` で待つ。`--match 'FIN exit='` は、打ったコマンドの行そのものに当たるので、正規表現で終了コードの数字まで見る。
+   - 待つ側はバックグラウンドの処理なので、打ち切られることがある。タブの処理は続いているので、待ち直す。
+4. 終了コードとログを読み、`herdr tab close <tab-id>` でタブを閉じる。
 
 ## 合格条件
 
