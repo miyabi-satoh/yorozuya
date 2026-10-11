@@ -56,7 +56,7 @@ description: 重い処理を始める前に、マシンの負荷を確かめて�
   - macOS のカーネルログ: `/usr/bin/log show --last 30m --style compact --predicate 'sender == "kernel" AND eventMessage CONTAINS "memorystatus"'`。`memorystatus_available_pages` と `compressor_size` の推移で、逼迫に至る流れを追える。zsh では `log` が組み込みコマンドに奪われるため、フルパスで呼ぶ。
   - macOS の Jetsam レポート: `/Library/Logs/DiagnosticReports/JetsamEvent-*.ips` に同じ時刻のものがあれば、OS がプロセスを強制終了している。全プロセスのメモリ使用量が載っている。
   - Linux: `cat /proc/pressure/memory`、`free -m`、`ps aux --sort=-rss | head -15`、`journalctl -k --since '-30min' | grep -iE 'oom|out of memory'`
-  - Windows（PowerShell）: `Get-CimInstance Win32_OperatingSystem | Select-Object TotalVisibleMemorySize,FreePhysicalMemory,TotalVirtualMemorySize,FreeVirtualMemory`（KB。物理メモリとコミットの空き）、`Get-Process | Group-Object Name | ForEach-Object { [pscustomobject]@{ Name = $_.Name; MB = [int](($_.Group | Measure-Object PrivateMemorySize64 -Sum).Sum / 1MB) } } | Sort-Object MB -Descending | Select-Object -First 15`
+  - Windows（PowerShell）: `Get-CimInstance Win32_OperatingSystem | Select-Object TotalVisibleMemorySize,FreePhysicalMemory,TotalVirtualMemorySize,FreeVirtualMemory | Format-List`（KB。物理メモリとコミットの空き）、`Get-Process | Group-Object Name | ForEach-Object { [pscustomobject]@{ Name = $_.Name; MB = [int](($_.Group | Measure-Object PrivateMemorySize64 -Sum).Sum / 1MB) } } | Sort-Object MB -Descending | Select-Object -First 15`
 
 ### Herdr のタブで流す
 
