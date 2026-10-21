@@ -2,7 +2,7 @@
 .claude/settings.local.json
 .agents/skills/*/config.local.json
 
-# macOS が作るフォルダの表示情報。
+# macOS が作るフォルダーの表示情報。
 .DS_Store
 
 # Claude Code が mod を読み込むたびに書き出す型定義。

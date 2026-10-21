@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { agentStatus, backgroundWorkHint, herdrError, herdrJson, inputDraft, prompt, sleep } from './lib/herdr.mjs';
+import { agentStatus, backgroundWorkHint, currentPane, herdrError, inputDraft, prompt, sleep } from './lib/herdr.mjs';
 
 const skip = (message) => {
   process.stderr.write(`[idle-clear-self] SKIP: ${message}\n`);
@@ -32,8 +32,7 @@ if (mode === '--send') {
   process.exit(0);
 }
 
-// $HERDR_PANE_ID はペイン移動前の ID のまま残ることがあるので、現在の ID を引き直す
-const current = herdrJson(['pane', 'current', '--current'])?.result?.pane;
+const current = currentPane();
 const self = current?.pane_id ?? '';
 const sid = current?.agent_session?.value ?? '';
 if (!self || !sid) skip(`自分のペインかセッションIDを特定できない（${herdrError()}）`);

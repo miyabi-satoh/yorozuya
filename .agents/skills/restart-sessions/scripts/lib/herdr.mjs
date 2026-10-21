@@ -47,7 +47,7 @@ export function herdrErrorCode() {
 
 // agent prompt がこれらを返したときは、入力を送る前に弾かれている。
 // agent_blocked と agent_not_ready は Herdr の文書に「入力を送る前に弾く」とある。
-// agent_not_found と empty_agent_prompt は実測した。server_not_running は、サーバが
+// agent_not_found と empty_agent_prompt は実測した。server_not_running は、サーバーが
 // 動いていないなら何も届いていない。
 // ここに無いコードは「送られたかもしれない」側として扱う（呼び出し側で FAIL にする）。
 export const SEND_REFUSED = new Set([
@@ -77,6 +77,12 @@ export function shellIsBack(pane) {
   const shell = info.shell_pid;
   if (!Number.isInteger(group) || !Number.isInteger(shell)) return false;
   return group === shell;
+}
+
+// 呼び出し元自身のペイン（pane current の結果そのまま）。取得できなければ undefined。
+// $HERDR_PANE_ID はペイン移動前の ID のまま残ることがあるので、使わずに現在の ID を引き直す。
+export function currentPane() {
+  return herdrJson(['pane', 'current', '--current'])?.result?.pane;
 }
 
 // agent get の結果そのまま。種別・名前・セッションIDをまとめて照合したいときに使う。

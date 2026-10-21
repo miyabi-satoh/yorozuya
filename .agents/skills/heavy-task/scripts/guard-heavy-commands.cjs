@@ -24,6 +24,7 @@ const path = require('node:path');
 
 // ユーザーが強行を認めたときに、ツールの入力に含めて通すための印。
 const FORCE_MARK = 'CLAUDE_FORCE_HEAVY=1';
+// heavy-wait の mod（mod/hooks/register.ts）が同じ値で空いたかを見るので、変えるときはそちらも合わせる。止めた理由の文も mod が読み取るので、文の形は変えない。
 const CPU_IDLE_MIN = 10;
 const CONFIG_PATH = path.join('.claude', 'heavy-commands.json');
 
@@ -223,7 +224,7 @@ function output(hookSpecificOutput) {
 
 function denyReason(input, idle) {
   return [
-    `CPU の空きが ${idle.toFixed(1)}% で、10% を切っているため、重い処理を止めました。`,
+    `CPU の空きが ${idle.toFixed(1)}% で、${CPU_IDLE_MIN}% を切っているため、重い処理を止めました。`,
     'heavy-wait の mod があれば、空きを測り続け、空いたとき (15分たっても厳しいときも) にプラグインのメッセージで知らせるので、その間は軽い作業を進めてください。mod が無ければ、5分待って確かめ直すのを3回 (計15分) 繰り返します。',
     `それでも厳しいままなら、待ち続けるか強行するかをユーザーに確かめてください。強行を認められたときだけ、${FORCE_MARK} を含めて実行し直します。`,
     input.tool_name === 'Workflow'

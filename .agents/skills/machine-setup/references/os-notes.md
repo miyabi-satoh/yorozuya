@@ -11,8 +11,8 @@ OS ごとに、インストールの途中で詰まりやすいところと、�
 
 ## macOS
 
-- **Apple Silicon では、Homebrew は入れた直後は PATH に無い（`/opt/homebrew/bin/brew`）。** 使うコマンドと同じ呼び出しの頭で `eval "$(/opt/homebrew/bin/brew shellenv)"` を読み込む。Intel の `/usr/local/bin` は最初から PATH にある。インストーラが案内する `~/.zprofile` への追記は、SKILL.md の決まり5のとおりステップ6で扱う。
-- **Homebrew のインストーラには sudo が要る。** SKILL.md の決まり9のとおりに用意する。端末の無い呼び出しでは非対話で動き、sudo が通らないと中止する（確かめてから）。Xcode Command Line Tools が無ければ一緒に入り、git も使えるようになる（確かめてから）。
+- **Apple Silicon では、Homebrew は入れた直後は PATH に無い（`/opt/homebrew/bin/brew`）。** 使うコマンドと同じ呼び出しの頭で `eval "$(/opt/homebrew/bin/brew shellenv)"` を読み込む。Intel の `/usr/local/bin` は最初から PATH にある。インストーラーが案内する `~/.zprofile` への追記は、SKILL.md の決まり5のとおりステップ6で扱う。
+- **Homebrew のインストーラーには sudo が要る。** SKILL.md の決まり9のとおりに用意する。端末の無い呼び出しでは非対話で動き、sudo が通らないと中止する（確かめてから）。Xcode Command Line Tools が無ければ一緒に入り、git も使えるようになる（確かめてから）。
 - **`/bin/bash` は 3.2。** その場で書くシェルスクリプトは、3.2 で動く書き方にする（連想配列は 4 から）。
 - **Homebrew の zsh をログインシェルにするなら、先に `/etc/shells` に登録する（sudo）。** macOS 標準の `/bin/zsh` は登録済み。変更が効くのは新しいターミナルから。
 

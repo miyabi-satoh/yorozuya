@@ -17,7 +17,7 @@ const GUIDE = fileURLToPath(new URL('../watch.md', import.meta.url));
 const say = (...lines) => process.stdout.write(`${lines.join('\n')}\n`);
 
 // mod（context-watch）が読み込まれていれば、各セッションが自分を見張るので、外の見張りは始めさせない。
-// CLAUDE_CODE_PLUGIN_DIRS の各フォルダは、それ自身か中のフォルダがプラグインになる。
+// CLAUDE_CODE_PLUGIN_DIRS の各フォルダーは、それ自身か中のフォルダーがプラグインになる。
 const real = (path) => {
   try {
     return realpathSync(path);

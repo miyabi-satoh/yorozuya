@@ -16,6 +16,8 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
+import { GUIDE_SEPARATOR, WITH_GUIDE_SUFFIX } from './lib/prompts.mjs';
+
 const [sessionId, ...rest] = process.argv.slice(2);
 const outFlagIndex = rest.indexOf('--out');
 
@@ -177,7 +179,6 @@ const LABELS = {
 const PREV_LIMIT = 20000;
 // 前の資料そのものの節（状態メモ＋そのセッションの会話ログ）が上限を超えたときに、頭から残す分。状態メモを落とさないため。
 const PREV_HEAD = 3000;
-const WITH_GUIDE = /-with-guide\.md$/;
 // 新セッションへの依頼の定型（restart.mjs・restart-self.mjs・idle-clear.md）。
 // ユーザーが手で `@<ファイル> …` と打って始めたセッションを、前の資料と取り違えないため。
 const HANDOFF_PROMPT = /前セッションの引き継ぎ資料です|自身の再起動です|\/clear で消えた前任/;
@@ -191,7 +192,7 @@ function previousHandoff() {
   if (!match || !HANDOFF_PROMPT.test(match[2])) return null;
   const path = match[1];
   // 進め方をつないだファイルなら、進め方の無い元の資料を読む（進め方を世代ごとに重ねないため）。
-  // 元の資料が消えていれば、つないだファイルから進め方を外して使う（進め方と資料は `---` の行でつないでいる。lib/prompts.mjs）。
+  // 元の資料が消えていれば、つないだファイルから進め方を外して使う。
   const read = (p) => {
     try {
       return readFileSync(p, 'utf8');
@@ -199,13 +200,13 @@ function previousHandoff() {
       return null;
     }
   };
-  if (WITH_GUIDE.test(path)) {
-    const original = path.replace(WITH_GUIDE, '.md');
+  if (path.endsWith(WITH_GUIDE_SUFFIX)) {
+    const original = `${path.slice(0, -WITH_GUIDE_SUFFIX.length)}.md`;
     const text = read(original);
     if (text !== null) return { path: original, text: text.trim() };
     const joined = read(path);
-    const sep = joined?.indexOf('\n\n---\n\n') ?? -1;
-    if (sep >= 0) return { path, text: joined.slice(sep + 7).trim() };
+    const sep = joined?.indexOf(GUIDE_SEPARATOR) ?? -1;
+    if (sep >= 0) return { path, text: joined.slice(sep + GUIDE_SEPARATOR.length).trim() };
     return { path, text: joined?.trim() ?? null };
   }
   const text = read(path);
