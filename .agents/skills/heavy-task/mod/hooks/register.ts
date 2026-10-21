@@ -6,14 +6,14 @@ import type { HeavyWaitWaiting } from '../types'
 // 止められた重い処理と、止められた時刻。空くまで、または15分たつまで持つ。
 const waiting = atom({ plugin: 'heavy-wait', key: 'waiting' } as const, null as HeavyWaitWaiting)
 
-// 止めた hook（scripts/guard-heavy-commands.cjs の CPU_IDLE_MIN）と同じ線で空いたと見る。isHeavyDeny の 10% も同じ値。
+// 止めた hook（scripts/guard-heavy-commands.cjs の CPU_IDLE_MIN）と同じ線で空いたと見る。
 const CPU_IDLE_MIN = 10
 const CHECK_EVERY_MS = 60 * 1000
 const GIVE_UP_AFTER_MS = 15 * 60 * 1000
 
 // guard-heavy-commands.cjs が CPU の厳しさで止めたときの理由の書き出し。
 // 実物の結果の文には、頭に「PreToolUse:Bash hook error: 」が付く。
-export const isHeavyDeny = (text: unknown) => typeof text === 'string' && /^(PreToolUse:\w+ hook error: )?CPU の空きが [\d.]+% で、10% を切っているため、重い処理を止めました/.test(text)
+export const isHeavyDeny = (text: unknown) => typeof text === 'string' && /^(PreToolUse:\w+ hook error: )?CPU の空きが [\d.]+% で、[\d.]+% を切っているため、重い処理を止めました/.test(text)
 
 const commandOf = (e: unknown) => {
   const { command, script } = e as { command?: unknown; script?: unknown }
