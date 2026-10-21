@@ -17,6 +17,7 @@ import { paceNote } from './lib/pace.mjs';
 import { attachGuide } from './lib/prompts.mjs';
 import {
   backgroundWorkHint,
+  currentPane,
   herdr,
   herdrError,
   herdrJson,
@@ -50,8 +51,7 @@ const fail = (message) => {
 const problem = handoffProblem(handoff, '新セッション');
 if (problem) skip(problem);
 
-// $HERDR_PANE_ID はペイン移動前の ID のまま残ることがあるので、現在の ID を引き直す
-const current = herdrJson(['pane', 'current', '--current'])?.result?.pane;
+const current = currentPane();
 const self = current?.pane_id ?? '';
 const sid = current?.agent_session?.value ?? '';
 if (!self || !sid) skip(`自分のペインかセッションIDを特定できない（${herdrError()}）`);

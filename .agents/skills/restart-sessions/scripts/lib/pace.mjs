@@ -8,7 +8,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { herdrJson } from './herdr.mjs';
+import { currentPane } from './herdr.mjs';
 
 const SCRIPTS = fileURLToPath(new URL('../../../weekly-pace/scripts/', import.meta.url));
 // Codex の5時間枠がここまで埋まっていたら、回しても rate limit で落ちるので添えない
@@ -29,8 +29,7 @@ function pace(script, input, timeout) {
 }
 
 // Weekly% はアカウント全体で共有されるので、呼び出し元の自分のペインを読めば足りる。
-// $HERDR_PANE_ID はペイン移動前の ID のまま残ることがあるので、渡されなければ現在の ID を引く。
-export function paceNote(pane = herdrJson(['pane', 'current', '--current'])?.result?.pane?.pane_id) {
+export function paceNote(pane = currentPane()?.pane_id) {
   if (!pane) return '';
   let screen;
   try {

@@ -79,6 +79,12 @@ export function shellIsBack(pane) {
   return group === shell;
 }
 
+// 呼び出し元自身のペイン（pane current の結果そのまま）。取得できなければ undefined。
+// $HERDR_PANE_ID はペイン移動前の ID のまま残ることがあるので、使わずに現在の ID を引き直す。
+export function currentPane() {
+  return herdrJson(['pane', 'current', '--current'])?.result?.pane;
+}
+
 // agent get の結果そのまま。種別・名前・セッションIDをまとめて照合したいときに使う。
 // 取得できなければ null。
 export function agentInfo(target) {
