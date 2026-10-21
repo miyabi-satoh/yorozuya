@@ -69,7 +69,7 @@ if (current.agent !== 'claude') skip(`このペインで動いているのは cl
 const cwd = [current.cwd, current.foreground_cwd].find((value) => typeof value === 'string' && isAbsolute(value));
 if (!cwd) skip('ペインの cwd を Herdr から取れない。新ペインをどこで起動するか決められないので止まる');
 
-// 新ペインの名前。指定が無ければ旧ペインの名前を引き継ぎ、名前が無ければ cwd のフォルダ名から作る。
+// 新ペインの名前。指定が無ければ旧ペインの名前を引き継ぎ、名前が無ければ cwd のフォルダー名から作る。
 // 呼び出し元への依頼は名前で届くので、立て直しの前後で名前を変えない。
 const agents = herdrJson(['agent', 'list'])?.result?.agents;
 const ownName = Array.isArray(agents) ? agents.find((agent) => agent.pane_id === self)?.name : undefined;

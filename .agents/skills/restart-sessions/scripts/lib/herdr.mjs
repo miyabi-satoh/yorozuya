@@ -47,7 +47,7 @@ export function herdrErrorCode() {
 
 // agent prompt がこれらを返したときは、入力を送る前に弾かれている。
 // agent_blocked と agent_not_ready は Herdr の文書に「入力を送る前に弾く」とある。
-// agent_not_found と empty_agent_prompt は実測した。server_not_running は、サーバが
+// agent_not_found と empty_agent_prompt は実測した。server_not_running は、サーバーが
 // 動いていないなら何も届いていない。
 // ここに無いコードは「送られたかもしれない」側として扱う（呼び出し側で FAIL にする）。
 export const SEND_REFUSED = new Set([

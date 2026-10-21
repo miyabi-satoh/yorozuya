@@ -4,7 +4,7 @@
 
 ## 読む前に
 
-- **最後まで通したのは、Ubuntu 24.04.4（arm64）の Docker コンテナで、Claude Code 2.1.270 を使った1回だけ。** GUI アプリ、OS の再起動、systemd を使うもの、macOS、Windows では試していない。手順と `references/os-notes.md` が OS ごとに扱うのは macOS・Ubuntu・WSL・Windows で、ほかの Linux の節は無い
+- **最後まで通したのは、Ubuntu 24.04.4（arm64）の Docker コンテナーで、Claude Code 2.1.270 を使った1回だけ。** GUI アプリ、OS の再起動、systemd を使うもの、macOS、Windows では試していない。手順と `references/os-notes.md` が OS ごとに扱うのは macOS・Ubuntu・WSL・Windows で、ほかの Linux の節は無い
 - **Claude Code が要る。ターミナルはもう1つあると、ずっと楽に進められる。** Claude Code の `!` で打ったコマンドとは対話できないので、sudo のパスワードの入力などは、もう1つのターミナルで打つ。1つしか無いときは、Claude Code を終了してコマンドを打ち、同じディレクトリで `claude --continue` を打って戻る
 - **スマホやデスクトップの Claude アプリがあると楽。** アプリから [Remote Control](https://code.claude.com/docs/en/remote-control) でつなぐと、問いに答えるのが楽になる。無くても進められる。ただし Remote Control は、API キーでログインした Claude Code では使えない
 - **既定の権限設定では、コマンドを打つたびに承認を求められる。** 承認し続けるか、起動するときに権限のモードを選ぶ（[Configure permissions](https://code.claude.com/docs/en/permissions)）
@@ -14,7 +14,7 @@
 
 ```
 0. 使う言語、入れるもの（ジャンルごとの候補から選ぶ）、設定ファイルの置き場所・取ってくる手段・管理ツールなどを、1問ずつ聞く
-1. パッケージマネージャを用意する
+1. パッケージマネージャーを用意する
 2. 設定ファイルを取ってくる道具（git, gh など）を入れる
 3. 認証してもらい、設定ファイルを取ってくる
 4. 選んだアプリ・ツール・言語・フォントを入れる
@@ -33,7 +33,7 @@
    - macOS / Ubuntu / WSL: `curl -fsSL https://claude.ai/install.sh | bash`（Ubuntu で curl が無ければ、先に `sudo apt update && sudo apt install -y curl`）
    - Windows (PowerShell): `irm https://claude.ai/install.ps1 | iex`
 2. できれば、新しいマシンでターミナルを2つ開く。1つは Claude 用、もう1つは管理者権限の要るコマンド（sudo や、Windows では管理者の PowerShell）や `gh auth login` などを自分で打つ用
-3. Claude 用のターミナルで、作業用のディレクトリ（例: `~/machine-setup`）を作って移り、`claude` を起動する。初めて起動するとログインの方法を聞かれ、ブラウザで認証する。Remote Control を使うなら、claude.ai のアカウントでログインする
+3. Claude 用のターミナルで、作業用のディレクトリ（例: `~/machine-setup`）を作って移り、`claude` を起動する。初めて起動するとログインの方法を聞かれ、ブラウザーで認証する。Remote Control を使うなら、claude.ai のアカウントでログインする
 4. 以下の指示を送る。Claude 用のターミナルに直接打ってもよいし、スマホやデスクトップの Claude アプリから [Remote Control](https://code.claude.com/docs/en/remote-control) でつないで送ってもよい（アプリからだと、問いに答えるのが楽）。Remote Control を使うなら、先に `/rc` を打つ。Remote Control の前提になる信頼の確認は、作業用のディレクトリでは記録されるが、ホームディレクトリでは記録されない
 
 > https://raw.githubusercontent.com/miyabi-satoh/yorozuya/main/.agents/skills/machine-setup/SKILL.md を curl -fsSL で取って読み、その手順でこのマシンをセットアップして

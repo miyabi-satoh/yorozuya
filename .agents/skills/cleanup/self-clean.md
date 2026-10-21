@@ -14,13 +14,13 @@ disk-watch の mod から「[ディスクの見張り]」の知らせを受け�
 1. **空きを記録する。** macOS / Linux は `df -h ~`、Windows は `Get-PSDrive C`。
 2. **片付ける場所を挙げる。** 元の clone（知らせに書かれたパス）と、`git worktree list` に出る worktree の、`Cargo.toml` の隣にある `target/`。
 3. **使用中のものを外す。** `ps -Ao pid,command`（Windows は `Get-Process | Select-Object Id,Path`）で、パスにリポジトリを含むプロセスを見る。
-   - ビルド（`cargo`・`rustc`）や開発サーバーが、その `target/` のある場所で動いていれば、その場所は今回は飛ばす。エディタの `rust-analyzer` は数えない。
+   - ビルド（`cargo`・`rustc`）や開発サーバーが、その `target/` のある場所で動いていれば、その場所は今回は飛ばす。エディターの `rust-analyzer` は数えない。
    - `target/<profile>/` のバイナリが動いていれば（常駐させているアプリなど）、そのプロファイルは消さない。
 4. **消す。** 1件ずつ実行し、1件失敗しても残りを続ける。
-   1. 日々の開発で使わないプロファイルとターゲット: `target/` 直下の `debug` 以外のフォルダのうち、中に14日以内に更新されたファイルが無いもの（`find target/<名前> -type f -mtime -14 -print -quit` が何も出さない）。`release` は `cargo clean --release`、ほかのプロファイルは `cargo clean --profile <名前>`、ターゲットの三つ組（`x86_64-pc-windows-msvc` など）は `cargo clean --target <三つ組>`。`--manifest-path` で場所を指す。
+   1. 日々の開発で使わないプロファイルとターゲット: `target/` 直下の `debug` 以外のフォルダーのうち、中に14日以内に更新されたファイルが無いもの（`find target/<名前> -type f -mtime -14 -print -quit` が何も出さない）。`release` は `cargo clean --release`、ほかのプロファイルは `cargo clean --profile <名前>`、ターゲットの三つ組（`x86_64-pc-windows-msvc` など）は `cargo clean --target <三つ組>`。`--manifest-path` で場所を指す。
    2. incremental: `target/<profile>/incremental/` を削除する（`rm -rf` に絶対パスで、1件ずつ）。作り直すのはワークスペースのクレートだけで、依存は作り直さない。
    3. ここまでで空きが知らせのラインに戻らなければ、このリポジトリの `target/` ごとに `cargo clean --profile dev` する（手順3で飛ばした場所は除く）。依存の版を上げた後の古い成果物は、これでしか消えない（cargo の target の GC は 2026-10 の時点で nightly のみ）。次のビルドは依存から作り直しになる。
-5. **共有のキャッシュ（知らせに担当と書かれたときだけ）。** 目録の「パッケージマネージャのキャッシュ」のうち npm・pnpm（`pnpm store prune`）・pnpm のメタデータキャッシュ・yarn・bun・pip・uv・Go ビルドキャッシュ。Go モジュール・Cargo レジストリ・Homebrew は失うもの（オフラインでのビルド・インストール済みの古い版）が大きいので、ここでは消さず報告に書く。
+5. **共有のキャッシュ（知らせに担当と書かれたときだけ）。** 目録の「パッケージマネージャーのキャッシュ」のうち npm・pnpm（`pnpm store prune`）・pnpm のメタデータキャッシュ・yarn・bun・pip・uv・Go ビルドキャッシュ。Go モジュール・Cargo レジストリ・Homebrew は失うもの（オフラインでのビルド・インストール済みの古い版）が大きいので、ここでは消さず報告に書く。
 6. **止められた行の許可を聞く。** 権限の判定で止められた行があれば、ほかの行を全部済ませてから、まとめて1回だけユーザーに許可を聞く。Claude Code なら `AskUserQuestion` のダイアログに、消すパス・大きさ・失うものを書く。許可が出たら消し、断られたら報告に書く。ダイアログを出せないエージェントは、聞かずに報告に書く。
 7. **報告する。** そのペインに、空きの前後、消したもの、飛ばしたもの（理由）を書く。片付けた後もラインを切っていれば、`/cleanup` で全体を調べるよう一行添える。
 

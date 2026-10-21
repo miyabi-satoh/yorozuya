@@ -21,7 +21,7 @@ const commandOf = (e: unknown) => {
 }
 
 // 空きは止めた hook と同じ測り方で測る（このスキルの scripts/guard-heavy-commands.cjs を --idle で呼ぶ）。測れなければ null。
-// mod のフォルダは symlink で読み込まれることがあるので、実体のパスからスキルのフォルダを割り出す。
+// mod のフォルダーは symlink で読み込まれることがあるので、実体のパスからスキルのフォルダーを割り出す。
 async function measureIdle($: EngineInterface) {
   const { realPath } = await $.fs.stat($.plugin.root, { resolve: true })
   const { exitCode, stdout } = await $.process.run(['node', `${realPath ?? $.plugin.root}/../scripts/guard-heavy-commands.cjs`, '--idle'])
