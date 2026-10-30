@@ -15,6 +15,6 @@ skill は、決まったコマンドを順に叩くスクリプトではなく�
 | [heavy-task](.agents/skills/heavy-task/README.md) | hook が CPU の厳しいときに重いコマンドを止め、mod が空いたらセッションに知らせる。hook が拾わない重い処理は、始める前に CPU の空きを測る手順で、始めるか待つかを決める | 何が重いかを足す、使う側の `.claude/heavy-commands.json`（無ければ既定だけを見る）。hook と mod は Claude Code 用（mod は 2.1.289 の function hooks）。止めて知らせるところまでの実機確認は macOS のみ |
 | [cleanup](.agents/skills/cleanup/README.md) | ディスクのゴミの候補を調べてレポートし、選んだものだけ消す。mod が空きを見張り、ラインを切ったら各セッションに自分のリポジトリを片付けさせる | 削除まで通したのは Windows のみ。mod は Claude Code 用で、実機確認は macOS のみ |
 | [machine-setup](.agents/skills/machine-setup/README.md) | 新しいマシンにアプリ・ツールを入れ、設定ファイルを取り込む | Claude Code。最後まで通したのは Ubuntu（Docker）のみ |
-| [pick-three](.agents/skills/pick-three/README.md) | 画面・文言・グラフの見せ方など見た目で選ぶ判断を、方針の違う3つの案を1枚のページに並べて選んでもらい、選ばれた案をプロジェクトの決めごとに書く | 使ったのは Claude Code のアーティファクトのみ。ほかのエージェント向けの HTML ファイルで出す形は未確認 |
+| [pick-three](.agents/skills/pick-three/README.md) | 画面・文言の見せ方や、選択肢の多い決定・絡み合う決定など、文章より並べて見比べたほうが選びやすい判断を1枚のページに並べて選んでもらい、選ばれた案をプロジェクトの決めごとに書く | 使ったのは Claude Code のアーティファクトのみ。ほかのエージェント向けの HTML ファイルで出す形は未確認 |
 
 各 skill の前提・仕組み・使い方は、リンク先の README にある。skill に手を入れるときの決まりは [AGENTS.md](AGENTS.md) にある。
