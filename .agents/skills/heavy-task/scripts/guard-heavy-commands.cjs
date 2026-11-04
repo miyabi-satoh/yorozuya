@@ -239,7 +239,7 @@ function output(hookSpecificOutput) {
 function outsideTabReason() {
   return [
     '重い処理は、Herdr の別のタブで流してください。ログと終了コードが残り、途中で打ち切られても理由が分かります。',
-    `node ${path.join(__dirname, 'run-in-tab.mjs')} --label <名前> -- '<コマンド>'`,
+    `node ${path.join(__dirname, 'run-in-tab.mjs')} --label <用途> -- '<コマンド>'`,
     `タブで流せない事情があるときだけ、コマンドの頭に ${FORCE_MARK} を付けます。`,
   ].join('\n');
 }
