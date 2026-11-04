@@ -49,8 +49,8 @@ description: 重い処理を始める前に、マシンの負荷を確かめて�
 - hook に止められたときは、heavy-wait の mod（このスキルの `mod/`）が1分ごとに空きを測り、空いたとき（15分たっても厳しいときも）にプラグインのメッセージで知らせる。自分で測り直して待たず、知らせを待つ間に軽い作業を進める。
 - mod が無いときや、hook が拾わないコマンドを自分で測って待つときは、foreground の `sleep` が使えないので、`Monitor` などで待つ。
 - Claude Code は、OS からメモリ逼迫の通知を受けると、バックグラウンドの Bash・PowerShell を "stopped because the system is running low on memory" で打ち切る（セッションが30分以上アイドルで、ターンもサブエージェントも動いていないとき）。フォアグラウンドの Bash と Monitor は対象外。macOS・Linux・Windows のどれでも起きる（Windows 11 では 2026-10-10 と 10-11 に、ビルドの最中に実際に起きた）。
-  - 10分以内に終わる処理は、`run_in_background` を使わず、フォアグラウンドで `timeout: 600000` を付けて走らせる。時間切れでバックグラウンドに回ると打ち切りの対象になる。
-  - 10分を超える処理は、Herdr の中（`HERDR_ENV=1`）なら Herdr の別のタブで流す（下の「Herdr のタブで流す」）。タブの中の処理は Claude Code のバックグラウンドの処理でないので、打ち切られず、時間の上限も無い。Herdr の外では、バックグラウンドで走らせる。
+  - Herdr の中（`HERDR_ENV=1`）では、Herdr の別のタブで流す（下の「Herdr のタブで流す」）。タブの中の処理は Claude Code のバックグラウンドの処理でないので、打ち切られず、時間の上限も無い。hook が拾うコマンドをタブの外で流そうとすると、hook が止める。
+  - Herdr の外では、10分以内に終わる処理は、`run_in_background` を使わず、フォアグラウンドで `timeout: 600000` を付けて走らせる（時間切れでバックグラウンドに回ると打ち切りの対象になる）。10分を超える処理は、バックグラウンドで走らせる。
 - 打ち切られたら、その場でマシンの状態を採取する。結果は scratchpad に保存し、打ち切られた時刻と要約をユーザーに報告する。自分からは流し直さず、流し直すかをユーザーに聞く。打ち切りの知らせが、メモリがまだ足りないかもしれないので、頼まれたときだけ流し直すよう求めるため。
   - macOS: `sysctl -n kern.memorystatus_vm_pressure_level`、`vm_stat`、`sysctl -n vm.swapusage`、`ps -Ao rss,comm | sort -rn | head -15`、`pgrep -x node | wc -l`
   - macOS のカーネルログ: `/usr/bin/log show --last 30m --style compact --predicate 'sender == "kernel" AND eventMessage CONTAINS "memorystatus"'`。`memorystatus_available_pages` と `compressor_size` の推移で、逼迫に至る流れを追える。zsh では `log` が組み込みコマンドに奪われるため、フルパスで呼ぶ。
@@ -60,12 +60,15 @@ description: 重い処理を始める前に、マシンの負荷を確かめて�
 
 ### Herdr のタブで流す
 
-1. `herdr tab create --workspace "$HERDR_WORKSPACE_ID" --cwd <リポジトリ> --label "<名前>" --no-focus` でタブを作り、返った `pane_id` と `tab_id` を控える。
-2. `herdr pane run <pane-id> '<コマンド> > "<ログ>" 2>&1; echo "FIN exit=$?"'` で流す。出力はログへ書き、画面には終わりの印と終了コードだけを出す。
-   - タブのシェルが PowerShell なら `'<コマンド> *> "<ログ>"; "FIN exit=$LASTEXITCODE"'`。ログの日本語の行は文字化けすることがある（Windows 11 の PowerShell 7 で 2026-10-11 に起きた）。
-3. `herdr pane wait-output <pane-id> --regex 'FIN exit=[0-9]' --source recent-unwrapped --timeout <ミリ秒>` を `run_in_background` で待つ。`--match 'FIN exit='` は、打ったコマンドの行そのものに当たるので、正規表現で終了コードの数字まで見る。
-   - 待つ側はバックグラウンドの処理なので、打ち切られることがある。タブの処理は続いているので、待ち直す。
-4. 終了コードとログを読み、`herdr tab close <tab-id>` でタブを閉じる。
+高負荷の処理・長時間の処理・出力を読む場合がある処理（ビルド・テスト・検査・ジョブやスクリプトの実行など）は、別のタブで流す。失敗や中断の理由がログと終了コードに残り、理由が分からないまま流し直さずに済む。すぐ終わる読み取り（`git status`・`grep` など）は対象にしない。
+
+`node <このスキル>/scripts/run-in-tab.mjs --label <名前> -- '<コマンド>'`
+
+- タブを作って流し、終わるのを待ち、ログの末尾と終了コードを出してタブを閉じる。終了コードはコマンドのものをそのまま返す。
+- 待ち方: 10分以内に終わる処理はフォアグラウンドで `timeout: 600000` を付ける。超えそうな処理は `run_in_background` を付ける。
+- 待つ側が打ち切られても、タブの処理は続く。始めに出る置き場を指して `--attach <置き場>` で待ち直す。流し直さない。
+- 置き場には、`output.log`（標準出力と標準エラー）と `exit.json`（終了コード・シグナル・タブの側が受けたシグナル・時刻）が残る。失敗や中断の理由は、まずここを読む。既定の置き場は OS の一時フォルダ。残したいログは `--dir` で指す。
+- 標準入力は渡さない。入力を待つコマンドはタブで流さない。
 
 ## 合格条件
 

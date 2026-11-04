@@ -13,7 +13,8 @@
 //   }
 //
 // 引用の中身と heredoc・here-string の本文は見ず、コマンドの位置 (行頭、`;` `&` `|` `(` の後) に来たものだけを見る。
-// 例外は `herdr pane run <ペイン> <コマンド>` で、ペインへ送るコマンドも同じように見る (ビルドやテストもペインで流すことがあるため)。
+// 例外は `herdr pane run <ペイン> <コマンド>` と `node run-in-tab.mjs ... -- <コマンド>` で、ペインへ送るコマンドも同じように見る (ビルドやテストもペインで流すことがあるため)。
+// Herdr の中では、重い処理をペインの外で流すのも止める。ログと終了コードがタブの側に残り、途中で打ち切られても理由が分かるため。
 // 測れないときや入力が読めないときは、何もせずに通す (hook の不具合で作業を止めないため)。
 // 3つの OS で同じに動くよう、負荷は node の os モジュールで測る。
 
@@ -92,10 +93,10 @@ function commandWords(segment) {
   return words;
 }
 
-// `herdr pane run <ペイン> <コマンド>` なら、ペインへ送るコマンドを返す。引用で渡していれば、その中身に戻す。
+// `herdr pane run <ペイン> <コマンド>` か `node run-in-tab.mjs ... -- <コマンド>` なら、ペインへ送るコマンドを返す。引用で渡していれば、その中身に戻す。
 // quotes は、この区切りに出てくる引用の中身 (出てきた順)。
 function paneCommand(segment, quotes) {
-  const sent = segment.match(/^(.*?\bherdr\s+pane\s+run\s+\S+\s+)(\S.*)$/s);
+  const sent = segment.match(/^(.*?\bherdr\s+pane\s+run\s+\S+\s+|.*?\brun-in-tab\.mjs\s+(?:.*?\s)?--\s+)(\S.*)$/s);
   if (!sent) return null;
   let next = (sent[1].match(/''|""/g) ?? []).length;
   return sent[2].replace(/''|""/g, () => quotes[next++] ?? '');
@@ -112,7 +113,8 @@ function commandSegments(command, nested = false) {
     if (words.length === 0) continue;
     segments.push(words);
     // ペインへ送るコマンドの中の `herdr pane run` までは追わない。
-    const sent = !nested && words[0] === 'herdr' ? paneCommand(segment, quotes) : null;
+    const sendsToPane = words[0] === 'herdr' || (words[0] === 'node' && /(^|[\\/])run-in-tab\.mjs$/.test(words[1] ?? ''));
+    const sent = !nested && sendsToPane ? paneCommand(segment, quotes) : null;
     if (sent === null) continue;
     for (const inner of commandSegments(sent, true)) segments.push(Object.assign(inner, { inPane: true }));
   }
@@ -180,15 +182,11 @@ function loadConfig(projectDir) {
   return { defaults, heavy, light: specList(raw, 'light') };
 }
 
-// 重い処理なら true。prePush(dir) は、dir (空ならいまの場所) のリポジトリに pre-push のフックがあるかを返す。
+// 重い処理の語の並びを返す。prePush(dir) は、dir (空ならいまの場所) のリポジトリに pre-push のフックがあるかを返す。
 // cd の後や、-C の先が引用で読めないとき、ペインへ送る push は、どのリポジトリか分からないので重いとみなす。
-function isHeavy(input, config, prePush) {
-  if (JSON.stringify(input.tool_input ?? {}).includes(FORCE_MARK)) return false;
-  if (input.tool_name === 'Workflow') return config.defaults;
-  const command = input.tool_input?.command;
-  if (typeof command !== 'string') return false;
+function heavySegments(command, config, prePush) {
   let movedDir = false;
-  return commandSegments(command).some((words) => {
+  return commandSegments(command).filter((words) => {
     if (words[0] === 'cd' || words[0] === 'pushd' || words[0] === 'Set-Location') movedDir = true;
     if (config.light.some((match) => match(words))) return false;
     if (config.heavy.some((match) => match(words))) return true;
@@ -197,6 +195,22 @@ function isHeavy(input, config, prePush) {
     if (movedDir || words.inPane || pushDir.includes('""') || pushDir.includes("''")) return true;
     return prePush(pushDir);
   });
+}
+
+function isHeavy(input, config, prePush) {
+  if (JSON.stringify(input.tool_input ?? {}).includes(FORCE_MARK)) return false;
+  if (input.tool_name === 'Workflow') return config.defaults;
+  const command = input.tool_input?.command;
+  if (typeof command !== 'string') return false;
+  return heavySegments(command, config, prePush).length > 0;
+}
+
+// 重い処理を、ペインへ送らずに流そうとしていれば true。Workflow はタブで流せないので見ない。
+function runsOutsideTab(input, config, prePush) {
+  if (JSON.stringify(input.tool_input ?? {}).includes(FORCE_MARK)) return false;
+  const command = input.tool_input?.command;
+  if (typeof command !== 'string') return false;
+  return heavySegments(command, config, prePush).some((words) => !words.inPane);
 }
 
 function cpuTotals() {
@@ -220,6 +234,14 @@ async function cpuIdlePercent() {
 
 function output(hookSpecificOutput) {
   process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', ...hookSpecificOutput } }));
+}
+
+function outsideTabReason() {
+  return [
+    '重い処理は、Herdr の別のタブで流してください。ログと終了コードが残り、途中で打ち切られても理由が分かります。',
+    `node ${path.join(__dirname, 'run-in-tab.mjs')} --label <名前> -- '<コマンド>'`,
+    `タブで流せない事情があるときだけ、コマンドの頭に ${FORCE_MARK} を付けます。`,
+  ].join('\n');
 }
 
 function denyReason(input, idle) {
@@ -251,7 +273,12 @@ async function main() {
     return;
   }
   const cwd = input.cwd || projectDir;
-  if (!isHeavy(input, config, (dir) => hasPrePushHook(path.resolve(cwd, dir)))) return;
+  const prePush = (dir) => hasPrePushHook(path.resolve(cwd, dir));
+  if (process.env.HERDR_ENV === '1' && runsOutsideTab(input, config, prePush)) {
+    output({ permissionDecision: 'deny', permissionDecisionReason: outsideTabReason() });
+    return;
+  }
+  if (!isHeavy(input, config, prePush)) return;
 
   const idle = await cpuIdlePercent();
   if (idle !== null && idle < CPU_IDLE_MIN) {
@@ -267,5 +294,5 @@ if (require.main === module && process.argv.includes('--idle')) {
 } else if (require.main === module) {
   main().catch(() => {});
 } else {
-  module.exports = { commandSegments, isHeavy, loadConfig, FORCE_MARK };
+  module.exports = { commandSegments, isHeavy, loadConfig, runsOutsideTab, FORCE_MARK };
 }
