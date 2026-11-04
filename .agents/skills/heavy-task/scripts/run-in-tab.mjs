@@ -18,7 +18,7 @@ const POLL_MS = 1000;
 const START_TIMEOUT_MS = 30_000;
 // exit の後に残った子孫が標準出力を握っていても、待ち続けない。
 const OUTPUT_DRAIN_MS = 2000;
-// Windows でタブが閉じると、子はこのコードで終わる。SIGHUP はその後に届くので、記録に間に合わない。Ctrl+C では SIGINT が先に届く。
+// Windows でタブが閉じると、子はこのコードで終わる。SIGHUP はその後に届き、exit.json を書くのに間に合わない。Ctrl+C では SIGINT が先に届く。
 const STATUS_CONTROL_C_EXIT = 0xc000013a;
 const DEFAULT_TAIL_LINES = 40;
 const TAIL_BYTES = 256 * 1024;
@@ -134,8 +134,8 @@ function describe({ code, signal, interruptedBy, error, seconds }) {
 }
 
 function exitCode({ code, signal, interruptedBy }) {
-  // そのまま返すと下位8ビットに丸められ、普通の失敗に見える。
-  if (code === STATUS_CONTROL_C_EXIT && interruptedBy) return 128 + os.constants.signals[interruptedBy];
+  // 3221225786 をそのまま返すと 58 に丸められ、普通の失敗に見える。
+  if (code === STATUS_CONTROL_C_EXIT) return 128 + os.constants.signals[interruptedBy];
   return code ?? 128 + (os.constants.signals[signal] ?? 0);
 }
 
