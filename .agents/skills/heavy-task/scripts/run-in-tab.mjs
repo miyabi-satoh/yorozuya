@@ -18,6 +18,8 @@ const POLL_MS = 1000;
 const START_TIMEOUT_MS = 30_000;
 // exit の後に残った子孫が標準出力を握っていても、待ち続けない。
 const OUTPUT_DRAIN_MS = 2000;
+// Windows でタブが閉じると、子が先に終わり、SIGHUP はその数 ms 後に届く。負荷が高くても届くまで待ち、終わりの遅れは気づかれない長さ。
+const INTERRUPT_SETTLE_MS = process.platform === 'win32' ? 500 : 0;
 const DEFAULT_TAIL_LINES = 40;
 const TAIL_BYTES = 256 * 1024;
 // 止める知らせを無視する処理は、この後で強制終了する。
@@ -119,7 +121,7 @@ function runner(dir) {
   }
   child.on('error', (error) => finish(127, null, error.message));
   child.on('exit', (code, signal) => setTimeout(() => finish(code, signal), OUTPUT_DRAIN_MS));
-  child.on('close', (code, signal) => finish(code, signal));
+  child.on('close', (code, signal) => setTimeout(() => finish(code, signal), INTERRUPT_SETTLE_MS));
 }
 
 function describe({ code, signal, interruptedBy, error, seconds }) {
@@ -130,7 +132,9 @@ function describe({ code, signal, interruptedBy, error, seconds }) {
   return parts.join(' ');
 }
 
-function exitCode({ code, signal }) {
+function exitCode({ code, signal, interruptedBy }) {
+  // Windows でタブが閉じると、子は 0xC000013A で終わる。そのまま返すと下位8ビットに丸められ、普通の失敗に見える。
+  if (interruptedBy && code > 255) return 128 + os.constants.signals[interruptedBy];
   return code ?? 128 + (os.constants.signals[signal] ?? 0);
 }
 
