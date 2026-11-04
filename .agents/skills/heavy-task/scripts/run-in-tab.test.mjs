@@ -73,7 +73,7 @@ test('タブの側が止められたら、受けたシグナルを残す', async
 
 test('止める知らせを無視する処理でも、理由を残して終わる', async () => {
   const dir = tmp();
-  fs.writeFileSync(path.join(dir, 'job.json'), JSON.stringify({ command: "trap '' HUP; sleep 30", cwd: dir }));
+  fs.writeFileSync(path.join(dir, 'job.json'), JSON.stringify({ command: "trap '' HUP; sleep 30 & echo $! > pid; wait", cwd: dir }));
   const child = spawn('node', [script, '--runner', dir], { stdio: 'ignore', env: { ...process.env, SHELL: '/bin/sh' } });
   while (!fs.existsSync(path.join(dir, 'output.log'))) await new Promise((resolve) => setTimeout(resolve, 50));
   await new Promise((resolve) => setTimeout(resolve, 200));
@@ -82,6 +82,8 @@ test('止める知らせを無視する処理でも、理由を残して終わ�
   const result = JSON.parse(fs.readFileSync(path.join(dir, 'exit.json'), 'utf8'));
   assert.equal(result.interruptedBy, 'SIGHUP');
   assert.equal(result.signal, 'SIGKILL');
+  const grandchild = Number(fs.readFileSync(path.join(dir, 'pid'), 'utf8'));
+  assert.throws(() => process.kill(grandchild, 0), { code: 'ESRCH' });
 });
 
 test('待ち直すと、終わった処理の結果を読める', () => {

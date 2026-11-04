@@ -73,7 +73,17 @@ function runner(dir) {
 
   const [shell, args] = shellFor(job.command);
   // 入力を待つコマンドが誰にも気づかれず止まり続けないよう、標準入力は渡さない。
-  const child = spawn(shell, args, { cwd: job.cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+  // 止めるときにシェルの子孫まで届くよう、プロセスグループを分ける（Windows には無い）。
+  const ownGroup = process.platform !== 'win32';
+  const child = spawn(shell, args, { cwd: job.cwd, stdio: ['ignore', 'pipe', 'pipe'], detached: ownGroup });
+  const signalChild = (name) => {
+    try {
+      if (ownGroup) process.kill(-child.pid, name);
+      else child.kill(name);
+    } catch {
+      // 既に終わっていてもよい。
+    }
+  };
   child.stdout.on('data', (chunk) => write(process.stdout, chunk));
   child.stderr.on('data', (chunk) => write(process.stderr, chunk));
 
@@ -101,8 +111,8 @@ function runner(dir) {
   for (const name of ['SIGHUP', 'SIGINT', 'SIGTERM']) {
     process.on(name, () => {
       interruptedBy = name;
-      child.kill(name);
-      setTimeout(() => child.kill('SIGKILL'), INTERRUPT_GRACE_MS);
+      signalChild(name);
+      setTimeout(() => signalChild('SIGKILL'), INTERRUPT_GRACE_MS);
     });
   }
   child.on('error', (error) => finish(127, null, error.message));
