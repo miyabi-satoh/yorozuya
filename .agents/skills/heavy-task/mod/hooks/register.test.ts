@@ -24,6 +24,7 @@ describe('isHeavyDeny', () => {
     expect(isHeavyDeny('CPU の空きが 4.2% で、10% を切っているため、重い処理を止めました。')).toBe(true)
     expect(isHeavyDeny('echo "CPU の空きが 4.2% で、10% を切っているため、重い処理を止めました"')).toBe(false)
     expect(isHeavyDeny('command not found')).toBe(false)
+    expect(isHeavyDeny('PreToolUse:Bash hook error: 重い処理は、Herdr の別のタブで流してください。')).toBe(false)
   })
 })
 

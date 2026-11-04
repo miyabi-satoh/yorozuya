@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { test } = require('node:test');
-const { isHeavy, loadConfig } = require('./guard-heavy-commands.cjs');
+const { isHeavy, loadConfig, runsOutsideTab } = require('./guard-heavy-commands.cjs');
 
 function projectWith(config) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'guard-heavy-'));
@@ -53,6 +53,26 @@ test('設定に書いたものと既定を重いとみなす', () => {
   }
   assert.equal(heavy({ tool_name: 'Workflow', tool_input: { script: 'x' } }), true);
   assert.equal(heavy({ tool_name: 'PowerShell', tool_input: { command: 'just ci' } }), true);
+});
+
+test('run-in-tab へ渡す重いコマンドは、重いがタブの外ではないとみなす', () => {
+  const outside = (command) => runsOutsideTab(bash(command), config, () => true);
+  for (const command of [
+    "node ~/.agents/skills/heavy-task/scripts/run-in-tab.mjs -- 'just ci'",
+    "node ~/x/run-in-tab.mjs --label 'CI の検査' --cwd /x -- 'cd /y && cargo test'",
+    'herdr pane run w1:p1 "just ci"',
+    "cd /x && node run-in-tab.mjs -- 'git push'",
+  ]) {
+    assert.equal(heavy(bash(command)), true, command);
+    assert.equal(outside(command), false, command);
+  }
+  for (const command of ['just ci', 'cargo test | tail', 'git push', "herdr pane read w1:p1; just ci", 'CLAUDE_X=1 just ci', "node x.mjs -- 'just fmt' && just ci"]) {
+    assert.equal(outside(command), true, command);
+  }
+  for (const command of ['git status', "node ~/x/run-in-tab.mjs -- 'just fmt'", "node ~/x/run-in-tab.mjs --attach /x", 'CLAUDE_FORCE_HEAVY=1 just ci']) {
+    assert.equal(outside(command), false, command);
+  }
+  assert.equal(runsOutsideTab({ tool_name: 'Workflow', tool_input: { script: 'x' } }, config, () => true), false);
 });
 
 test('引用・heredoc・here-string の中の語や、軽いものは見逃す', () => {
