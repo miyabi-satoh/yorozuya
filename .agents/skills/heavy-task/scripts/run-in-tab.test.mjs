@@ -79,7 +79,9 @@ test('止める知らせを無視する処理でも、理由を残して終わ�
   await new Promise((resolve) => setTimeout(resolve, 200));
   child.kill('SIGHUP');
   await new Promise((resolve) => child.on('exit', resolve));
-  assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'exit.json'), 'utf8')).interruptedBy, 'SIGHUP');
+  const result = JSON.parse(fs.readFileSync(path.join(dir, 'exit.json'), 'utf8'));
+  assert.equal(result.interruptedBy, 'SIGHUP');
+  assert.equal(result.signal, 'SIGKILL');
 });
 
 test('待ち直すと、終わった処理の結果を読める', () => {

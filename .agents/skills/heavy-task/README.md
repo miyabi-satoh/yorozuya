@@ -10,6 +10,7 @@
 - **mod は Claude Code の function hooks（早期アクセスの API）に頼っている。** 版ごとに変わりうる。Claude Code 2.1.289 で確かめた
 - **止めて知らせるところまで実物で通したのは macOS だけ。** hook が CPU の厳しさで止め、mod が空きを測り続けて知らせるところまで、macOS（Claude Code 2.1.289）で確かめた。Windows 11（Claude Code 2.1.296・Node.js 26.5.0）では、`--idle` が CPU の空きを返すところまで確かめた。hook が止めるところと mod は試していない。Linux の測り方（`os.cpus()`）はコードにあるが、実物では試していない
 - **`run-in-tab.mjs` を実物の Herdr で通したのは macOS（Herdr 0.9.3）だけ。** Windows では `pwsh` で流す形にしてあるが、試していない
+- **`run-in-tab.mjs` のタブ名は、Claude Code の内部のファイル（`~/.claude/sessions/<pid>.json`）からセッションの名前を読む。** 公開された API ではないので、版によって読めなくなりうる。読めなければリポジトリの名前を付ける
 - **CPU の空きだけを見る。** 測れないとき・入力が読めないときは、止めずに通す
 
 ## できること

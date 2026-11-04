@@ -20,10 +20,10 @@ const START_TIMEOUT_MS = 30_000;
 const OUTPUT_DRAIN_MS = 2000;
 const DEFAULT_TAIL_LINES = 40;
 const TAIL_BYTES = 256 * 1024;
-// 止める知らせを無視する処理があっても、理由を記録しないまま止まり続けない。
+// 止める知らせを無視する処理は、この後で強制終了する。
 const INTERRUPT_GRACE_MS = 5000;
 const PANE_CHECK_MS = 5000;
-// タブが閉じると、タブの側はこの間に exit.json を書く。INTERRUPT_GRACE_MS より長くする。
+// タブが閉じると、タブの側はこの間に exit.json を書く。INTERRUPT_GRACE_MS と OUTPUT_DRAIN_MS の和より長くする。
 const CLOSED_TAB_GRACE_MS = 10_000;
 // 記録の無いまま終わったとき。コマンドの終了コードと区別できるよう、文でも伝える。
 const EXIT_NO_RECORD = 125;
@@ -102,7 +102,7 @@ function runner(dir) {
     process.on(name, () => {
       interruptedBy = name;
       child.kill(name);
-      setTimeout(() => finish(null, null), INTERRUPT_GRACE_MS);
+      setTimeout(() => child.kill('SIGKILL'), INTERRUPT_GRACE_MS);
     });
   }
   child.on('error', (error) => finish(127, null, error.message));
@@ -111,7 +111,7 @@ function runner(dir) {
 }
 
 function describe({ code, signal, interruptedBy, error, seconds }) {
-  const parts = [signal ? `signal=${signal}` : code === null ? '処理の終わりを確かめられなかった' : `exit=${code}`];
+  const parts = [signal ? `signal=${signal}` : `exit=${code}`];
   if (interruptedBy) parts.push(`タブの側が ${interruptedBy} を受けた`);
   if (error) parts.push(`起動できなかった: ${error}`);
   parts.push(`${seconds}秒`);
@@ -252,6 +252,7 @@ function start({ command, label, cwd, dir }) {
     herdr('pane', 'run', job.pane, `node "${fileURLToPath(import.meta.url)}" --runner "${jobDir}"`);
   } catch (error) {
     closeTab(job.tab);
+    fs.rmSync(jobFile(jobDir));
     throw error;
   }
   return jobDir;
