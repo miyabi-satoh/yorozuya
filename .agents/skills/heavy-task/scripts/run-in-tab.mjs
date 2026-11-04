@@ -18,6 +18,8 @@ const POLL_MS = 1000;
 const START_TIMEOUT_MS = 30_000;
 // exit の後に残った子孫が標準出力を握っていても、待ち続けない。
 const OUTPUT_DRAIN_MS = 2000;
+// Windows でタブが閉じると、子はこのコードで終わる。SIGHUP はその後に届き、exit.json を書くのに間に合わない。Ctrl+C では SIGINT が先に届く。
+const STATUS_CONTROL_C_EXIT = 0xc000013a;
 const DEFAULT_TAIL_LINES = 40;
 const TAIL_BYTES = 256 * 1024;
 // 止める知らせを無視する処理は、この後で強制終了する。
@@ -92,6 +94,7 @@ function runner(dir) {
   const finish = (code, signal, error) => {
     if (finished) return;
     finished = true;
+    if (code === STATUS_CONTROL_C_EXIT) interruptedBy ??= 'SIGHUP';
     const endedAt = new Date();
     const result = {
       code,
@@ -130,7 +133,9 @@ function describe({ code, signal, interruptedBy, error, seconds }) {
   return parts.join(' ');
 }
 
-function exitCode({ code, signal }) {
+function exitCode({ code, signal, interruptedBy }) {
+  // 3221225786 をそのまま返すと 58 に丸められ、普通の失敗に見える。
+  if (code === STATUS_CONTROL_C_EXIT) return 128 + os.constants.signals[interruptedBy];
   return code ?? 128 + (os.constants.signals[signal] ?? 0);
 }
 
