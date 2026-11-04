@@ -110,8 +110,10 @@ function runner(dir) {
   };
   for (const name of ['SIGHUP', 'SIGINT', 'SIGTERM']) {
     process.on(name, () => {
-      interruptedBy = name;
       signalChild(name);
+      // 続けて届いても、最初の理由を残し、強制終了の時刻を延ばさない。
+      if (interruptedBy) return;
+      interruptedBy = name;
       setTimeout(() => signalChild('SIGKILL'), INTERRUPT_GRACE_MS);
     });
   }

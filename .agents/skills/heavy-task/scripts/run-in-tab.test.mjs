@@ -75,8 +75,9 @@ test('止める知らせを無視する処理でも、理由を残して終わ�
   const dir = tmp();
   fs.writeFileSync(path.join(dir, 'job.json'), JSON.stringify({ command: "trap '' HUP; sleep 30 & echo $! > pid; wait", cwd: dir }));
   const child = spawn('node', [script, '--runner', dir], { stdio: 'ignore', env: { ...process.env, SHELL: '/bin/sh' } });
-  while (!fs.existsSync(path.join(dir, 'output.log'))) await new Promise((resolve) => setTimeout(resolve, 50));
-  await new Promise((resolve) => setTimeout(resolve, 200));
+  while (!fs.existsSync(path.join(dir, 'pid')) || !fs.readFileSync(path.join(dir, 'pid'), 'utf8').trim()) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
   child.kill('SIGHUP');
   await new Promise((resolve) => child.on('exit', resolve));
   const result = JSON.parse(fs.readFileSync(path.join(dir, 'exit.json'), 'utf8'));
