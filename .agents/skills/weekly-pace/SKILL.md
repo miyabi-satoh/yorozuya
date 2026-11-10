@@ -1,6 +1,6 @@
 ---
 name: weekly-pace
-description: Claude・Codex 双方の週次使用ペースを判定する。Claude側はステータスラインの Weekly%/Weekly Reset、Codex側は app-server の account/rateLimits/read から直接取る。ユーザーが「ペースどう」「ハイペースか」「Codex に投げたほうがいい？」と尋ねたときや、委譲できる作業をどちらに回すか自分で判断したいときに使う。
+description: Claude・Codex 双方の週次使用ペースを判定する。Claude側は使用量 API（Claude Code の OAuth トークン）、Codex側は app-server の account/rateLimits/read から直接取る。ユーザーが「ペースどう」「ハイペースか」「Codex に投げたほうがいい？」と尋ねたときや、委譲できる作業をどちらに回すか自分で判断したいときに使う。
 ---
 
 # 週次使用ペースの判定
@@ -9,8 +9,8 @@ description: Claude・Codex 双方の週次使用ペースを判定する。Clau
 
 Claude・Codex の週次枠を、リセットまで今のペースで使い続けたときの着地見込み%で判定する。
 
-`Weekly: X% | Weekly Reset: Nd Hhr Mm` は、**アカウント全体で共有される週次（7日=168h）の使用量**。
-どの claude ペインを読んでも同じ値になる。これを線形・比例で消費していくと仮定し、リセットまでの着地見込み%を概算する。
+週次枠は、**アカウント全体で共有される週次（7日=168h）の使用量**。
+どのマシン・どのセッションで取っても同じ値になる。これを線形・比例で消費していくと仮定し、リセットまでの着地見込み%を概算する。
 あくまで目安・参考程度。ペースそのもの（%/h）ではなく、着地見込みが100%を超えるかどうかだけを見る。
 
 ## やらないこと
@@ -34,15 +34,20 @@ Claude・Codex の週次枠を、リセットまで今のペースで使い続�
 
 ### Claude側
 
-1. claude ペインの画面を読む。Claude から使うなら自分のペインでよい（`herdr pane current --current` の `result.pane.pane_id`。`$HERDR_PANE_ID` はペインを移すと古いまま残ることがある）。ステータスラインは会話の文脈には入らないが、画面には出ている。Codex から使うなら、`herdr agent list` で claude のペインを選ぶ（どれでもよい、値は共有されている）。
-   ```
-   herdr pane read <pane_id> --source visible
-   ```
-2. 読んだテキストをそのまま渡す（`--json` を付けると数値で返る）。
+Claude の使用量 API から直接取れる。画面を読む必要はなく、Herdr の外でも、どの OS でも動く。クォータは消費しない。
+
+```
+node <このスキルのディレクトリ>/scripts/pace.mjs
+```
+
+1. 上を流す（`--json` を付けると数値で返る）。
+2. 出力をそのままユーザーに伝える。判定不可（サイクル開始から経過2時間未満）のときはその旨だけ伝える。
+3. 取れなかったとき（アクセストークンが切れている・API が 429 を返し続ける など）は、ステータスラインから読む。claude ペインの画面（Claude から使うなら自分のペイン。`herdr pane current --current` の `result.pane.pane_id`）を渡す。
    ```
    herdr pane read <pane_id> --source visible | node <このスキルのディレクトリ>/scripts/pace.mjs
    ```
-3. 出力をそのままユーザーに伝える。判定不可（サイクル開始から経過2時間未満）のときはその旨だけ伝える。
+
+`claude-usage.mjs` 単体は、`codex-usage.mjs` と同じ形の JSON を返す（`primary`=5時間枠、`secondary`=週次枠）。API はすぐに 429 を返すので、15分はキャッシュの値を返す。
 
 ### Codex側
 

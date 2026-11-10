@@ -18,7 +18,7 @@
 - **mod を使わずに、`config.local.json` を置き、使う側に SessionStart の hook を置くと、起動のたびにコンテキストの見張りが始まり、知らせは確認なしで流す。** 見張るのは Herdr 上の claude ペインすべて（他のプロジェクトのものも）。使用率が閾値（既定 30%）以上になるか更新の知らせが出たセッションは会話ログを引き継いで再起動し、放置のヒントが出たセッションには `/clear` を送る。知らせのたびに確認させたいなら、`config.local.json` の `confirm` を `true` にする
 - **コンテキストの見張りは、ステータスラインに使用率が出ていることが前提。** 出していなければ、見張りだけ使えない。ステータスラインは自分で設定するもので、[ccstatusline](https://github.com/sirmalloc/ccstatusline) などで出せる
 - **見張りには `config.local.json` が要る。** スキルのディレクトリで `cp config.example.json config.local.json` として作り、`watch.pattern` をステータスラインの使用率の表示に合わせる（例は ccstatusline の `Ctx Used: 12.3%` 用）。無ければ見張りは始まらない。このリポジトリの `.gitignore` で除外しているので、pull しても上書きされない（skill を symlink でなく写したなら、使う側の `.gitignore` に足す）
-- **再起動の依頼に、週次枠のペースの一文を添えることがある。** Claude がハイペースで Codex に余裕があるとき（[weekly-pace](../weekly-pace/README.md) の判定）、判断の質が落ちにくい作業を Codex に回すよう新セッションに書く。取れなければ（ステータスラインに Weekly が無い・`codex` が無い）何も添えない
+- **再起動の依頼に、週次枠のペースの一文を添えることがある。** Claude がハイペースで Codex に余裕があるとき（[weekly-pace](../weekly-pace/README.md) の判定）、判断の質が落ちにくい作業を Codex に回すよう新セッションに書く。取れなければ（Claude の使用量 API もステータスラインの Weekly も読めない・`codex` が無い）何も添えない
 - **見張りは、見張る側のセッションが起きている間だけ動く。** そのセッションを閉じれば見張りも止まる。一定時間で切れるので、そのたびに張り直させる
 - **`/exit` を送る直前に対象の入力欄を読み、書きかけがあれば止まる。** 書きかけの末尾に `/exit` がつながって送信されるため。読んでから送るまでの1秒ほどの間に打ち始められたら防げないので、再起動の最中は対象のペインで打たないこと
 - **照合と `/exit` は一続きにできない。** herdr にはセッションを指定して送る手段が無いので、照合した直後に同じペインの中身が入れ替わると、入れ替わった相手に届く。実行中は対象のペインを他から操作しないこと
@@ -147,9 +147,10 @@ Claude Code の更新の知らせ（再起動で反映される）や、放置�
 - `herdr pane read --source visible` で、ステータスラインまで含めた画面が読める（見張り）
 - `herdr agent wait --until` が指定した状態になるまで待ち、時間切れなら `timeout` のエラーを返す。`herdr agent send-keys <name> Enter` で入力欄の中身が送信される（再起動の後に、資料を読ませる依頼が送信されたかの確認）
 
-**Codex**（週次枠のペースを添えるときだけ）
+**週次枠のペース**（添えるときだけ。詳しくは [weekly-pace](../weekly-pace/README.md)）
 
-- `codex app-server` の `account/rateLimits/read`（詳しくは [weekly-pace](../weekly-pace/README.md)）。取れなければ何も添えずに再起動を続ける
+- Claude の使用量 API（`/api/oauth/usage`）。取れなければ、上のステータスラインの読み取りで補う
+- `codex app-server` の `account/rateLimits/read`。どちらかが取れなければ何も添えずに再起動を続ける
 
 壊れたときは、このどれが変わったかから当たりを付ける。
 止まり方は SKIP と FAIL で、どちらも**対象のセッションには手を付けていない**か、`claude --resume <ID>` で戻せる状態で止まる。

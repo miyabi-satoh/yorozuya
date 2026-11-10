@@ -2,9 +2,9 @@
 //
 // Claude がハイペースで Codex に余裕があるときだけ、任せられる作業を Codex に回すよう書く。
 // 再起動のたびに入るので、毎回のプロンプトで差し込む hook を各セッションに置かずに済む。
-// 最長で約18秒かかる（画面の読み取り3秒・pace.mjs 3秒・codex の問い合わせ12秒）ので、呼び出し側は事前の確かめより前に呼ぶ（確かめてから /exit までを空けない）。
+// 最長で約28秒かかる（使用量 API 10秒・画面の読み取り3秒・画面からの判定3秒・codex の問い合わせ12秒）ので、呼び出し側は事前の確かめより前に呼ぶ（確かめてから /exit までを空けない）。
 // 読み違えても、新セッションが作業をどちらに回すかが変わるだけで、後戻りできない操作には進まない。
-// 取れないとき（Herdr の外・ステータスラインに Weekly が無い・codex が無い）は何も添えない。
+// 取れないとき（使用量 API も画面も読めない・codex が無い）は何も添えない。
 
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -28,9 +28,11 @@ function pace(script, input, timeout) {
   }
 }
 
-// Weekly% はアカウント全体で共有されるので、呼び出し元の自分のペインを読めば足りる。
-export function paceNote(pane = currentPane()?.pane_id) {
-  if (!pane) return '';
+// Claude 側は使用量 API（pace.mjs が入力なしで叩く）を先に使う。取れなければ、呼び出し元の自分のペインの
+// ステータスラインから読む（Weekly% はアカウント全体で共有されるので、自分のペインで足りる）。
+function claudePace(pane) {
+  const fromApi = pace('pace.mjs', '', 10000);
+  if (fromApi || !pane) return fromApi;
   let screen;
   try {
     screen = execFileSync('herdr', ['pane', 'read', pane, '--source', 'visible'], {
@@ -39,9 +41,13 @@ export function paceNote(pane = currentPane()?.pane_id) {
       stdio: ['ignore', 'pipe', 'ignore'],
     });
   } catch {
-    return '';
+    return null;
   }
-  const claude = pace('pace.mjs', screen, 3000);
+  return pace('pace.mjs', screen, 3000);
+}
+
+export function paceNote(pane = currentPane()?.pane_id) {
+  const claude = claudePace(pane);
   if (!claude || claude.projected === null || claude.projected <= 100) return '';
 
   const codex = pace('codex-pace.mjs', '', 12000);

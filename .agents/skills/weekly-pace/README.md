@@ -4,11 +4,13 @@ Claude と Codex の週次使用ペースを概算する。
 
 ## 読む前に
 
-- **Claude 側は ccstatusline 系の表示（`Weekly: X% | Weekly Reset: Nd Hhr Mm`）と Herdr が前提。** claude ペインの画面を `herdr pane read` で読むので、どちらかが無ければ使えない
+- **Claude 側は Claude Code のログインが前提。** Claude Code がログインに使う OAuth トークン（Linux・Windows は `~/.claude/.credentials.json`、macOS はキーチェーンの `Claude Code-credentials`）で、使用量 API（`https://api.anthropic.com/api/oauth/usage`）を読む。公開された API ではなく、ccstatusline や Omarchy も同じ API を読んでいる。トークンを更新するのは Claude Code 本体なので、しばらく起動していないと切れて取れない
+- **macOS では、初めてキーチェーンを読むときに許可のダイアログが出ることがある**
+- **API で取れないときは、画面からも読める。** ccstatusline 系の表示（`Weekly: X% | Weekly Reset: Nd Hhr Mm`）を `herdr pane read` で読んで渡す
 - **Codex 側は `codex` CLI が PATH に要る。** `codex app-server` の `account/rateLimits/read` から取る（クォータは消費しない）。codex-cli 0.157.0 で確認
 - **線形・比例で消費すると仮定した、あくまで目安。** 実際の消費は波があるので、外れることがある
 - **週の頭（経過が短い）ほど数字が跳ねる。** 経過2時間未満は判定不可として返す
-- **Weekly% はアカウント全体で共有される値。** どの claude ペインを読んでも同じで、自分のペインを読んでもよい
+- **Weekly% はアカウント全体で共有される値。** どのマシン・どのセッションで取っても同じ
 
 ## できること
 
@@ -31,6 +33,7 @@ Weekly 8%（経過 7.5h / リセットまで残り 160.5h）→ このペース�
 | | |
 | --- | --- |
 | `SKILL.md` | 手順 |
-| `scripts/pace.mjs` | Claude 側。画面のテキストから Weekly%・Weekly Reset を読み、着地見込みを計算する |
+| `scripts/claude-usage.mjs` | Claude 側。使用量 API から5時間枠・週次枠の使用率とリセット時刻を JSON で取る（15分キャッシュ） |
+| `scripts/pace.mjs` | Claude 側。`claude-usage.mjs` の出力（取れなければ画面のテキスト）から週次枠の着地見込みを計算する |
 | `scripts/codex-usage.mjs` | Codex 側。app-server から5時間枠・週次枠の使用率とリセット時刻を JSON で取る |
 | `scripts/codex-pace.mjs` | Codex 側。`codex-usage.mjs` の出力から週次枠の着地見込みを計算する |

@@ -1,13 +1,23 @@
 #!/usr/bin/env node
-// ステータスラインの「Weekly: X% | Weekly Reset: Nd Hhr Mm」から、週次サイクル（7日=168h）を線形・比例で消費していくと仮定した場合の着地見込み%を概算する。あくまで目安。
+// Claude の週次枠（7日=168h）を、線形・比例で消費していくと仮定した場合の着地見込み%を概算する。あくまで目安。
 //
 // usage: pace.mjs [--text '<画面のテキスト>'] [--json]
-//   --text を省けば stdin から読む（herdr pane read の出力をそのままパイプしてよい）。
-//   --json なら {pct, elapsedHours, remainingHours, projected} を出す（判定不可のとき projected は null）。
+//   入力が無ければ claude-usage.mjs（使用量 API）を自分で叩く。ふだんはこれでよい。
+//   stdin に claude-usage.mjs の JSON を渡してもよい。
+//   API で取れないときの予備として、ステータスラインの「Weekly: X% | Weekly Reset: Nd Hhr Mm」を含む画面のテキスト
+//   （--text か stdin。herdr pane read の出力をそのままパイプしてよい）からも読める。
+//   --json なら {pct, elapsedHours, remainingHours, projected, primaryPct} を出す（判定不可のとき projected は null。
+//   primaryPct は5時間枠の使用率で、画面から読んだときは null）。
 //
-// Weekly% はアカウント全体で共有される値なので、動いている claude ペインならどれを読んでもよい（自分のペインでもよい）。
+// Weekly% はアカウント全体で共有される値なので、どのマシン・どのセッションで取っても同じ。
 
+import { execFileSync } from 'node:child_process';
 import { text as readStream } from 'node:stream/consumers';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const WEEKLY_CYCLE_HOURS = 168; // 7日
 
 const args = process.argv.slice(2);
 const textFlagIndex = args.indexOf('--text');
@@ -15,42 +25,75 @@ if (textFlagIndex >= 0 && args[textFlagIndex + 1] === undefined) {
   process.stderr.write('--text には値が要る。\n');
   process.exit(1);
 }
-// readFileSync(0) は上流がまだ書いていないパイプで EAGAIN になるので、ストリームで読み切る。
-const raw = textFlagIndex >= 0 ? args[textFlagIndex + 1] : await readStream(process.stdin);
-// ステータスラインの空白はノーブレークスペース（U+00A0）。
-// 照合の前に普通の空白へ揃える（揃えないと "Weekly Reset" のような固定文字列がマッチしない）。
-const text = raw.replace(/\u00a0/g, ' ');
 
-const WEEKLY_CYCLE_HOURS = 168; // 7日
-
-// 画面上部の会話に古い値が残っていることがあるので、最下部のステータスラインにあたる最後の一致を使う。
-const lastMatch = (re) => [...text.matchAll(re)].at(-1);
-
-// 例: "Weekly Reset: 6d 17hr 34m" / "Weekly Reset: 17hr 34m" / "Weekly Reset: 34m" / compact 表示の "6d17h34m"
-const pctMatch = lastMatch(/Weekly:\s*(\d+(?:\.\d+)?)%/g);
-const resetMatch = lastMatch(/Weekly Reset:\s*(?:(\d+)d\s*)?(?:(\d+)hr?\s*)?(?:(\d+)m)?/g);
-
-if (!pctMatch || !resetMatch || (!resetMatch[1] && !resetMatch[2] && !resetMatch[3])) {
-  process.stderr.write('Weekly% か Weekly Reset を読み取れなかった。ステータスラインの表示が既定と違うかもしれない。\n');
+function fail(message) {
+  process.stderr.write(`${message}\n`);
   process.exit(1);
 }
 
-const pct = Number(pctMatch[1]);
-if (!Number.isFinite(pct)) {
-  process.stderr.write(`Weekly% の値がおかしい: "${pctMatch[1]}"\n`);
-  process.exit(1);
+async function readInput() {
+  if (textFlagIndex >= 0) return args[textFlagIndex + 1];
+  if (process.stdin.isTTY) return '';
+  // readFileSync(0) は上流がまだ書いていないパイプで EAGAIN になるので、ストリームで読み切る。
+  return readStream(process.stdin);
 }
-const days = Number(resetMatch[1] ?? 0);
-const hours = Number(resetMatch[2] ?? 0);
-const minutes = Number(resetMatch[3] ?? 0);
-const remainingHours = days * 24 + hours + minutes / 60;
+
+function fromUsage(usage) {
+  const secondary = usage.secondary;
+  if (!secondary || typeof secondary.usedPercent !== 'number' || !secondary.resetsAt) {
+    fail('secondary(週次枠)の情報が取れなかった。');
+  }
+  return {
+    pct: secondary.usedPercent,
+    remainingHours: (secondary.resetsAt * 1000 - Date.now()) / 3_600_000,
+    primaryPct: usage.primary?.usedPercent ?? null,
+  };
+}
+
+function fromScreen(raw) {
+  // ステータスラインの空白はノーブレークスペース（U+00A0）。
+  // 照合の前に普通の空白へ揃える（揃えないと "Weekly Reset" のような固定文字列がマッチしない）。
+  const text = raw.replace(/ /g, ' ');
+  // 画面上部の会話に古い値が残っていることがあるので、最下部のステータスラインにあたる最後の一致を使う。
+  const lastMatch = (re) => [...text.matchAll(re)].at(-1);
+  // 例: "Weekly Reset: 6d 17hr 34m" / "Weekly Reset: 17hr 34m" / "Weekly Reset: 34m" / compact 表示の "6d17h34m"
+  const pctMatch = lastMatch(/Weekly:\s*(\d+(?:\.\d+)?)%/g);
+  const resetMatch = lastMatch(/Weekly Reset:\s*(?:(\d+)d\s*)?(?:(\d+)hr?\s*)?(?:(\d+)m)?/g);
+  if (!pctMatch || !resetMatch || (!resetMatch[1] && !resetMatch[2] && !resetMatch[3])) {
+    fail('Weekly% か Weekly Reset を読み取れなかった。ステータスラインの表示が既定と違うかもしれない。');
+  }
+  const pct = Number(pctMatch[1]);
+  if (!Number.isFinite(pct)) fail(`Weekly% の値がおかしい: "${pctMatch[1]}"`);
+  const [days, hours, minutes] = [1, 2, 3].map((i) => Number(resetMatch[i] ?? 0));
+  return { pct, remainingHours: days * 24 + hours + minutes / 60, primaryPct: null };
+}
+
+function fetchUsage() {
+  try {
+    // 失敗の理由（トークン切れ・429 など）は claude-usage.mjs が stderr に出すので、そのまま流す。
+    const raw = execFileSync('node', [join(__dirname, 'claude-usage.mjs')], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'inherit'],
+    });
+    return JSON.parse(raw);
+  } catch {
+    fail('Claude の使用量を取得できなかった。画面のテキストを渡せば、ステータスラインから読める。');
+  }
+}
+
+const input = (await readInput()).trim();
+const { pct, remainingHours, primaryPct } = !input
+  ? fromUsage(fetchUsage())
+  : input.startsWith('{')
+    ? fromUsage(JSON.parse(input))
+    : fromScreen(input);
 const elapsedHours = WEEKLY_CYCLE_HOURS - remainingHours;
 
 const fmt1 = (n) => Math.round(n * 10) / 10;
 const projected = elapsedHours < 2 ? null : (pct / elapsedHours) * WEEKLY_CYCLE_HOURS;
 
 if (args.includes('--json')) {
-  console.log(JSON.stringify({ pct, elapsedHours, remainingHours, projected }));
+  console.log(JSON.stringify({ pct, elapsedHours, remainingHours, projected, primaryPct }));
   process.exit(0);
 }
 
