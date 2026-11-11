@@ -207,7 +207,7 @@ if (submitted.result === 'refused') {
 if (submitted.result === 'unknown') {
   fail(
     `新ペイン ${created} の新セッションが資料を読み始めたのを確かめられない（${submitted.detail}）。呼び直さない（ペインが増える）。` +
-      `新ペインを見て、起動の時のダイアログには答え、入力欄に依頼が残っていれば Enter を押す。claude が終わってシェルに戻っていれば 'herdr pane close ${created}' で閉じ、同じ引数で呼び直す。旧セッションはそのまま`,
+      `新ペインを見て、起動の時のダイアログには答え、入力欄に依頼が残っていれば Enter を押す。claude が終わってシェルに戻っていれば 'herdr pane close ${created}' で閉じ、名前が外れたら 'herdr agent rename ${self} ${name}' で旧ペインに戻してから呼び直す（旧ペインは今、無名）。旧セッションはそのまま`,
   );
 }
 if (submitted.result === 'resent') log('依頼が入力欄に残っていたので、Enter を送り直した');
