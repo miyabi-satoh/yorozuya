@@ -66,12 +66,13 @@ export function prompt(target, text) {
   return herdr(['agent', 'prompt', target, text]) !== null;
 }
 
-// 入力欄の書きかけが、送った依頼の文そのもの（送信されずに残ったもの）か。長い依頼は折り返して末尾しか見えないので、
-// 空白を除いて、依頼の末尾と一致するかで見る。サジェスト（薄字）は inputDraft の時点で落ちている。
+// 入力欄の書きかけが、送った依頼の文そのもの（送信されずに残ったもの）か。折り返しの改行と字下げで空白が変わるので、
+// 空白を除いて全体が一致するかで見る。一部の一致で通すと、ほかの書きかけまで Enter で送ってしまう。
+// 一致しなければ Enter を送らずに止まる（ユーザーが画面を見て押す）ので、厳しく倒す。サジェスト（薄字）は inputDraft の時点で落ちている。
 export function draftIsRequest(draft, text) {
   const squash = (value) => value.replace(/\s+/g, '');
   const seen = squash(draft ?? '');
-  return seen.length > 0 && squash(text).endsWith(seen);
+  return seen.length > 0 && seen === squash(text);
 }
 
 // 依頼を送り、相手が受け取って動き出したかまで確かめる。Enter だけが落ちて、依頼が入力欄に残ることがある（原因は分かっていない）。
