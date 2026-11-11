@@ -1,13 +1,15 @@
 #!/usr/bin/env node
-// Claude の週次枠（7日=168h）を、線形・比例で消費していくと仮定した場合の着地見込み%を概算する。あくまで目安。
+// Claude の週次枠（7日=168h）を、毎日の稼働の時間帯に線形・比例で消費していくと仮定した場合の着地見込み%を概算する。
+// あくまで目安。数え方は projection.mjs。
 //
-// usage: pace.mjs [--text '<画面のテキスト>'] [--json]
+// usage: pace.mjs [--text '<画面のテキスト>'] [--json] [--active-hours 12-20]
 //   入力が無ければ claude-usage.mjs（使用量 API）を自分で叩く。ふだんはこれでよい。
 //   stdin に claude-usage.mjs の JSON を渡してもよい。
 //   API で取れないときの予備として、ステータスラインの「Weekly: X% | Weekly Reset: Nd Hhr Mm」を含む画面のテキスト
 //   （--text か stdin。herdr pane read の出力をそのままパイプしてよい）からも読める。
-//   --json なら {pct, elapsedHours, remainingHours, projected, primaryPct} を出す（判定不可のとき projected は null。
-//   primaryPct は5時間枠の使用率で、画面から読んだときは null）。
+//   --json なら {pct, elapsedHours, remainingHours, activeElapsedHours, activeTotalHours, projected, verdict, primaryPct} を出す
+//   （判定不可のとき projected と verdict は null。primaryPct は5時間枠の使用率で、画面から読んだときは null）。
+//   --active-hours は稼働の時間帯（既定と環境変数は projection.mjs）。
 //
 // Weekly% はアカウント全体で共有される値なので、どのマシン・どのセッションで取っても同じ。
 
@@ -15,6 +17,7 @@ import { execFileSync } from 'node:child_process';
 import { text as readStream } from 'node:stream/consumers';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { activeHoursFrom, describe, project } from './projection.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const WEEKLY_CYCLE_HOURS = 168; // 7日
@@ -81,6 +84,13 @@ function fetchUsage() {
   }
 }
 
+let activeHours;
+try {
+  activeHours = activeHoursFrom(args);
+} catch (error) {
+  fail(error.message);
+}
+
 const input = (await readInput()).trim();
 const { pct, remainingHours, primaryPct } = !input
   ? fromUsage(fetchUsage())
@@ -88,24 +98,16 @@ const { pct, remainingHours, primaryPct } = !input
     ? fromUsage(JSON.parse(input))
     : fromScreen(input);
 const elapsedHours = WEEKLY_CYCLE_HOURS - remainingHours;
-
-const fmt1 = (n) => Math.round(n * 10) / 10;
-const projected = elapsedHours < 2 ? null : (pct / elapsedHours) * WEEKLY_CYCLE_HOURS;
+// 画面から読んだときは残りが分単位なので、リセットの時刻も分単位の誤差を持つ。目安には足りる。
+const result = project({
+  pct,
+  resetsAtMs: Date.now() + remainingHours * 3_600_000,
+  windowHours: WEEKLY_CYCLE_HOURS,
+  activeHours,
+});
 
 if (args.includes('--json')) {
-  console.log(JSON.stringify({ pct, elapsedHours, remainingHours, projected, primaryPct }));
-  process.exit(0);
+  console.log(JSON.stringify({ pct, elapsedHours, remainingHours, ...result, primaryPct }));
+} else {
+  console.log(describe('Weekly', pct, remainingHours, activeHours, result));
 }
-
-if (projected === null) {
-  console.log(
-    `Weekly ${pct}% ・ サイクル開始から ${fmt1(elapsedHours)}h しか経っていない。判定不可（目安にするには経過が短すぎる）`
-  );
-  process.exit(0);
-}
-
-const verdict = projected > 100 ? 'ハイペース' : '順調';
-
-console.log(
-  `Weekly ${pct}%（経過 ${fmt1(elapsedHours)}h / リセットまで残り ${fmt1(remainingHours)}h）→ このペースの着地見込み ${fmt1(projected)}% … ${verdict}（線形外挿の目安）`
-);
