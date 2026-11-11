@@ -17,15 +17,14 @@ import { paceNote } from './lib/pace.mjs';
 import { attachGuide } from './lib/prompts.mjs';
 import {
   backgroundWorkHint,
-  confirmSubmitted,
   currentPane,
   herdr,
   herdrError,
   herdrJson,
   NAME_PATTERN,
   paneHoldingName,
-  prompt,
   startAgent,
+  submitAndConfirm,
   waitForNameRelease,
 } from './lib/herdr.mjs';
 
@@ -195,27 +194,23 @@ if (!startAgent(name, created)) {
 }
 log('起動');
 
-// --wait は付けない。待っている間に旧ペインごと閉じられるため、待つ意味がない。
 const request = `@${sent} このセッション自身の再起動です。資料の先頭の「自己再起動の手順」に従うこと。`;
 
-// ここは起動済みで、資料だけが渡っていない。ユーザーが答えれば進む状態ではないので、
-// 閉じて元の一枚に戻す。
-if (!prompt(created, request)) {
-  const error = herdrError();
-  fail(`新セッションに依頼を送れなかった（${error}）。${closeCreated()}${restoreName(false)}旧セッションはそのまま`);
-}
-
-// 送っただけでは、claude が受け取ったかは分からない。旧ペインが閉じられるまでの間に、こちらで確かめる。
+// 送っただけでは、claude が受け取ったかは分からないので、動き出すまでこちらで見る。
 // 確かめる者がほかにいないため（ほかのセッションの再起動は、呼んだセッションが SKILL.md の手順6で確かめる）。
 // 新セッションが資料を読み終えて旧ペインを閉じれば、このスクリプトも待っている途中で終わる。
-const submitted = confirmSubmitted(created, created, request);
-if (submitted === 'blocked') {
-  fail(`新ペイン ${created} が確認や問いで止まっている。画面を見て、起動の時のダイアログなら答えてから、入力欄に依頼が残っていれば Enter を押すこと。旧セッションはそのまま`);
+const submitted = submitAndConfirm(created, request);
+// 弾かれたときは起動済みで、資料だけが渡っていない。ユーザーが答えれば進む状態ではないので、閉じて元の一枚に戻す。
+if (submitted.result === 'refused') {
+  fail(`新セッションに依頼を送れなかった（${submitted.detail}）。${closeCreated()}${restoreName(false)}旧セッションはそのまま`);
 }
-if (submitted === null) {
-  fail(`新ペイン ${created} の新セッションが動き出したかを確かめられない（${herdrError()}）。画面を見て、入力欄に依頼が残っていれば Enter を押すこと。旧セッションはそのまま`);
+if (submitted.result === 'unknown') {
+  fail(
+    `新ペイン ${created} の新セッションが資料を読み始めたのを確かめられない（${submitted.detail}）。呼び直さない（ペインが増える）。` +
+      `新ペインを見て、起動の時のダイアログには答え、入力欄に依頼が残っていれば Enter を押す。claude が終わってシェルに戻っていれば 'herdr pane close ${created}' で閉じ、同じ引数で呼び直す。旧セッションはそのまま`,
+  );
 }
-if (submitted === 'resent') log('依頼が入力欄に残っていたので、Enter を送り直した');
+if (submitted.result === 'resent') log('依頼が入力欄に残っていたので、Enter を送り直した');
 
 process.stdout.write(`OK\t${self}\t${created}\t${name}\t${handoff}\tresume:${sid}\n`);
 
