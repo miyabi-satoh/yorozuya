@@ -86,7 +86,7 @@ export function submitAndConfirm(pane, text, timeoutMs = 30000) {
   const until = ['--until', 'working', '--until', 'blocked', '--timeout', String(timeoutMs)];
   // --wait は送る前から続いているターンの終わりでも通る（Herdr の help）。起動の処理が動いている間に送らないよう、
   // 入力を待つ状態になるのを先に待つ。取れなくても送りはする（送らないと資料が渡らない）。
-  herdr(['agent', 'wait', pane, '--until', 'idle', '--timeout', '10000']);
+  herdr(['agent', 'wait', pane, '--until', 'idle', '--until', 'done', '--timeout', '10000']);
   if (herdr(['agent', 'prompt', pane, text, '--wait', ...until]) !== null) return { result: 'started' };
   const code = herdrErrorCode();
   if (SEND_REFUSED.has(code)) return { result: 'refused', detail: herdrError() };
