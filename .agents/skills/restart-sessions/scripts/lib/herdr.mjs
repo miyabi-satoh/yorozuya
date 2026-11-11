@@ -66,6 +66,37 @@ export function prompt(target, text) {
   return herdr(['agent', 'prompt', target, text]) !== null;
 }
 
+// 入力欄の書きかけが、送った依頼の文そのもの（送信されずに残ったもの）か。長い依頼は折り返して末尾しか見えないので、
+// 空白を除いて、依頼の末尾と一致するかで見る。サジェスト（薄字）は inputDraft の時点で落ちている。
+export function draftIsRequest(draft, text) {
+  const squash = (value) => value.replace(/\s+/g, '');
+  const seen = squash(draft ?? '');
+  return seen.length > 0 && squash(text).endsWith(seen);
+}
+
+// 依頼が送信され、相手が動き出したかを確かめる。Enter だけが落ちて、依頼が入力欄に残ることがある（原因は分かっていない）。
+// 動き出さず、入力欄に依頼の文だけが残っていれば、Enter を1回送って待ち直す。
+// 返すのは 'working'（動き出した）・'blocked'（確認や問いで止まっている。送られたかは画面を見ないと分からない）・
+// 'resent'（Enter を送り直して動き出した）・null（どれでもない。理由は herdrError() か、入力欄の中身）。
+export function confirmSubmitted(target, pane, text, timeoutMs = 30000) {
+  const wait = () => {
+    const out = herdrJson(['agent', 'wait', target, '--until', 'working', '--until', 'blocked', '--timeout', String(timeoutMs)]);
+    return out?.result?.agent?.agent_status ?? null;
+  };
+  const first = wait();
+  if (first === 'working' || first === 'blocked') return first;
+  const draft = inputDraft(pane);
+  if (!draftIsRequest(draft, text)) {
+    lastError = draft === null ? '入力欄を読めない' : draft === '' ? '入力欄は空だが、動き出していない' : `入力欄に依頼と違う文がある: ${draft.slice(-80)}`;
+    return null;
+  }
+  if (herdr(['agent', 'send-keys', target, 'Enter']) === null) return null;
+  const second = wait();
+  if (second === 'working' || second === 'blocked') return 'resent';
+  if (!lastError) lastError = 'Enter を送り直しても動き出さない';
+  return null;
+}
+
 // 前景のプロセスグループがシェルに戻っていれば、そのペインの claude は終了している。
 // どちらのフィールドも schema 上は省略も null もありうる（required は pane_id だけ）。
 // 欠けたまま比べると undefined === undefined で「戻った」ことになってしまうので、

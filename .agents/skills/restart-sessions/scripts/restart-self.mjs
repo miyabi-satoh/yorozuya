@@ -17,6 +17,7 @@ import { paceNote } from './lib/pace.mjs';
 import { attachGuide } from './lib/prompts.mjs';
 import {
   backgroundWorkHint,
+  confirmSubmitted,
   currentPane,
   herdr,
   herdrError,
@@ -203,6 +204,18 @@ if (!prompt(created, request)) {
   const error = herdrError();
   fail(`新セッションに依頼を送れなかった（${error}）。${closeCreated()}${restoreName(false)}旧セッションはそのまま`);
 }
+
+// 送っただけでは、claude が受け取ったかは分からない。旧ペインが閉じられるまでの間に、こちらで確かめる。
+// 確かめる者がほかにいないため（ほかのセッションの再起動は、呼んだセッションが SKILL.md の手順6で確かめる）。
+// 新セッションが資料を読み終えて旧ペインを閉じれば、このスクリプトも待っている途中で終わる。
+const submitted = confirmSubmitted(created, created, request);
+if (submitted === 'blocked') {
+  fail(`新ペイン ${created} が確認や問いで止まっている。画面を見て、起動の時のダイアログなら答えてから、入力欄に依頼が残っていれば Enter を押すこと。旧セッションはそのまま`);
+}
+if (submitted === null) {
+  fail(`新ペイン ${created} の新セッションが動き出したかを確かめられない（${herdrError()}）。画面を見て、入力欄に依頼が残っていれば Enter を押すこと。旧セッションはそのまま`);
+}
+if (submitted === 'resent') log('依頼が入力欄に残っていたので、Enter を送り直した');
 
 process.stdout.write(`OK\t${self}\t${created}\t${name}\t${handoff}\tresume:${sid}\n`);
 
