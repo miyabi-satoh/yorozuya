@@ -23,8 +23,8 @@ import {
   herdrJson,
   NAME_PATTERN,
   paneHoldingName,
-  prompt,
   startAgent,
+  submitAndConfirm,
   waitForNameRelease,
 } from './lib/herdr.mjs';
 
@@ -194,15 +194,23 @@ if (!startAgent(name, created)) {
 }
 log('起動');
 
-// --wait は付けない。待っている間に旧ペインごと閉じられるため、待つ意味がない。
 const request = `@${sent} このセッション自身の再起動です。資料の先頭の「自己再起動の手順」に従うこと。`;
 
-// ここは起動済みで、資料だけが渡っていない。ユーザーが答えれば進む状態ではないので、
-// 閉じて元の一枚に戻す。
-if (!prompt(created, request)) {
-  const error = herdrError();
-  fail(`新セッションに依頼を送れなかった（${error}）。${closeCreated()}${restoreName(false)}旧セッションはそのまま`);
+// 送っただけでは、claude が受け取ったかは分からないので、動き出すまでこちらで見る。
+// 確かめる者がほかにいないため（ほかのセッションの再起動は、呼んだセッションが SKILL.md の手順6で確かめる）。
+// 新セッションが資料を読み終えて旧ペインを閉じれば、このスクリプトも待っている途中で終わる。
+const submitted = submitAndConfirm(created, request);
+// 弾かれたときは起動済みで、資料だけが渡っていない。ユーザーが答えれば進む状態ではないので、閉じて元の一枚に戻す。
+if (submitted.result === 'refused') {
+  fail(`新セッションに依頼を送れなかった（${submitted.detail}）。${closeCreated()}${restoreName(false)}旧セッションはそのまま`);
 }
+if (submitted.result === 'unknown') {
+  fail(
+    `新ペイン ${created} の新セッションが資料を読み始めたのを確かめられない（${submitted.detail}）。呼び直さない（ペインが増える）。` +
+      `新ペインを見て、起動の時のダイアログには答え、入力欄に依頼が残っていれば Enter を押す。claude が終わってシェルに戻っていれば 'herdr pane close ${created}' で閉じ、名前が外れたら 'herdr agent rename ${self} ${name}' で旧ペインに名前を付け直してから呼び直す。旧セッションはそのまま`,
+  );
+}
+if (submitted.result === 'resent') log('依頼が入力欄に残っていたので、Enter を送り直した');
 
 process.stdout.write(`OK\t${self}\t${created}\t${name}\t${handoff}\tresume:${sid}\n`);
 

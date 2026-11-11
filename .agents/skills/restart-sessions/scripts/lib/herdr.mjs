@@ -66,6 +66,44 @@ export function prompt(target, text) {
   return herdr(['agent', 'prompt', target, text]) !== null;
 }
 
+// 入力欄の書きかけが、送った依頼の文そのもの（送信されずに残ったもの）か。折り返しの改行と字下げで空白が変わるので、
+// 空白を除いて全体が一致するかで見る。一部の一致で通すと、ほかの書きかけまで Enter で送ってしまう。
+// 一致しなければ Enter を送らずに止まる（ユーザーが画面を見て押す）ので、厳しく倒す。サジェスト（薄字）は inputDraft の時点で落ちている。
+export function draftIsRequest(draft, text) {
+  const squash = (value) => value.replace(/\s+/g, '');
+  const seen = squash(draft ?? '');
+  return seen.length > 0 && seen === squash(text);
+}
+
+// 依頼を送り、相手が受け取って動き出したかまで確かめる。Enter だけが落ちて、依頼が入力欄に残ることがある（原因は分かっていない）。
+// 送った後の状態は agent prompt の --wait で見る。別に agent wait を呼ぶと、送る前からの working（起動の処理など）でも通ってしまうため。
+// 返すのは次のどれか。
+// - { result: 'started' }: 送った後に working か blocked になった。blocked は、送る前に止まっていれば Herdr が
+//   agent_blocked で弾くので、受け取った後の新セッション自身の問いや許可の画面。
+// - { result: 'resent' }: 動き出さず、入力欄に依頼の文だけが残っていたので、Enter を1回送り直して動き出した。
+// - { result: 'refused', detail }: 送る前に弾かれた（SEND_REFUSED）。入力欄には何も入っていない。
+// - { result: 'unknown', detail }: 送られたかもしれないが、動き出したのを確かめられない。
+export function submitAndConfirm(pane, text, timeoutMs = 30000) {
+  const until = ['--until', 'working', '--until', 'blocked', '--timeout', String(timeoutMs)];
+  // --wait は送る前から続いているターンの終わりでも通る（Herdr の help）。起動の処理が動いている間に送らないよう、
+  // 入力を待つ状態になるのを先に待つ。取れなくても送りはする（送らないと資料が渡らない）。
+  herdr(['agent', 'wait', pane, '--until', 'idle', '--until', 'done', '--timeout', '10000']);
+  if (herdr(['agent', 'prompt', pane, text, '--wait', ...until]) !== null) return { result: 'started' };
+  const code = herdrErrorCode();
+  if (SEND_REFUSED.has(code)) return { result: 'refused', detail: herdrError() };
+  if (code !== 'agent_prompt_stalled' && code !== 'timeout') return { result: 'unknown', detail: herdrError() };
+  const draft = inputDraft(pane);
+  if (!draftIsRequest(draft, text)) {
+    const detail =
+      draft === null ? '動き出さず、入力欄も読めない' : draft === '' ? '動き出さず、入力欄は空' : `動き出さず、入力欄に依頼と違う文がある: ${draft.slice(-80)}`;
+    return { result: 'unknown', detail };
+  }
+  if (herdr(['agent', 'send-keys', pane, 'Enter']) === null) return { result: 'unknown', detail: `Enter を送れない（${herdrError()}）` };
+  // Enter の直前は入力欄で待っていた（動いていない）ので、ここで別に待っても、送る前からの working を拾うことは無い。
+  if (herdr(['agent', 'wait', pane, ...until]) !== null) return { result: 'resent' };
+  return { result: 'unknown', detail: `入力欄に残った依頼へ Enter を送り直しても動き出さない（${herdrError()}）` };
+}
+
 // 前景のプロセスグループがシェルに戻っていれば、そのペインの claude は終了している。
 // どちらのフィールドも schema 上は省略も null もありうる（required は pane_id だけ）。
 // 欠けたまま比べると undefined === undefined で「戻った」ことになってしまうので、
