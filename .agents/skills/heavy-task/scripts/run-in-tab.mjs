@@ -188,7 +188,7 @@ function overrunReport(dir, job, minutes, tailLines) {
   console.log(`--- ログの末尾 ${tailLines} 行 ---\n${tailOf(logFile(dir), tailLines)}\n---`);
   console.log(
     `見込みの ${minutes} 分を過ぎても終わっていません。タブは動いたままです（${job.label}、${job.tab}）。\n${grown}` +
-      `ログ: ${logFile(dir)}\n進んでいるかを確かめ、待ち直すなら --attach ${dir} --expect <分>、止めるならタブを閉じる。`,
+      `ログ: ${logFile(dir)}\n画面: herdr pane read ${job.pane} --lines 20\n進んでいるかを確かめ、待ち直すなら --attach ${dir} --expect <分>、止めるならタブを閉じる。`,
   );
   return EXIT_OVERRUN;
 }
@@ -204,6 +204,8 @@ async function waitFor(dir, tailLines, expectMinutes) {
   let paneCheckedAt = 0;
   let paneGoneAt = null;
   for (;;) {
+    // 終わりの記録を読む前に時刻を見る。読んだ後に見ると、その間に終わった処理まで見込み超えにしてしまう。
+    const overdue = Date.now() >= deadline;
     const result = readJson(exitFile(dir));
     if (result) {
       console.log(`--- ログの末尾 ${tailLines} 行 ---\n${tailOf(logFile(dir), tailLines)}\n---`);
@@ -230,7 +232,7 @@ async function waitFor(dir, tailLines, expectMinutes) {
       console.log(`タブの中で処理が始まりませんでした。タブは残しています（${job.tab}）。\n${screen}`);
       return EXIT_NO_RECORD;
     }
-    if (Date.now() >= deadline) return overrunReport(dir, job, expectMinutes, tailLines);
+    if (overdue) return overrunReport(dir, job, expectMinutes, tailLines);
     await new Promise((resolve) => setTimeout(resolve, POLL_MS));
   }
 }
