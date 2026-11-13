@@ -20,7 +20,8 @@ function fakeHerdr() {
 state='${state}'
 case "$1 $2" in
   'tab create') printf '%s\n' "$@" > "$state/create-args"; echo '{"result":{"root_pane":{"pane_id":"w1:p1"},"tab":{"tab_id":"w1:t1"}}}' ;;
-  'pane run') [ -e "$state/no-run" ] || sh -c "$4" >/dev/null 2>&1 & ;;
+  # 本物の herdr のように送ったらすぐ返るよう、後ろで流す側の出力も herdr の出力から切り離す。
+  'pane run') { [ -e "$state/no-run" ] || sh -c "$4"; } >/dev/null 2>&1 & ;;
   'pane get') if [ -e "$state/gone" ]; then echo '{"error":{"code":"pane_not_found"}}'; exit 1; fi ;;
   'pane read') echo 'screen' ;;
   'tab close') touch "$state/closed" ;;
@@ -96,6 +97,29 @@ test('待ち直すと、終わった処理の結果を読める', () => {
   const result = run(env, '--attach', dir);
   assert.equal(result.status, 0);
   assert.match(result.stdout, /done/);
+});
+
+test('見込みを過ぎたら、タブを閉じずに待つのをやめる', () => {
+  const { env, state } = fakeHerdr();
+  const dir = tmp();
+  const result = run(env, '--dir', dir, '--expect', '0.03', '--', 'echo started; sleep 4');
+  assert.equal(result.status, 124);
+  assert.match(result.stdout, /見込みの 0.03 分を過ぎても終わっていません/);
+  assert.match(result.stdout, /started/);
+  assert.match(result.stdout, /ログが最後に増えたのは \d+ 秒前/);
+  assert.equal(fs.existsSync(path.join(state, 'closed')), false);
+  assert.equal(fs.existsSync(path.join(dir, 'exit.json')), false);
+  // 待ち直すと、終わった処理の結果を読める。
+  const again = run(env, '--attach', dir, '--expect', '1');
+  assert.equal(again.status, 0);
+  assert.equal(fs.existsSync(path.join(state, 'closed')), true);
+});
+
+test('見込みの分は0より大きい数で書く', () => {
+  const { env } = fakeHerdr();
+  const result = run(env, '--expect', '0', '--', 'true');
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /--expect/);
 });
 
 test('終わりを記録しないままタブが閉じられたら、そう報告する', () => {
