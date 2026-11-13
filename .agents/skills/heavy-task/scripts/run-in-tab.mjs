@@ -1,8 +1,11 @@
 #!/usr/bin/env node
 // コマンドを Herdr の別のタブで流し、出力・終了コード・止まった理由をファイルに残す。
 //
-//   node run-in-tab.mjs [--label <用途>] [--cwd <場所>] [--dir <置き場>] [--tail <行数>] -- '<コマンド>'
-//   node run-in-tab.mjs --attach <置き場>    待つ側だけが打ち切られたときに、待ち直す
+//   node run-in-tab.mjs [--label <用途>] [--cwd <場所>] [--dir <置き場>] [--tail <行数>] [--expect <分>] -- '<コマンド>'
+//   node run-in-tab.mjs --attach <置き場> [--expect <分>]    待つ側だけが終わったときに、待ち直す
+//
+// --expect を過ぎても終わらなければ、タブの処理は止めずに、待つ側だけが EXIT_OVERRUN で返る。
+// バックグラウンドで待つエージェントは、待つ側が終わったときにしか起きないので、処理が詰まったまま眠り続けないための目覚まし。
 //
 // 待つ側はタブの中の処理と別のプロセスなので、待つ側が打ち切られてもタブの処理は続く。
 // 置き場には job.json・output.log・exit.json ができる。
@@ -29,6 +32,8 @@ const PANE_CHECK_MS = 5000;
 const CLOSED_TAB_GRACE_MS = 10_000;
 // 記録の無いまま終わったとき。コマンドの終了コードと区別できるよう、文でも伝える。
 const EXIT_NO_RECORD = 125;
+// 見込みを過ぎても終わらないとき。timeout(1) と同じ値で、処理の失敗でなく待つのをやめたことを表す。
+const EXIT_OVERRUN = 124;
 
 const herdr = (...args) => execFileSync('herdr', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 const jobFile = (dir) => path.join(dir, 'job.json');
@@ -172,16 +177,35 @@ function closeTab(tab) {
   }
 }
 
-async function waitFor(dir, tailLines) {
+function overrunReport(dir, job, minutes, tailLines) {
+  let grown = '';
+  try {
+    const seconds = Math.round((Date.now() - fs.statSync(logFile(dir)).mtimeMs) / 1000);
+    grown = `ログが最後に増えたのは ${seconds} 秒前。\n`;
+  } catch {
+    // ログがまだ無くても、見込みを過ぎたことは伝える。
+  }
+  console.log(`--- ログの末尾 ${tailLines} 行 ---\n${tailOf(logFile(dir), tailLines)}\n---`);
+  console.log(
+    `見込みの ${minutes} 分を過ぎても終わっていません。タブは動いたままです（${job.label}、${job.tab}）。\n${grown}` +
+      `ログ: ${logFile(dir)}\n画面: herdr pane read ${job.pane} --lines 20\n進んでいるかを確かめ、待ち直すなら --attach ${dir} --expect <分>、止めるならタブを閉じる。`,
+  );
+  return EXIT_OVERRUN;
+}
+
+async function waitFor(dir, tailLines, expectMinutes) {
   const job = readJson(jobFile(dir));
   if (!job) {
     console.error(`job.json を読めません: ${dir}`);
     return 2;
   }
   const waitStarted = Date.now();
+  const deadline = expectMinutes === undefined ? Infinity : waitStarted + expectMinutes * 60_000;
   let paneCheckedAt = 0;
   let paneGoneAt = null;
   for (;;) {
+    // 終わりの記録を読む前に時刻を見る。読んだ後に見ると、その間に終わった処理まで見込み超えにしてしまう。
+    const overdue = Date.now() >= deadline;
     const result = readJson(exitFile(dir));
     if (result) {
       console.log(`--- ログの末尾 ${tailLines} 行 ---\n${tailOf(logFile(dir), tailLines)}\n---`);
@@ -208,6 +232,7 @@ async function waitFor(dir, tailLines) {
       console.log(`タブの中で処理が始まりませんでした。タブは残しています（${job.tab}）。\n${screen}`);
       return EXIT_NO_RECORD;
     }
+    if (overdue) return overrunReport(dir, job, expectMinutes, tailLines);
     await new Promise((resolve) => setTimeout(resolve, POLL_MS));
   }
 }
@@ -216,13 +241,15 @@ function readArgs(argv) {
   const { values, positionals } = parseArgs({
     args: argv,
     allowPositionals: true,
-    options: Object.fromEntries(['label', 'cwd', 'dir', 'tail', 'attach', 'runner'].map((name) => [name, { type: 'string' }])),
+    options: Object.fromEntries(['label', 'cwd', 'dir', 'tail', 'attach', 'runner', 'expect'].map((name) => [name, { type: 'string' }])),
   });
   const tail = Number(values.tail ?? DEFAULT_TAIL_LINES);
   if (!Number.isInteger(tail) || tail < 1) throw new Error(`--tail は1以上の整数で書く: ${values.tail}`);
+  const expect = values.expect === undefined ? undefined : Number(values.expect);
+  if (expect !== undefined && !(expect > 0)) throw new Error(`--expect は0より大きい分で書く: ${values.expect}`);
   // 分けて渡すと、呼ぶ側のシェルで引用が外れ、タブのシェルで別のコマンドになる。
   if (positionals.length > 1) throw new Error("コマンドは引用で1つにまとめて渡す: -- '<コマンド>'");
-  return { ...values, tail, command: positionals[0] };
+  return { ...values, tail, expect, command: positionals[0] };
 }
 
 function defaultDir(label) {
@@ -291,12 +318,12 @@ async function main() {
     console.error('Herdr の中でないので、タブで流せません（HERDR_ENV=1 でない）。');
     return 2;
   }
-  if (options.attach) return waitFor(options.attach, options.tail);
+  if (options.attach) return waitFor(options.attach, options.tail, options.expect);
   if (!options.command?.trim()) {
     console.error("コマンドがありません: run-in-tab.mjs [--label <用途>] -- '<コマンド>'");
     return 2;
   }
-  return waitFor(start(options), options.tail);
+  return waitFor(start(options), options.tail, options.expect);
 }
 
 main().then(
