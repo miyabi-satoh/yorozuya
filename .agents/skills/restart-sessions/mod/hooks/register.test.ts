@@ -25,10 +25,11 @@ test('知らせの行は、入力欄の上枠のすぐ上の1行', () => {
 })
 
 // 使用率・入っている版・画面を決め、セッションに届いた知らせを集める。
-function setUp(on: any, s: { percent?: number; tokens?: number; installed?: string; screen?: string; herdr?: boolean }) {
+function setUp(on: any, s: { percent?: number; tokens?: number; installed?: string; screen?: string; herdr?: boolean; pane?: string }) {
   const sent: string[] = []
   const runs: string[][] = []
-  mock.env(on, s.herdr === false ? {} : { HERDR_ENV: '1', HERDR_PANE_ID: 'w1:p1' })
+  const env = (): Record<string, string> => (s.herdr === false ? {} : { HERDR_ENV: '1', HERDR_PANE_ID: s.pane ?? 'w1:p1' })
+  on('env.get', (_$: any, e: any) => ({ value: env()[e.name] }))
   on('fs.stat', () => ({ value: { realPath: '/skills/restart-sessions/mod' } }))
   on('fs.read', () => ({ value: '{"watch":{"threshold":50}}' }))
   on('session.usage', () => ({ value: { context: { percent: s.percent, tokens: s.tokens, window: 1000000 } } }))
@@ -41,9 +42,12 @@ function setUp(on: any, s: { percent?: number; tokens?: number; installed?: stri
   })
   on('process.run', (_$: any, e: any) => {
     runs.push(e.argv)
-    return e.argv[0] === 'claude'
-      ? { value: { exitCode: 0, stdout: `${s.installed ?? '2.1.289'} (Claude Code)\n`, stderr: '' } }
-      : { value: { exitCode: 0, stdout: s.screen ?? '', stderr: '' } }
+    if (e.argv[0] === 'claude') return { value: { exitCode: 0, stdout: `${s.installed ?? '2.1.289'} (Claude Code)\n`, stderr: '' } }
+    if (e.argv[1] === 'agent') {
+      const agents = [{ name: 'knowledge-f3', pane_id: s.pane ?? 'w1:p1' }]
+      return { value: { exitCode: 0, stdout: JSON.stringify({ result: { agents } }), stderr: '' } }
+    }
+    return { value: { exitCode: 0, stdout: s.screen ?? '', stderr: '' } }
   })
   on('prompt.submit', (_$: any, e: any) => {
     sent.push(e.text)
@@ -83,10 +87,12 @@ describe('ターンの終わりの見張り', () => {
     expect(sent[0]).toContain('UPDATE 2.1.289 → 2.1.290')
   })
 
-  test('自動更新に失敗していれば、ペインと版の組みごとに1回だけ再起動を知らせる', async ($, on) => {
+  test('自動更新に失敗していれば、名前と版の組みごとに1回だけ再起動を知らせる（再起動で新しいペインに移っても繰り返さない）', async ($, on) => {
     mock.clock(on, { now: 0 })
-    const sent = setUp(on, { percent: 10, screen: screenWith('✘ Auto-update failed · Run claude doctor') })
+    const s = { percent: 10, screen: screenWith('✘ Auto-update failed · Run claude doctor'), pane: 'w1:p1' }
+    const sent = setUp(on, s)
     await $.turn.complete(turn)
+    s.pane = 'w1:p9'
     await $.turn.complete(turn)
     expect(sent.length).toBe(1)
     expect(sent[0]).toContain('UPDATE FAILED 2.1.289')

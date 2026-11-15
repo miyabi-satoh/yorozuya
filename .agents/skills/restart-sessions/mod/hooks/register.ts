@@ -42,7 +42,18 @@ export const versionOf = (stdout: string) => stdout.trim().split(/\s+/)[0] || un
 
 async function readScreen($: EngineInterface, pane: string) {
   const { exitCode, stdout } = await $.process.run(['herdr', 'pane', 'read', pane, '--source', 'visible'])
-  return exitCode === 0 ? stdout : ''
+  // 空白がノーブレークスペースで来ることがある（scripts/lib/herdr.mjs の readScreen と同じに揃える）。
+  return exitCode === 0 ? stdout.replace(/ /g, ' ') : ''
+}
+
+// 自分の Herdr の名前。restart-self.mjs は新しいペインに割って起動し直し、名前だけを引き継ぐ。
+export function agentNameOf(listJson: string, pane: string): string | undefined {
+  try {
+    const agents = JSON.parse(listJson)?.result?.agents
+    return Array.isArray(agents) ? agents.find(a => a?.pane_id === pane)?.name || undefined : undefined
+  } catch {
+    return undefined
+  }
 }
 
 // `/goal` が動いている間は知らせない（区切りの確かめで、目標追従を途中で止めることになるため）。
@@ -88,12 +99,15 @@ async function check($: EngineInterface) {
   }
 
   // 自動更新に失敗していれば、起動し直して更新をやり直させる。起動し直しても同じ版で失敗し続けるなら、
-  // 再起動を繰り返さないよう、ペインと版の組みごとに1回だけにする（セッションをまたぐので $.store に持つ）。
-  const failedKey = `updateFailed:${pane}`
-  if ((await $.store.get(failedKey)) === running) return
+  // 再起動を繰り返さないよう、Herdr の名前と版の組みごとに1回だけにする（再起動でペインは変わり、名前は引き継がれる。
+  // セッションをまたぐので $.store に持つ）。名前が取れなければ、再起動の後も同じ鍵になる版だけで見る。
   const screen = await readScreen($, pane)
   const row = noticeRowOf(screen)
-  if (row.includes(UPDATE_FAILED_PATTERN) && !screen.includes(GOAL_PATTERN)) {
+  if (!row.includes(UPDATE_FAILED_PATTERN) || screen.includes(GOAL_PATTERN)) return
+  const list = await $.process.run(['herdr', 'agent', 'list'])
+  const name = list.exitCode === 0 ? agentNameOf(list.stdout, pane) : undefined
+  const failedKey = `updateFailed:${name ?? '-'}`
+  if ((await $.store.get(failedKey)) !== running) {
     await $.store.set(failedKey, running)
     await $.prompt.submit({ text: `[コンテキストの見張り] UPDATE FAILED ${running}（${row.trim()}）。Claude Code の自動更新をやり直すため、${guide}` })
   }
