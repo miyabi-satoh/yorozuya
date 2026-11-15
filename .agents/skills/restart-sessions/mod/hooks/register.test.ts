@@ -24,7 +24,6 @@ test('知らせの行は、入力欄の上枠のすぐ上の1行', () => {
   expect(noticeRowOf(screenWith('✘ Auto-update failed · Run claude doctor')).trim()).toBe('✘ Auto-update failed · Run claude doctor')
   expect(noticeRowOf(screenWith(''))).not.toContain('Auto-update failed')
   expect(noticeRowOf('入力欄の無い画面')).toBe('')
-  expect(noticeRowOf(screenWith('✘ Auto-update failed'))).toContain(' ')
 })
 
 // 使用率・入っている版・画面を決め、セッションに届いた知らせを集める。

@@ -104,10 +104,10 @@ async function check($: EngineInterface) {
   // 自動更新に失敗していれば、起動し直して更新をやり直させる。起動し直しても同じ版で失敗し続けるなら、
   // 再起動を繰り返さないよう、Herdr の名前と版の組みごとに1回だけにする（再起動でペインは変わり、名前は引き継がれる。
   // セッションをまたぐので $.store に持つ）。名前が取れなければ、再起動の後も同じ鍵になる版だけで見る。
+  // 新しい版が入っていれば、再起動は UPDATE の側に任せる（知らせ済みで再起動を待っている間と、/goal で見送った間）。
+  if (installed !== undefined && installed !== running) return
   const screen = await readScreen($, pane)
   const row = noticeRowOf(screen)
-  // 新しい版が入っていれば、再起動は UPDATE の側で済む（知らせ済みで再起動を待っている間も含む）。
-  if (installed !== undefined && installed !== running) return
   if (!row.includes(UPDATE_FAILED_PATTERN) || screen.includes(GOAL_PATTERN)) return
   const list = await $.process.run(['herdr', 'agent', 'list'])
   const name = list.exitCode === 0 ? agentNameOf(list.stdout, pane) : undefined
