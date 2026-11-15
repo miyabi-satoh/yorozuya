@@ -10,6 +10,8 @@ const told = atom({ plugin: 'context-watch', key: 'told' } as const, { over: fal
 
 const DEFAULT_THRESHOLD = 50
 const GOAL_PATTERN = '/goal active'
+// 自動更新に失敗した知らせ（2.1.325 では「✘ Auto-update failed · Run claude doctor」）。起動し直すと更新がやり直される。
+const UPDATE_FAILED_PATTERN = 'Auto-update failed'
 // 放置の目安は Claude Code の「放置から戻ったときのヒント」に合わせる（10万トークン以上で、最後の応答から75分。2.1.278 のコードで確認）。
 export const IDLE_AFTER_MS = 75 * 60 * 1000
 export const IDLE_MIN_TOKENS = 100_000
@@ -38,10 +40,38 @@ export function thresholdOf(text: string | undefined) {
 // `claude --version` の出力（`2.1.290 (Claude Code)`）から版を取る。
 export const versionOf = (stdout: string) => stdout.trim().split(/\s+/)[0] || undefined
 
-// `/goal` が動いている間は知らせない（区切りの確かめで、目標追従を途中で止めることになるため）。
-async function isGoalActive($: EngineInterface, pane: string) {
+// 文字のまま書くと、エディタや整形で普通の空白に化けても見分けられないので、コードで作る。
+const NBSP = new RegExp(String.fromCharCode(0xa0), 'g')
+
+async function readScreen($: EngineInterface, pane: string) {
   const { exitCode, stdout } = await $.process.run(['herdr', 'pane', 'read', pane, '--source', 'visible'])
-  return exitCode === 0 && stdout.includes(GOAL_PATTERN)
+  // 空白がノーブレークスペースで来ることがある（scripts/lib/herdr.mjs の readScreen と同じに揃える）。
+  return exitCode === 0 ? stdout.replace(NBSP, ' ') : ''
+}
+
+// 自分の Herdr の名前。restart-self.mjs は新しいペインに割って起動し直し、名前だけを引き継ぐ。
+export function agentNameOf(listJson: string, pane: string): string | undefined {
+  try {
+    const agents = JSON.parse(listJson)?.result?.agents
+    return Array.isArray(agents) ? agents.find(a => a?.pane_id === pane)?.name || undefined : undefined
+  } catch {
+    return undefined
+  }
+}
+
+// `/goal` が動いている間は知らせない（区切りの確かめで、目標追従を途中で止めることになるため）。
+const isGoalActive = async ($: EngineInterface, pane: string) => (await readScreen($, pane)).includes(GOAL_PATTERN)
+
+// 更新の知らせは、入力欄の上枠のすぐ上の1行に出る。画面全体に当てると、会話に出てきた同じ文言を拾う。
+// 下から見て最初の「─ だけの行」を下枠、その上で最初の「─ で始まる行」を上枠とみなす（scripts/watch-context.mjs と同じ読み方）。
+export function noticeRowOf(screen: string) {
+  const lines = screen.split('\n')
+  let bottom = lines.length - 1
+  while (bottom >= 0 && !/^─+\s*$/.test(lines[bottom])) bottom -= 1
+  for (let top = bottom - 1; top >= 1; top -= 1) {
+    if (lines[top].startsWith('─')) return lines[top - 1]
+  }
+  return ''
 }
 
 async function check($: EngineInterface) {
@@ -68,6 +98,25 @@ async function check($: EngineInterface) {
   if (installed !== undefined && installed !== running && current.update !== installed && !(await isGoalActive($, pane))) {
     await update($, told, t => ({ ...t, update: installed }))
     await $.prompt.submit({ text: `[コンテキストの見張り] UPDATE ${running} → ${installed}。Claude Code の更新を反映するため、${guide}` })
+    return
+  }
+
+  // 自動更新に失敗していれば、起動し直して更新をやり直させる。起動し直しても同じ版で失敗し続けるなら、
+  // 再起動を繰り返さないよう、Herdr の名前と版の組みごとに1回だけにする（再起動でペインは変わり、名前は引き継がれる。
+  // セッションをまたぐので $.store に持つ）。名前が取れなければ、再起動の後も同じ鍵になる版だけで見る。
+  // 新しい版が入っていれば、再起動は UPDATE の側に任せる（知らせ済みで再起動を待っている間と、/goal で見送った間）。
+  if (installed !== undefined && installed !== running) return
+  const screen = await readScreen($, pane)
+  const row = noticeRowOf(screen)
+  if (!row.includes(UPDATE_FAILED_PATTERN) || screen.includes(GOAL_PATTERN)) return
+  const list = await $.process.run(['herdr', 'agent', 'list'])
+  const name = list.exitCode === 0 ? agentNameOf(list.stdout, pane) : undefined
+  const failedKey = `updateFailed:${name ?? '-'}`
+  if ((await $.store.get(failedKey)) !== running) {
+    // OVER・UPDATE と同じく、送る前に覚えて消さない。submit が知らせのターンを終えてから返るなら、
+    // 後で覚えると再起動で落ちて覚えられず、繰り返しを止められないため。送れなかったときの再試行はしない。
+    await $.store.set(failedKey, running)
+    await $.prompt.submit({ text: `[コンテキストの見張り] UPDATE FAILED ${running}（${row.trim()}）。Claude Code の自動更新をやり直すため、${guide}` })
   }
 }
 
