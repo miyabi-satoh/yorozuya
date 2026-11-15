@@ -14,6 +14,8 @@ test('claude --version から版を取る', () => {
   expect(versionOf('')).toBeUndefined()
 })
 
+const NBSP = String.fromCharCode(0xa0)
+
 // 2.1.325 の画面（入力欄の上枠のすぐ上が知らせの行）。
 const screenWith = (notice: string, body = '会話の中の Auto-update failed の話') =>
   [body, `   ${notice}`, `${'─'.repeat(20)} knowledge-f3/x1 ─`, '❯ ', '─'.repeat(30), '  Model: Opus 5.5 | Ctx Used: 10.0%', '  ⏵⏵ auto mode on'].join('\n')
@@ -22,6 +24,7 @@ test('知らせの行は、入力欄の上枠のすぐ上の1行', () => {
   expect(noticeRowOf(screenWith('✘ Auto-update failed · Run claude doctor')).trim()).toBe('✘ Auto-update failed · Run claude doctor')
   expect(noticeRowOf(screenWith(''))).not.toContain('Auto-update failed')
   expect(noticeRowOf('入力欄の無い画面')).toBe('')
+  expect(noticeRowOf(screenWith('✘ Auto-update failed'))).toContain(' ')
 })
 
 // 使用率・入っている版・画面を決め、セッションに届いた知らせを集める。
@@ -89,7 +92,8 @@ describe('ターンの終わりの見張り', () => {
 
   test('自動更新に失敗していれば、名前と版の組みごとに1回だけ再起動を知らせる（再起動で新しいペインに移っても繰り返さない）', async ($, on) => {
     mock.clock(on, { now: 0 })
-    const s = { percent: 10, screen: screenWith('✘ Auto-update failed · Run claude doctor'), pane: 'w1:p1' }
+    // 空白がノーブレークスペースで来る画面でも当たる。
+    const s = { percent: 10, screen: screenWith(`✘${NBSP}Auto-update${NBSP}failed · Run claude doctor`), pane: 'w1:p1' }
     const sent = setUp(on, s)
     await $.turn.complete(turn)
     s.pane = 'w1:p9'

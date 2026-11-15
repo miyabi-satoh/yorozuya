@@ -40,10 +40,13 @@ export function thresholdOf(text: string | undefined) {
 // `claude --version` の出力（`2.1.290 (Claude Code)`）から版を取る。
 export const versionOf = (stdout: string) => stdout.trim().split(/\s+/)[0] || undefined
 
+// 文字のまま書くと、エディタや整形で普通の空白に化けても見分けられないので、コードで作る。
+const NBSP = new RegExp(String.fromCharCode(0xa0), 'g')
+
 async function readScreen($: EngineInterface, pane: string) {
   const { exitCode, stdout } = await $.process.run(['herdr', 'pane', 'read', pane, '--source', 'visible'])
   // 空白がノーブレークスペースで来ることがある（scripts/lib/herdr.mjs の readScreen と同じに揃える）。
-  return exitCode === 0 ? stdout.replace(/ /g, ' ') : ''
+  return exitCode === 0 ? stdout.replace(NBSP, ' ') : ''
 }
 
 // 自分の Herdr の名前。restart-self.mjs は新しいペインに割って起動し直し、名前だけを引き継ぐ。
@@ -103,6 +106,8 @@ async function check($: EngineInterface) {
   // セッションをまたぐので $.store に持つ）。名前が取れなければ、再起動の後も同じ鍵になる版だけで見る。
   const screen = await readScreen($, pane)
   const row = noticeRowOf(screen)
+  // 新しい版が入っていれば、再起動は UPDATE の側で済む（知らせ済みで再起動を待っている間も含む）。
+  if (installed !== undefined && installed !== running) return
   if (!row.includes(UPDATE_FAILED_PATTERN) || screen.includes(GOAL_PATTERN)) return
   const list = await $.process.run(['herdr', 'agent', 'list'])
   const name = list.exitCode === 0 ? agentNameOf(list.stdout, pane) : undefined
