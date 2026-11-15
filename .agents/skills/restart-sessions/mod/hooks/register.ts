@@ -10,6 +10,8 @@ const told = atom({ plugin: 'context-watch', key: 'told' } as const, { over: fal
 
 const DEFAULT_THRESHOLD = 50
 const GOAL_PATTERN = '/goal active'
+// 自動更新に失敗した知らせ（2.1.325 では「✘ Auto-update failed · Run claude doctor」）。起動し直すと更新がやり直される。
+const UPDATE_FAILED_PATTERN = 'Auto-update failed'
 // 放置の目安は Claude Code の「放置から戻ったときのヒント」に合わせる（10万トークン以上で、最後の応答から75分。2.1.278 のコードで確認）。
 export const IDLE_AFTER_MS = 75 * 60 * 1000
 export const IDLE_MIN_TOKENS = 100_000
@@ -38,10 +40,24 @@ export function thresholdOf(text: string | undefined) {
 // `claude --version` の出力（`2.1.290 (Claude Code)`）から版を取る。
 export const versionOf = (stdout: string) => stdout.trim().split(/\s+/)[0] || undefined
 
-// `/goal` が動いている間は知らせない（区切りの確かめで、目標追従を途中で止めることになるため）。
-async function isGoalActive($: EngineInterface, pane: string) {
+async function readScreen($: EngineInterface, pane: string) {
   const { exitCode, stdout } = await $.process.run(['herdr', 'pane', 'read', pane, '--source', 'visible'])
-  return exitCode === 0 && stdout.includes(GOAL_PATTERN)
+  return exitCode === 0 ? stdout : ''
+}
+
+// `/goal` が動いている間は知らせない（区切りの確かめで、目標追従を途中で止めることになるため）。
+const isGoalActive = async ($: EngineInterface, pane: string) => (await readScreen($, pane)).includes(GOAL_PATTERN)
+
+// 更新の知らせは、入力欄の上枠のすぐ上の1行に出る。画面全体に当てると、会話に出てきた同じ文言を拾う。
+// 下から見て最初の「─ だけの行」を下枠、その上で最初の「─ で始まる行」を上枠とみなす（scripts/watch-context.mjs と同じ読み方）。
+export function noticeRowOf(screen: string) {
+  const lines = screen.split('\n')
+  let bottom = lines.length - 1
+  while (bottom >= 0 && !/^─+\s*$/.test(lines[bottom])) bottom -= 1
+  for (let top = bottom - 1; top >= 1; top -= 1) {
+    if (lines[top].startsWith('─')) return lines[top - 1]
+  }
+  return ''
 }
 
 async function check($: EngineInterface) {
@@ -68,6 +84,18 @@ async function check($: EngineInterface) {
   if (installed !== undefined && installed !== running && current.update !== installed && !(await isGoalActive($, pane))) {
     await update($, told, t => ({ ...t, update: installed }))
     await $.prompt.submit({ text: `[コンテキストの見張り] UPDATE ${running} → ${installed}。Claude Code の更新を反映するため、${guide}` })
+    return
+  }
+
+  // 自動更新に失敗していれば、起動し直して更新をやり直させる。起動し直しても同じ版で失敗し続けるなら、
+  // 再起動を繰り返さないよう、ペインと版の組みごとに1回だけにする（セッションをまたぐので $.store に持つ）。
+  const failedKey = `updateFailed:${pane}`
+  if ((await $.store.get(failedKey)) === running) return
+  const screen = await readScreen($, pane)
+  const row = noticeRowOf(screen)
+  if (row.includes(UPDATE_FAILED_PATTERN) && !screen.includes(GOAL_PATTERN)) {
+    await $.store.set(failedKey, running)
+    await $.prompt.submit({ text: `[コンテキストの見張り] UPDATE FAILED ${running}（${row.trim()}）。Claude Code の自動更新をやり直すため、${guide}` })
   }
 }
 
