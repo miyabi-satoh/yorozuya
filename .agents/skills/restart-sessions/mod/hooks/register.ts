@@ -113,15 +113,10 @@ async function check($: EngineInterface) {
   const name = list.exitCode === 0 ? agentNameOf(list.stdout, pane) : undefined
   const failedKey = `updateFailed:${name ?? '-'}`
   if ((await $.store.get(failedKey)) !== running) {
-    // 送る前に覚える。submit が知らせのターンを終えてから返るなら、その前に再起動で落ちて覚えられないため。
-    // 送れなかったときだけ消し、次のターンの終わりにまた試す。
+    // OVER・UPDATE と同じく、送る前に覚えて消さない。submit が知らせのターンを終えてから返るなら、
+    // 後で覚えると再起動で落ちて覚えられず、繰り返しを止められないため。送れなかったときの再試行はしない。
     await $.store.set(failedKey, running)
-    try {
-      await $.prompt.submit({ text: `[コンテキストの見張り] UPDATE FAILED ${running}（${row.trim()}）。Claude Code の自動更新をやり直すため、${guide}` })
-    } catch (error) {
-      await $.store.delete(failedKey)
-      throw error
-    }
+    await $.prompt.submit({ text: `[コンテキストの見張り] UPDATE FAILED ${running}（${row.trim()}）。Claude Code の自動更新をやり直すため、${guide}` })
   }
 }
 
