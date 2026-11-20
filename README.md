@@ -16,5 +16,6 @@ skill は、決まったコマンドを順に叩くスクリプトではなく�
 | [cleanup](.agents/skills/cleanup/README.md) | ディスクのゴミの候補を調べてレポートし、選んだものだけ消す。mod が空きを見張り、ラインを切ったら各セッションに自分のリポジトリを片付けさせる | 削除まで通したのは Windows のみ。mod は Claude Code 用で、実機確認は macOS のみ |
 | [machine-setup](.agents/skills/machine-setup/README.md) | 新しいマシンにアプリ・ツールを入れ、設定ファイルを取り込む | Claude Code。最後まで通したのは Ubuntu（Docker）のみ |
 | [pick-three](.agents/skills/pick-three/README.md) | 画面・文言の見せ方や、選択肢の多い決定・絡み合う決定など、文章より並べて見比べたほうが選びやすい判断を1枚のページに並べて選んでもらい、選ばれた案をプロジェクトの決めごとに書く | 使ったのは Claude Code のアーティファクトのみ。ほかのエージェント向けの HTML ファイルで出す形は未確認 |
+| [desk-inspection](.agents/skills/desk-inspection/README.md) | リポジトリ全体を領域に分けてサブエージェントに読ませ、利用者が踏む欠陥を探し、指摘を1件ずつコードと依存のソースで確かめ直して、重さ順のレポートにする（ビルドも実行もしない机上検査）。サブエージェントのモデルは1か所で変えられる | Claude Code の Agent ツールと Artifact ツール（無ければ HTML ファイル）。使用量の枠を大きく使う。この skill の形ではまだ通していない |
 
 各 skill の前提・仕組み・使い方は、リンク先の README にある。skill に手を入れるときの決まりは [AGENTS.md](AGENTS.md) にある。

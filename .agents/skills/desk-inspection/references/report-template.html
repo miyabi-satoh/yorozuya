@@ -1,0 +1,260 @@
+<title>{アプリ名} 机上検査レポート</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* 1段組みの報告書。上に結論と件数、続けて重いものを1件ずつ、軽いものは短い一覧にまとめる */
+:root {
+  --bg: #f3f6f7;
+  --surface: #ffffff;
+  --ink: #16212a;
+  --muted: #566571;
+  --line: #d5dde2;
+  --accent: #0d6767;
+  --accent-soft: #e0f0ef;
+  --warn: #8a5200;
+  --warn-soft: #fdf0d6;
+  --ok: #1b6a3b;
+  --ok-soft: #e1f2e7;
+  --bad: #a3282d;
+  --bad-soft: #fbe4e3;
+  --code-bg: #eaeff2;
+  --font-body: "Hiragino Sans", "Yu Gothic UI", "Meiryo", "Noto Sans JP", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #10171c;
+    --surface: #172129;
+    --ink: #e3eaef;
+    --muted: #9aa9b4;
+    --line: #2b3943;
+    --accent: #62c8c3;
+    --accent-soft: #15393a;
+    --warn: #f0b860;
+    --warn-soft: #3a2c12;
+    --ok: #74cf96;
+    --ok-soft: #16331f;
+    --bad: #f29a9a;
+    --bad-soft: #3d1c1e;
+    --code-bg: #212d36;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #10171c;
+  --surface: #172129;
+  --ink: #e3eaef;
+  --muted: #9aa9b4;
+  --line: #2b3943;
+  --accent: #62c8c3;
+  --accent-soft: #15393a;
+  --warn: #f0b860;
+  --warn-soft: #3a2c12;
+  --ok: #74cf96;
+  --ok-soft: #16331f;
+  --bad: #f29a9a;
+  --bad-soft: #3d1c1e;
+  --code-bg: #212d36;
+  color-scheme: dark;
+}
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.8;
+  padding-block: 32px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.page { max-width: 46rem; margin-inline: auto; display: flex; flex-direction: column; gap: 40px; }
+h1, h2, h3, dt, .tag, .toc a, .count dt { word-break: auto-phrase; }
+h1 { font-size: 1.7rem; line-height: 1.35; margin: 0; font-weight: 700; }
+h2 { font-size: 1.2rem; line-height: 1.45; margin: 0; padding-bottom: 8px; border-bottom: 2px solid var(--accent); }
+h3 { font-size: 1rem; line-height: 1.55; margin: 0; font-weight: 700; }
+p { margin: 0; }
+a { color: var(--accent); }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+code {
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  background: var(--code-bg);
+  padding: 1px 5px;
+  border-radius: 3px;
+  overflow-wrap: anywhere;
+}
+header { display: flex; flex-direction: column; gap: 12px; }
+.meta { color: var(--muted); font-size: 0.87rem; }
+.lead { display: flex; flex-direction: column; gap: 10px; }
+.counts { display: grid; grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); margin: 0; }
+.count { background: var(--surface); padding: 12px 14px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.count dt { font-size: 0.8rem; color: var(--muted); line-height: 1.5; }
+.count dd { margin: 0; font-size: 1.5rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.3; }
+.count dd small { font-size: 0.8rem; font-weight: 400; color: var(--muted); }
+.toc { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 0.9rem; }
+section { display: flex; flex-direction: column; gap: 20px; }
+.note { color: var(--muted); font-size: 0.9rem; }
+.finding { background: var(--surface); border: 1px solid var(--line); padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.finding h3 { display: flex; gap: 10px; align-items: baseline; }
+.no { font-family: var(--font-mono); font-size: 0.82rem; color: var(--accent); flex: none; font-variant-numeric: tabular-nums; }
+.tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.tag { font-size: 0.75rem; line-height: 1.5; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.tag.sure { background: var(--ok-soft); color: var(--ok); border-color: transparent; }
+.tag.unsure { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+.tag.must { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+.tag.st-done { background: var(--ok); color: var(--surface); border-color: transparent; font-weight: 700; }
+.tag.st-wip { background: var(--accent); color: var(--surface); border-color: transparent; font-weight: 700; }
+.tag.st-todo { background: var(--warn); color: var(--surface); border-color: transparent; font-weight: 700; }
+.tag.st-none { background: var(--muted); color: var(--surface); border-color: transparent; font-weight: 700; }
+.finding.is-done, .rows li.is-done { opacity: 0.72; }
+.finding dd.status { font-weight: 700; }
+.rows .status { font-weight: 700; }
+.tag.grave { background: var(--bad-soft); color: var(--bad); border-color: transparent; font-weight: 700; }
+.finding dl { margin: 0; display: grid; grid-template-columns: 5.5em minmax(0, 1fr); gap: 6px 14px; }
+.finding dt { color: var(--muted); font-size: 0.85rem; padding-top: 1px; }
+.finding dd { margin: 0; min-width: 0; }
+@media (max-width: 520px) {
+  .finding dl { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .finding dd { margin-bottom: 8px; }
+  .finding { padding: 16px; }
+}
+.rows { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+.rows li { padding: 12px 0; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.rows .head { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: baseline; }
+.rows strong { font-weight: 700; }
+.rows .where { font-size: 0.85rem; color: var(--muted); }
+h4 { font-size: 0.92rem; margin: 8px 0 0; color: var(--muted); font-weight: 700; }
+.plain { margin: 0; padding-left: 1.3em; display: flex; flex-direction: column; gap: 6px; }
+blockquote { margin: 0; padding: 8px 14px; border-left: 3px solid var(--line); color: var(--muted); font-size: 0.9rem; }
+</style>
+
+<!--
+  机上検査レポートのひな形。{…} を埋め、使わない節は節ごと消す。
+  - 節の順は重い順。節の名前と note は、対象のアプリと時期に合わせて書き換えてよい（SKILL.md「重さの分け方」）。
+  - 番号は節ごとの頭文字 + 連番（A1, B1 …）。後で対応の状況を書き足すときに、番号で指せるようにする。
+  - 対応の状況のタグ: st-todo 未対応 / st-wip 対応中・後で / st-done 対応済み / st-none 対応不要。対応済みの項目には is-done を付ける。
+  - 確かめの度合いのタグ: sure（コードで確認・依存のソースで確認・実機で確認 など、確かめた手段を書く）/ unsure（実機は未確認・量は見積もり など、確かめていない所を書く）。
+-->
+<div class="page" lang="ja">
+
+<header>
+  <h1>{アプリ名} 机上検査レポート</h1>
+  <p class="meta">{YYYY-MM-DD} ・ main <code>{短い SHA}</code> ・ {いつの前に (例: 最初の公開の前に)}</p>
+  <div class="lead">
+    <p><strong>{結論を1文。いちばん重いものの件数と中身}</strong>{いちばん重いものが、利用者にとって何を意味するか}</p>
+    <p>{ほかの節の件数を1〜2文で}</p>
+    <p>{何を読んだか (領域の数・読んだ種類)、指摘を1件ずつコードと依存のソースで確かめ直したこと、ビルドと実行はしていないこと。実機で決まる所は<a href="#devices">実機で確かめたいこと</a>にまとめたこと}</p>
+  </div>
+  <!-- 対応の状況。直し始めたら足し、件数を更新する -->
+  <div class="lead">
+    <p><strong>対応の状況:</strong> {N}&nbsp;件のうち {n}&nbsp;件を直しました ({PR})。</p>
+  </div>
+  <dl class="counts" aria-label="対応の状況">
+    <div class="count"><dt>対応済み</dt><dd>{n} <small>件</small></dd></div>
+    <div class="count"><dt>対応不要</dt><dd>{n} <small>件</small></dd></div>
+    <div class="count"><dt>未対応</dt><dd>{n} <small>件</small></dd></div>
+  </dl>
+  <dl class="counts">
+    <div class="count"><dt>{時期}の前に直したい</dt><dd>{n} <small>件</small></dd></div>
+    <div class="count"><dt>ふつうの操作で踏む</dt><dd>{n} <small>件</small></dd></div>
+    <div class="count"><dt>軽いもの</dt><dd>{n} <small>件</small></dd></div>
+  </dl>
+  <nav class="toc" aria-label="目次">
+    <a href="#must">{時期}の前に直したい</a>
+    <a href="#usual">ふつうの操作で踏む</a>
+    <a href="#abuse">意地悪をする人がいると踏む</a>
+    <a href="#minor">軽いもの</a>
+    <a href="#other-os">{OS}だけ</a>
+    <a href="#docs">マニュアルと文書</a>
+    <a href="#devices">実機で確かめたいこと</a>
+    <a href="#sound">確かめて問題なかったこと</a>
+  </nav>
+</header>
+
+<section id="must">
+  <h2>{時期}の前に直したい</h2>
+  <p class="note">{この節に入れた基準 (例: データを戻せない・ファイルを失う・止まったまま気づけない・見せないはずの物に届く)}</p>
+
+  <article class="finding">
+    <h3><span class="no">A1</span>{利用者の目で見て何が起きるかを1行で}</h3>
+    <p class="tags"><span class="tag st-todo">未対応</span><span class="tag">{OS (すべての OS / Windows など)}</span><span class="tag sure">{確かめた手段}</span><span class="tag unsure">{確かめていない所}</span></p>
+    <dl>
+      <!-- 対応したら先頭に足す: <dt>対応</dt><dd class="status">直しました (PR #…)。…</dd> -->
+      <dt>起きること</dt>
+      <dd>{利用者の操作の手順と、画面に出る文言 (そのまま引く) と、その結果}</dd>
+      <dt>理由</dt>
+      <dd>{コードが何をしていて、なぜそうなるか}</dd>
+      <dt>確かめ方</dt>
+      <dd>{どの経路を読んだか・何を試したか。テストがなぜ拾わないか}</dd>
+      <dt>場所</dt>
+      <dd><code>{path}:{line}</code>、{依存} {版} <code>{path}:{line}</code></dd>
+      <dt>直す方向</dt>
+      <dd>{1〜2文}</dd>
+      <!-- 要るときだけ: 未確認の所 / 根拠 (資料の引用は blockquote) / 決めごととの食い違い / 同じ根の症状 / {版}の理由 -->
+    </dl>
+  </article>
+</section>
+
+<section id="usual">
+  <h2>ふつうの操作で踏む</h2>
+  <p class="note">データは失いませんが、期待したとおりに動かないもの。断りの無いものはコードで確認済みです。</p>
+  <!-- A と同じ article の形。番号は B1 … -->
+</section>
+
+<section id="abuse">
+  <h2>意地悪をする人がいると踏む</h2>
+  <p class="note">{アプリが想定する相手 (例: 同じ LAN の知らない人) と、その相手がいる使い方}</p>
+  <ul class="rows">
+    <li><div class="head"><strong>{何が起きるか}</strong><span class="tag st-todo">未対応</span></div>
+      <span>{相手・手順・結果を1〜2文}</span>
+      <span class="where"><code>{path}:{line}</code></span></li>
+  </ul>
+</section>
+
+<section id="minor">
+  <h2>軽いもの</h2>
+  <p class="note">まれにしか踏まないか、踏んでも困りごとが小さいもの。断りの無いものはコードで確認済みです。</p>
+  <!-- 件数が多ければ <h4>{画面や機能の区分}</h4> で分ける -->
+  <ul class="rows">
+    <li><div class="head"><strong>{何が起きるか}</strong><span class="tag st-todo">未対応</span></div>
+      <span>{補足を1〜2文。要らなければ省く}</span>
+      <span class="where"><code>{path}:{line}</code></span></li>
+  </ul>
+</section>
+
+<section id="other-os">
+  <h2>{OS}だけ</h2>
+  <p class="note">{いつまでに直せばよいか (例: それぞれの OS の版を出す前に)}</p>
+  <ul class="rows">
+    <li><div class="head"><strong>{何が起きるか}</strong><span class="tag">{OS}</span><span class="tag st-todo">未対応</span></div>
+      <span class="where"><code>{path}:{line}</code></span></li>
+  </ul>
+</section>
+
+<section id="docs">
+  <h2>マニュアルと文書</h2>
+  <p class="note">マニュアル・README・設計の文書が、今の動きと食い違うもの。</p>
+  <ul class="rows">
+    <li><div class="head"><strong>{どこが何と食い違うか}</strong><span class="tag st-todo">未対応</span></div>
+      <span class="where"><code>{path}:{line}</code></span></li>
+  </ul>
+</section>
+
+<section id="devices">
+  <h2>実機で確かめたいこと</h2>
+  <p class="note">読むだけでは決まらなかった所。OS やブラウザーの実際の動きで決まります。</p>
+  <ul class="rows">
+    <li><div class="head"><strong>{番号} {何を確かめるか}</strong><span class="tag st-todo">未確認</span></div>
+      <span>{どの環境で何をして、何が見えたらどちらと分かるか}</span></li>
+    <!-- 確かめたら: li に is-done、タグを <span class="tag st-done">確認済み</span>、<span class="status">{結果}</span> -->
+  </ul>
+</section>
+
+<section id="sound">
+  <h2>確かめて問題なかったこと</h2>
+  <!-- 読む人が疑いそうな所で、確かめて欠陥が無かったもの。何を確かめたかを具体的に -->
+  <ul class="plain">
+    <li><strong>{区分}</strong>: {何を見て、どうなっていたか}</li>
+  </ul>
+</section>
+
+</div>
