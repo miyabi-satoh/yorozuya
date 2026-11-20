@@ -206,7 +206,7 @@ blockquote { margin: 0; padding: 8px 14px; border-left: 3px solid var(--line); c
 
 <section id="abuse">
   <h2>意地悪をする人がいると踏む</h2>
-  <p class="note">{アプリが想定する相手 (例: 同じ LAN の知らない人) と、その相手がいる使い方}</p>
+  <p class="note">{アプリが想定する相手 (例: 同じ LAN の知らない人) と、その相手がいる使い方}。断りの無いものはコードで確認済みです。</p>
   <ul class="rows">
     <li><div class="head"><strong>{何が起きるか}</strong><span class="tag st-todo">未対応</span></div>
       <span>{相手・手順・結果を1〜2文}</span>
@@ -218,6 +218,7 @@ blockquote { margin: 0; padding: 8px 14px; border-left: 3px solid var(--line); c
   <h2>軽いもの</h2>
   <p class="note">まれにしか踏まないか、踏んでも困りごとが小さいもの。断りの無いものはコードで確認済みです。</p>
   <!-- 件数が多ければ <h4>{画面や機能の区分}</h4> で分ける -->
+  <!-- 確かめていない所がある行は、head に <span class="tag unsure">{実機は未確認 など}</span> を足す。どの一覧の節も同じ -->
   <ul class="rows">
     <li><div class="head"><strong>{何が起きるか}</strong><span class="tag st-todo">未対応</span></div>
       <span>{補足を1〜2文。要らなければ省く}</span>
@@ -227,7 +228,7 @@ blockquote { margin: 0; padding: 8px 14px; border-left: 3px solid var(--line); c
 
 <section id="other-os">
   <h2>{OS}だけ</h2>
-  <p class="note">{いつまでに直せばよいか (例: それぞれの OS の版を出す前に)}</p>
+  <p class="note">{いつまでに直せばよいか (例: それぞれの OS の版を出す前に)}。断りの無いものはコードで確認済みです。</p>
   <ul class="rows">
     <li><div class="head"><strong>{何が起きるか}</strong><span class="tag">{OS}</span><span class="tag st-todo">未対応</span></div>
       <span class="where"><code>{path}:{line}</code></span></li>
@@ -236,7 +237,7 @@ blockquote { margin: 0; padding: 8px 14px; border-left: 3px solid var(--line); c
 
 <section id="docs">
   <h2>マニュアルと文書</h2>
-  <p class="note">マニュアル・README・設計の文書が、今の動きと食い違うもの。</p>
+  <p class="note">マニュアル・README・設計の文書が、今の動きと食い違うもの。断りの無いものはコードと文書で確認済みです。</p>
   <ul class="rows">
     <li><div class="head"><strong>{どこが何と食い違うか}</strong><span class="tag st-todo">未対応</span></div>
       <span class="where"><code>{path}:{line}</code></span></li>
