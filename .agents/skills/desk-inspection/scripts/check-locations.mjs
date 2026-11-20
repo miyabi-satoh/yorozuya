@@ -48,7 +48,7 @@ const countLines = (f) => {
       const p = join(repo, f);
       if (statSync(p).isFile()) {
         const text = readFileSync(p, "utf8");
-        n = text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
+        n = text === "" ? 0 : text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
       }
     } catch {}
     lineCount.set(f, n);
@@ -91,7 +91,10 @@ for (const block of blocks) {
       unresolved.push(`${shown} (読めない)`);
       continue;
     }
-    if (Number(from) < 1 || last < Number(from) || last > n) {
+    if (Number(from) < 1 || last < Number(from)) {
+      console.log(`NG  ${shown} → 行の範囲がおかしい`);
+      bad++;
+    } else if (last > n) {
       console.log(`NG  ${shown} → ${hits[0]} は ${n} 行`);
       bad++;
     } else {
