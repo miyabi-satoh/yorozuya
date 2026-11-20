@@ -138,13 +138,13 @@ blockquote { margin: 0; padding: 8px 14px; border-left: 3px solid var(--line); c
 
 <header>
   <h1>{アプリ名} 机上検査レポート</h1>
-  <p class="meta">{YYYY-MM-DD} ・ main <code>{短い SHA}</code> ・ {いつの前に (例: 最初の公開の前に)}</p>
+  <p class="meta">{YYYY-MM-DD} ・ {ブランチ} <code>{短い SHA}</code> ・ {いつの前に (例: 最初の公開の前に)}</p>
   <div class="lead">
     <p><strong>{結論を1文。いちばん重いものの件数と中身}</strong>{いちばん重いものが、利用者にとって何を意味するか}</p>
     <p>{ほかの節の件数を1〜2文で}</p>
     <p>{何を読んだか (領域の数・読んだ種類)、指摘を1件ずつコードと依存のソースで確かめ直したこと、ビルドと実行はしていないこと。実機で決まる所は<a href="#devices">実機で確かめたいこと</a>にまとめたこと}</p>
   </div>
-  <!-- 対応の状況。直し始めたら足し、件数を更新する -->
+  <!-- 対応の状況。最初のレポートには入れず、直し始めたらこのコメントを外して埋める
   <div class="lead">
     <p><strong>対応の状況:</strong> {N}&nbsp;件のうち {n}&nbsp;件を直しました ({PR})。</p>
   </div>
@@ -153,10 +153,14 @@ blockquote { margin: 0; padding: 8px 14px; border-left: 3px solid var(--line); c
     <div class="count"><dt>対応不要</dt><dd>{n} <small>件</small></dd></div>
     <div class="count"><dt>未対応</dt><dd>{n} <small>件</small></dd></div>
   </dl>
+  -->
   <dl class="counts">
     <div class="count"><dt>{時期}の前に直したい</dt><dd>{n} <small>件</small></dd></div>
     <div class="count"><dt>ふつうの操作で踏む</dt><dd>{n} <small>件</small></dd></div>
+    <div class="count"><dt>意地悪をする人がいると踏む</dt><dd>{n} <small>件</small></dd></div>
     <div class="count"><dt>軽いもの</dt><dd>{n} <small>件</small></dd></div>
+    <div class="count"><dt>{OS}だけ</dt><dd>{n} <small>件</small></dd></div>
+    <div class="count"><dt>マニュアルと文書</dt><dd>{n} <small>件</small></dd></div>
   </dl>
   <nav class="toc" aria-label="目次">
     <a href="#must">{時期}の前に直したい</a>

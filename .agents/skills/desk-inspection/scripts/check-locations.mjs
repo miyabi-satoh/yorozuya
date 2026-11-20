@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 // レポートの <code>path:line</code> が、検査したリポジトリの今のファイルに実在するかを見る。
 // 使い方: node check-locations.mjs <report.html> <repo のルート>
-// 終了コード: 1 = 行がファイルの長さを超える場所がある（書き間違いか、別の版を読んだ）。
+// 終了コード: 0 = 通った / 1 = 行がファイルの長さを超える場所がある（書き間違いか、別の版を読んだ）/
+//   2 = 確かめられなかった（引数・読めないファイル・1か所も確かめられなかった）。1 と分けるのは、確かめられないまま通ったと読まないため。
 // リポジトリに無いパス（依存のソースなど）と、名前だけで複数のファイルに当たるものは、確かめられなかったとして並べるだけにする。
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 const [reportPath, repo] = process.argv.slice(2);
@@ -13,10 +14,22 @@ if (!reportPath || !repo) {
   process.exit(2);
 }
 
-const html = readFileSync(reportPath, "utf8");
-const files = execFileSync("git", ["-C", repo, "ls-files"], { encoding: "utf8" })
-  .split("\n")
-  .filter(Boolean);
+const fail = (msg) => {
+  console.error(msg);
+  process.exit(2);
+};
+let html;
+let files;
+try {
+  // コメントの中（ひな形の例など）は場所として読まない。
+  html = readFileSync(reportPath, "utf8").replace(/<!--[\s\S]*?-->/g, "");
+  // -z: 既定では日本語のパスが引用符と8進のエスケープで出て、レポートの書き方と合わなくなる。
+  files = execFileSync("git", ["-C", repo, "ls-files", "-z"], { encoding: "utf8" })
+    .split("\0")
+    .filter(Boolean);
+} catch (e) {
+  fail(`読めなかった: ${e.message}`);
+}
 const fileSet = new Set(files);
 
 const decode = (s) =>
@@ -26,9 +39,18 @@ const decode = (s) =>
 // 引き継ぐのは同じ段落（dd・li）の中だけにする。
 const blocks = html.split(/<\/(?:dd|li)>/);
 const lineCount = new Map();
+// 読めないもの（作業フォルダで消したファイル・ディレクトリ・サブモジュール）は null。
 const countLines = (f) => {
   if (!lineCount.has(f)) {
-    lineCount.set(f, readFileSync(join(repo, f), "utf8").split("\n").length);
+    let n = null;
+    try {
+      const p = join(repo, f);
+      if (statSync(p).isFile()) {
+        const text = readFileSync(p, "utf8");
+        n = text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
+      }
+    } catch {}
+    lineCount.set(f, n);
   }
   return lineCount.get(f);
 };
@@ -51,8 +73,8 @@ for (const block of blocks) {
     if (path === "") {
       if (!prev) continue;
       path = prev;
-    } else if (!/[./]/.test(path)) {
-      continue; // パスでない（「UNIQUE constraint failed: …」など）
+    } else if (!/[./]/.test(path) && !files.some((f) => f === path || f.endsWith(`/${path}`))) {
+      continue; // パスでない（「UNIQUE constraint failed: …」など）。拡張子の無いファイル（Makefile など）は通す
     }
     const shown = text.startsWith(":") ? `${path}${text}` : text;
     const hits = resolve(path);
@@ -64,7 +86,11 @@ for (const block of blocks) {
     prev = path;
     const last = Number(to ?? from);
     const n = countLines(hits[0]);
-    if (last > n) {
+    if (n === null) {
+      unresolved.push(`${shown} (読めない)`);
+      continue;
+    }
+    if (Number(from) < 1 || last > n) {
       console.log(`NG  ${shown} → ${hits[0]} は ${n} 行`);
       bad++;
     } else {
@@ -74,6 +100,7 @@ for (const block of blocks) {
 }
 
 console.log(`確かめた場所: ${ok + bad} 件 (NG ${bad} 件)`);
+if (ok + bad === 0) fail("1か所も確かめられなかった。リポジトリのルートと、レポートの場所の書き方（リポジトリからの相対パス）を見直す");
 if (unresolved.length) {
   console.log(`リポジトリで確かめられなかった場所 (依存のソースなら、そのまま): ${unresolved.length} 件`);
   for (const u of [...new Set(unresolved)]) console.log(`  ${u}`);
