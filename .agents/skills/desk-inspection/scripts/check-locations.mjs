@@ -31,6 +31,7 @@ try {
   fail(`読めなかった: ${e.message}`);
 }
 const fileSet = new Set(files);
+const baseNames = new Set(files.map((f) => f.slice(f.lastIndexOf("/") + 1)));
 
 const decode = (s) =>
   s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&").replace(/&nbsp;/g, " ");
@@ -73,7 +74,7 @@ for (const block of blocks) {
     if (path === "") {
       if (!prev) continue;
       path = prev;
-    } else if (!/[./]/.test(path) && !files.some((f) => f === path || f.endsWith(`/${path}`))) {
+    } else if (!/[./]/.test(path) && !baseNames.has(path)) {
       continue; // パスでない（「UNIQUE constraint failed: …」など）。拡張子の無いファイル（Makefile など）は通す
     }
     const shown = text.startsWith(":") ? `${path}${text}` : text;
@@ -90,7 +91,7 @@ for (const block of blocks) {
       unresolved.push(`${shown} (読めない)`);
       continue;
     }
-    if (Number(from) < 1 || last > n) {
+    if (Number(from) < 1 || last < Number(from) || last > n) {
       console.log(`NG  ${shown} → ${hits[0]} は ${n} 行`);
       bad++;
     } else {
@@ -100,9 +101,9 @@ for (const block of blocks) {
 }
 
 console.log(`確かめた場所: ${ok + bad} 件 (NG ${bad} 件)`);
-if (ok + bad === 0) fail("1か所も確かめられなかった。リポジトリのルートと、レポートの場所の書き方（リポジトリからの相対パス）を見直す");
 if (unresolved.length) {
   console.log(`リポジトリで確かめられなかった場所 (依存のソースなら、そのまま): ${unresolved.length} 件`);
   for (const u of [...new Set(unresolved)]) console.log(`  ${u}`);
 }
+if (ok + bad === 0) fail("1か所も確かめられなかった。リポジトリのルートと、レポートの場所の書き方（リポジトリからの相対パス）を見直す");
 process.exit(bad ? 1 : 0);
