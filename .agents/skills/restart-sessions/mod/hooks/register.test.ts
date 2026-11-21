@@ -30,12 +30,16 @@ test('知らせの行は、入力欄の上枠のすぐ上の1行', () => {
 // orca を立てると、Herdr でなく Orca の端末として動かす（pane は端末のハンドル、worktree は ORCA_WORKTREE_ID）。
 function setUp(
   on: any,
-  s: { percent?: number; tokens?: number; installed?: string; screen?: string; herdr?: boolean; orca?: boolean; pane?: string; worktree?: string },
+  s: { percent?: number; tokens?: number; installed?: string; screen?: string; herdr?: boolean; orca?: boolean; orcaFail?: boolean; pane?: string; worktree?: string | null },
 ) {
   const sent: string[] = []
   const runs: string[][] = []
   const env = (): Record<string, string> => {
-    if (s.orca) return { ORCA_TERMINAL_HANDLE: s.pane ?? 'term_1', ORCA_WORKTREE_ID: s.worktree ?? 'r1::/w' }
+    if (s.orca) {
+      const env: Record<string, string> = { ORCA_TERMINAL_HANDLE: s.pane ?? 'term_1' }
+      if (s.worktree !== null) env.ORCA_WORKTREE_ID = s.worktree ?? 'r1::/w'
+      return env
+    }
     return s.herdr === false ? {} : { HERDR_ENV: '1', HERDR_PANE_ID: s.pane ?? 'w1:p1' }
   }
   on('env.get', (_$: any, e: any) => ({ value: env()[e.name] }))
@@ -53,6 +57,7 @@ function setUp(
     runs.push(e.argv)
     if (e.argv[0] === 'claude') return { value: { exitCode: 0, stdout: `${s.installed ?? '2.1.289'} (Claude Code)\n`, stderr: '' } }
     if (e.argv[0] === 'orca') {
+      if (s.orcaFail) return { value: { exitCode: 1, stdout: '{"ok":false,"error":{"code":"terminal_handle_stale"}}', stderr: '' } }
       const tail = (s.screen ?? '').split('\n')
       return { value: { exitCode: 0, stdout: JSON.stringify({ ok: true, result: { terminal: { tail, source: 'screen' } } }), stderr: '' } }
     }
@@ -138,8 +143,8 @@ describe('ターンの終わりの見張り', () => {
 
 test('Orca の画面は terminal read --screen の tail をつなぐ。描けなかったときは読めない扱い', () => {
   expect(orcaScreenOf(JSON.stringify({ ok: true, result: { terminal: { tail: ['a', 'b'], source: 'screen' } } }))).toBe('a\nb')
-  expect(orcaScreenOf(JSON.stringify({ ok: true, result: { terminal: { tail: ['a'], source: 'screen-unavailable' } } }))).toBe('')
-  expect(orcaScreenOf('not json')).toBe('')
+  expect(orcaScreenOf(JSON.stringify({ ok: true, result: { terminal: { tail: ['a'], source: 'screen-unavailable' } } }))).toBeNull()
+  expect(orcaScreenOf('not json')).toBeNull()
 })
 
 describe('Orca の端末での見張り', () => {
@@ -158,6 +163,20 @@ describe('Orca の端末での見張り', () => {
     await $.turn.complete(turn)
     expect(sent).toEqual([])
     expect(sent.runs.some(argv => argv[0] === 'orca' && argv.includes('--screen'))).toBe(true)
+  })
+
+  test('画面を読めなければ、/goal が動いているかもしれないので知らせない', async ($, on) => {
+    mock.clock(on, { now: 0 })
+    const sent = setUp(on, { percent: 80, orca: true, orcaFail: true })
+    await $.turn.complete(turn)
+    expect(sent).toEqual([])
+  })
+
+  test('作業フォルダーが分からなければ、自動更新の失敗は知らせない（ほかのセッションと鍵を分けられない）', async ($, on) => {
+    mock.clock(on, { now: 0 })
+    const sent = setUp(on, { percent: 10, orca: true, worktree: null, screen: screenWith('✘ Auto-update failed · Run claude doctor') })
+    await $.turn.complete(turn)
+    expect(sent).toEqual([])
   })
 
   test('自動更新の失敗は、作業フォルダーと版の組みごとに1回だけ（再起動で端末と名前が変わっても繰り返さない）', async ($, on) => {

@@ -95,10 +95,11 @@ function commandWords(segment) {
 }
 
 // `herdr pane run <ペイン> <コマンド>` か `node run-in-tab.mjs ... -- <コマンド>` なら、ペインへ送るコマンドを返す。引用で渡していれば、その中身に戻す。
-// Orca は `--command` か `--text` の次の1語 (引用ならその中身) を送るコマンドとみなす。
+// Orca は `--command` か `--text` の次の1語 (`--text=<値>` の形も。引用ならその中身) を送るコマンドとみなす。
+// 引用しない複数の語は、シェルが別の引数に分けるので、Orca に渡るのも1語目だけ。
 // quotes は、この区切りに出てくる引用の中身 (出てきた順)。
 function paneCommand(segment, quotes) {
-  const toOrca = segment.match(/^(.*?\borca\s+terminal\s+(?:create|send|split)\s+(?:.*?\s)?--(?:command|text)\s+)(\S+)/s);
+  const toOrca = segment.match(/^(.*?\borca\s+terminal\s+(?:create|send|split)\s+(?:.*?\s)?--(?:command|text)(?:\s+|=))(\S+)/s);
   if (toOrca) {
     let next = (toOrca[1].match(/''|""/g) ?? []).length;
     return toOrca[2].replace(/''|""/g, () => quotes[next++] ?? '');

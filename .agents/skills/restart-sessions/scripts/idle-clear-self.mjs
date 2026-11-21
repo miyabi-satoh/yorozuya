@@ -23,9 +23,12 @@ const skip = (message) => {
 const [, , mode, pane, handoff, shells] = process.argv;
 
 // 切り離した子: /clear を送り、画面が入れ替わるのを待ってから続きを送る。
+// /clear を送れなければ、続きは送らない。待つ間にユーザーが打ち始めたか、何かが動き出していても送らない
+// （続きが打ちかけの末尾につながって送信されるため）。どちらも見送るだけで、元の会話は残る。
 if (mode === '--send') {
-  prompt(pane, '/clear');
+  if (!prompt(pane, '/clear')) process.exit(1);
   sleep(3);
+  if (inputDraft(pane) !== '' || ['working', 'blocked'].includes(idleStatus(pane).status)) process.exit(1);
   prompt(
     pane,
     `@${handoff} /clear で消えた前任（このペインの直前のセッション）の会話ログです。最新のやり取りは「# 前の資料」の見出しの直前までで、見出しの下は古い世代です。読んで状況を短く確かめ、ユーザーの答え待ちだったなら同じ問いを出し直し、そうでなければ指示を待ってください（作業は始めない）。${shells === 'yes' ? '前任のバックグラウンドのシェルが残っています。その終わりの知らせが届いたら、会話ログにある予定に沿って続けてかまいません。' : ''}`,

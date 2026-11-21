@@ -55,21 +55,25 @@ async function ownTerminal($: EngineInterface): Promise<Terminal | undefined> {
 }
 
 // orca terminal read --screen --json の結果から画面の文字を取る。描けなかったとき（source が screen でない）は読めない扱い。
-export function orcaScreenOf(stdout: string) {
+// 読み方は scripts/lib/orca.mjs の screenFromRead と同じ（変えるときは両方を直す）。mod は外の CLI を $.process で呼ぶ決まりで、scripts のモジュールを読み込まないので写している。
+export function orcaScreenOf(stdout: string): string | null {
   try {
     const terminal = JSON.parse(stdout)?.result?.terminal
-    if (!Array.isArray(terminal?.tail) || (terminal.source !== undefined && terminal.source !== 'screen')) return ''
-    return terminal.tail.join('\n')
+    if (!Array.isArray(terminal?.tail) || (terminal.source !== undefined && terminal.source !== 'screen')) return null
+    return terminal.tail.join('\n') as string
   } catch {
-    return ''
+    return null
   }
 }
 
-async function readScreen($: EngineInterface, own: Terminal) {
+// Orca で読めなければ null（Orca を開き直した後の古いハンドルなど、読めないまま続くことがある）。
+// 呼び出し側は読めないときに知らせを見送る。Herdr は読めなければ '' のまま（分ける前と同じ）。
+async function readScreen($: EngineInterface, own: Terminal): Promise<string | null> {
   // 空白がノーブレークスペースで来ることがある（scripts/lib/herdr.mjs の readScreen と同じに揃える）。
   if (own.kind === 'orca') {
     const { exitCode, stdout } = await $.process.run(['orca', 'terminal', 'read', '--terminal', own.handle, '--screen', '--json'])
-    return exitCode === 0 ? orcaScreenOf(stdout).replace(NBSP, ' ') : ''
+    const screen = exitCode === 0 ? orcaScreenOf(stdout) : null
+    return screen === null ? null : screen.replace(NBSP, ' ')
   }
   const { exitCode, stdout } = await $.process.run(['herdr', 'pane', 'read', own.pane, '--source', 'visible'])
   return exitCode === 0 ? stdout.replace(NBSP, ' ') : ''
@@ -86,7 +90,11 @@ export function agentNameOf(listJson: string, pane: string): string | undefined 
 }
 
 // `/goal` が動いている間は知らせない（区切りの確かめで、目標追従を途中で止めることになるため）。
-const isGoalActive = async ($: EngineInterface, own: Terminal) => (await readScreen($, own)).includes(GOAL_PATTERN)
+// 画面を読めなければ、/goal が動いているかもしれないので、動いているとみなして見送る。
+const isGoalActive = async ($: EngineInterface, own: Terminal) => {
+  const screen = await readScreen($, own)
+  return screen === null || screen.includes(GOAL_PATTERN)
+}
 
 // 更新の知らせは、入力欄の上枠のすぐ上の1行に出る。画面全体に当てると、会話に出てきた同じ文言を拾う。
 // 下から見て最初の「─ だけの行」を下枠、その上で最初の「─ で始まる行」を上枠とみなす（scripts/watch-context.mjs と同じ読み方）。
@@ -133,9 +141,13 @@ async function check($: EngineInterface) {
   // 新しい版が入っていれば、再起動は UPDATE の側に任せる（知らせ済みで再起動を待っている間と、/goal で見送った間）。
   if (installed !== undefined && installed !== running) return
   const screen = await readScreen($, own)
+  if (screen === null) return
   const row = noticeRowOf(screen)
   if (!row.includes(UPDATE_FAILED_PATTERN) || screen.includes(GOAL_PATTERN)) return
-  const failedKey = `updateFailed:${(await failedKeyName($, own)) ?? '-'}`
+  const keyName = await failedKeyName($, own)
+  // Orca で作業フォルダーが分からなければ、ほかのセッションと鍵を分けられないので知らせない。
+  if (own.kind === 'orca' && keyName === undefined) return
+  const failedKey = `updateFailed:${keyName ?? '-'}`
   if ((await $.store.get(failedKey)) !== running) {
     // OVER・UPDATE と同じく、送る前に覚えて消さない。submit が知らせのターンを終えてから返るなら、
     // 後で覚えると再起動で落ちて覚えられず、繰り返しを止められないため。送れなかったときの再試行はしない。
@@ -145,7 +157,9 @@ async function check($: EngineInterface) {
 }
 
 // 自動更新の失敗を1回だけにする鍵の名前。Herdr は名前を再起動の後へ引き継ぐ。
-// Orca では claude の名前が再起動のたびに変わるので、再起動の前後で変わらない作業フォルダー（ORCA_WORKTREE_ID）で代える。
+// Orca では claude の名前も端末のハンドルもセッションIDも再起動のたびに変わる（自己再起動は端末を分割して移る）ので、
+// 再起動の前後で変わらない作業フォルダー（ORCA_WORKTREE_ID）で代える。変わるものを鍵に入れると、再起動のたびに別の鍵になり、
+// 同じ版で失敗し続ける間、再起動を繰り返す。同じ作業フォルダーの2つ目のセッションには知らせないが、1つ目の再起動で更新がやり直される。
 async function failedKeyName($: EngineInterface, own: Terminal) {
   if (own.kind === 'orca') return own.worktree ? `orca:${own.worktree}` : undefined
   const list = await $.process.run(['herdr', 'agent', 'list'])

@@ -49,10 +49,10 @@ while [ $# -gt 0 ]; do
   shift
 done
 case "$sub" in
-  'terminal create') echo '{"ok":true,"result":{"terminal":{"handle":"term_1"}}}' ;;
+  'terminal create') if [ -e "$state/no-handle" ]; then echo '{"ok":true,"result":{"terminal":{}}}'; else echo '{"ok":true,"result":{"terminal":{"handle":"term_1"}}}'; fi ;;
   'terminal send') printf '%s' "$text" > "$state/sent"; { [ -e "$state/no-run" ] || sh -c "$(printf '%s' "$text" | tr -d '\\r')"; } >/dev/null 2>&1 & echo '{"ok":true,"result":{"send":{"accepted":true}}}' ;;
   'terminal show') if [ -e "$state/gone" ]; then echo '{"ok":false,"error":{"code":"terminal_handle_stale"}}'; exit 1; fi; echo '{"ok":true,"result":{"terminal":{"connected":true}}}' ;;
-  'terminal read') echo '{"ok":true,"result":{"terminal":{"tail":["screen"],"source":"screen"}}}' ;;
+  'terminal read') echo '{"ok":true,"result":{"terminal":{"tail":["~ ❯",""],"source":"screen"}}}' ;;
   'terminal close') touch "$state/closed"; echo '{"ok":true,"result":{}}' ;;
 esac
 `,
@@ -225,12 +225,31 @@ test('Orca の端末が終わりを記録しないまま閉じられたら、そ
   assert.match(result.stdout, /タブが閉じられました/);
 });
 
-test('同じ置き場の処理を2回は流さない', () => {
+test('Orca の端末からは、同じ置き場の処理を2回は流さない', () => {
   const dir = tmp();
-  fs.writeFileSync(path.join(dir, 'job.json'), JSON.stringify({ command: 'echo again', cwd: dir }));
+  fs.writeFileSync(path.join(dir, 'job.json'), JSON.stringify({ command: 'echo again', cwd: dir, terminal: 'term_1' }));
   fs.writeFileSync(path.join(dir, 'output.log'), 'first\n');
   const result = spawnSync('node', [script, '--runner', dir], { encoding: 'utf8', env: { ...process.env, SHELL: '/bin/sh' } });
   assert.equal(result.status, 2);
   assert.match(result.stderr, /一度流れています/);
   assert.equal(fs.readFileSync(path.join(dir, 'output.log'), 'utf8'), 'first\n');
+});
+
+test('Herdr のタブでは、置き場にログがあっても分ける前のとおり続けて流す', () => {
+  const dir = tmp();
+  fs.writeFileSync(path.join(dir, 'job.json'), JSON.stringify({ command: 'echo again', cwd: dir, pane: 'w1:p1', tab: 'w1:t1' }));
+  fs.writeFileSync(path.join(dir, 'output.log'), 'first\n');
+  const result = spawnSync('node', [script, '--runner', dir], { encoding: 'utf8', env: { ...process.env, SHELL: '/bin/sh' } });
+  assert.equal(result.status, 0);
+  assert.match(fs.readFileSync(path.join(dir, 'output.log'), 'utf8'), /^again$/m);
+});
+
+test('Orca の端末を作った出力にハンドルが無ければ、流さずに止まる', () => {
+  const { env, state } = fakeOrca();
+  fs.writeFileSync(path.join(state, 'no-handle'), '');
+  const dir = tmp();
+  const result = run(env, '--dir', dir, '--', 'echo x');
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /ハンドルが無い/);
+  assert.equal(fs.existsSync(path.join(state, 'sent')), false);
 });

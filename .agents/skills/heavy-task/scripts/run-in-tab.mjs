@@ -38,6 +38,8 @@ const EXIT_OVERRUN = 124;
 
 const herdr = (...args) => execFileSync('herdr', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 // Orca の CLI は --json で { ok, result } を返し、失敗も JSON で stdout に出す。失敗は code を載せて投げる。
+// restart-sessions の scripts/lib/orca.mjs と同じ読み方を、ここにも持つ。skill は1つずつ置かれ、heavy-task だけを置いた所でも動かすため
+// （読み方を変えるときは両方を直す）。
 function orca(...args) {
   let out;
   try {
@@ -80,8 +82,9 @@ function runner(dir) {
     console.error(`job.json を読めません: ${dir}`);
     process.exit(2);
   }
-  // 同じ置き場で2回目を流さない。タブで ↑ と Enter を押したときや、端末を開き直したときに、同じ処理（push など）を繰り返さないため。
-  if (fs.existsSync(logFile(dir))) {
+  // Orca の端末では、同じ置き場で2回目を流さない。打ち込んだ行がシェルの履歴に残り、タブで ↑ と Enter を押すと、同じ処理（push など）を繰り返すため。
+  // Herdr のタブは分ける前のまま（置き場を使い回したときに続けて流す）。
+  if (job.terminal && fs.existsSync(logFile(dir))) {
     console.error(`この置き場の処理は一度流れています: ${dir}`);
     process.exit(2);
   }
@@ -216,6 +219,23 @@ function readTabScreen(job) {
   return (orca('terminal', 'read', '--terminal', job.terminal, '--screen').terminal?.tail ?? []).slice(-20).join('\n');
 }
 
+// 作った端末のシェルが上がるのを待つ。最後の文のある行がプロンプトの印で終われば上がった（restart-sessions の lib/orca.mjs の shellPromptReady と同じ見方）。
+// 待っても見えなければ、そのまま打つ。打った文字は端末が預かり、シェルが上がってから読む。見慣れないプロンプトで止めないため。
+const SHELL_WAIT_MS = 15_000;
+function waitForShell(terminal) {
+  const until = Date.now() + SHELL_WAIT_MS;
+  while (Date.now() < until) {
+    try {
+      const tail = orca('terminal', 'read', '--terminal', terminal, '--screen').terminal?.tail ?? [];
+      const last = tail.map((line) => line.trimEnd()).filter(Boolean).at(-1) ?? '';
+      if (/[❯$%#>]$/.test(last)) return;
+    } catch {
+      // 読めなくても、打つことはできる。
+    }
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 300);
+  }
+}
+
 const screenCommand = (job) => (job.terminal ? `orca terminal read --terminal ${job.terminal} --screen` : `herdr pane read ${job.pane} --lines 20`);
 
 function overrunReport(dir, job, minutes, tailLines) {
@@ -348,13 +368,17 @@ function start({ command, label, cwd, dir }) {
 // 呼び出し元と同じ作業フォルダー（ORCA_WORKTREE_ID。無ければ Orca で開いているもの）に端末のタブを作り、シェルに打ち込んで流す。
 // 起動のコマンド（--command）にしないのは、Orca が窓を開き直すときに起動のコマンドを流し直すため（2026-11-21 に claude で実際に起きた）。
 // 打ち込むのは貼り付けでなくそのままの文字で、Enter は CR で送る。
+// タブは焦点を奪わずに開く（--focus を付けなければ切り替えない。orca terminal create --help と、作った後も前のタブが選ばれたままだったのを実測）。
 function startInOrca(jobDir, base, runCommand) {
   const worktree = process.env.ORCA_WORKTREE_ID ? `id:${process.env.ORCA_WORKTREE_ID}` : 'active';
   const created = orca('terminal', 'create', '--worktree', worktree, '--title', base.label).terminal;
+  // ハンドルが無いまま進むと、後の処理が Herdr の側に倒れ、作ったタブが閉じられずに残る。
+  if (!created?.handle) throw new Error(`orca terminal create の出力にハンドルが無い（Orca の出力の形が変わった可能性）。「${base.label}」のタブが残っていれば閉じること`);
   const job = { ...base, terminal: created.handle };
   fs.writeFileSync(jobFile(jobDir), JSON.stringify(job, null, 2));
   console.log(`タブ: ${base.label}（${job.terminal}）\n置き場: ${jobDir}`);
   try {
+    waitForShell(job.terminal);
     orca('terminal', 'send', '--terminal', job.terminal, '--text', `${runCommand}\r`);
   } catch (error) {
     closeTab(job);

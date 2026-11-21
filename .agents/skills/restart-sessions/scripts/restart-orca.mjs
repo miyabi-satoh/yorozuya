@@ -9,6 +9,7 @@
 //   Orca は窓を開き直すときに起動のコマンドを流し直し、同じ会話の claude が2つ動く（2026-11-21 に実際に起きた）。
 // - 名前は Orca でなく claude が付ける。新しいセッションは新しい名前になるので、名前の付け外しは無い。
 // - シェルに戻ったかは、登録簿にある claude のプロセスが消えたかで見る。Orca の agentIdentity は claude が終わっても残る（実測）。
+//   消えた後、画面にシェルのプロンプトが打ちかけ無しで出ているのを確かめてから `claude` を打つ（打ちかけの末尾につながって流れないため）。
 
 import { handoffProblem } from './lib/handoff.mjs';
 import {
@@ -17,11 +18,11 @@ import {
   agentStateOf,
   backgroundWorkHint,
   inputDraft,
+  isClaudePid,
   liveSessions,
   orca,
   orcaError,
   orcaErrorCode,
-  pidAlive,
   prompt,
   SEND_REFUSED,
   sessionForTitle,
@@ -30,6 +31,7 @@ import {
   submitAndConfirm,
   terminalInfo,
   waitForClaude,
+  waitForShellPrompt,
 } from './lib/orca.mjs';
 import { paceNote } from './lib/pace.mjs';
 import { attachGuide, HOW_TO_PROCEED } from './lib/prompts.mjs';
@@ -117,7 +119,7 @@ if (!prompt(handle, '/exit')) {
 let back = false;
 for (let i = 0; i < 60; i += 1) {
   sleep(1);
-  if (!pidAlive(entry.pid)) {
+  if (!isClaudePid(entry.pid)) {
     back = true;
     break;
   }
@@ -128,6 +130,10 @@ for (let i = 0; i < 60; i += 1) {
   }
 }
 if (!back) fail(`シェルに戻らない。端末を見ること。終了してシェルに戻っていたら、${recovery}`);
+
+if (!waitForShellPrompt(handle, 10)) {
+  fail(`claude は終わったが、端末にシェルのプロンプトが打ちかけ無しで出ていない（シェルでない何かが動いているか、打ちかけがある）。端末を見ること。シェルに戻っていて打ちかけが無ければ、${recovery}`);
+}
 
 log('起動');
 // シェルへは貼り付けでなく、そのまま打ち込む（--enter を付けると、claude と見なしたままの端末へは貼り付けで送られる）。

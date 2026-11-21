@@ -145,6 +145,8 @@ test('orca terminal で端末へ送るコマンドも、重いがタブの外で
     'orca terminal create --worktree active --title t --command "just ci" --json',
     "orca terminal send --terminal term_1 --text 'cargo test' --enter",
     'orca terminal split --terminal term_1 --command "pnpm build"',
+    'orca terminal send --terminal t --text="npm run build" --enter',
+    "orca terminal create --command='cargo test'",
   ]) {
     assert.equal(heavy(bash(command)), true, command);
     assert.equal(outside(command), false, command);

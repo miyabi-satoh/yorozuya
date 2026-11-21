@@ -13,7 +13,8 @@ import {
   screenFromRead,
   sendStarted,
   sessionForTitle,
-  shellQuote,
+  shellPromptReady,
+  claudePidsFromPs,
   stripTitle,
   submittedOnScreen,
 } from './orca.mjs';
@@ -47,7 +48,9 @@ test('draft が無くても、画面の入力欄に文があれば書きかけ�
   assert.equal(draftFromRead(read(['シェルの画面'])), null);
 });
 
-test('タイトルの頭の状態の印を外す', () => {
+test('タイトルの頭の状態の印は、知っている印だけを外す', () => {
+  assert.equal(stripTitle('✳ _wip/mac'), '_wip/mac');
+  assert.equal(stripTitle('#12-x'), '#12-x');
   assert.equal(stripTitle('✳ weblav-5d/mac'), 'weblav-5d/mac');
   assert.equal(stripTitle('◐ knowledge-10/mac'), 'knowledge-10/mac');
   assert.equal(stripTitle('clipkeep-2c/mac'), 'clipkeep-2c/mac');
@@ -67,6 +70,17 @@ test('登録簿とはタイトルで結ぶ。タイトルが名前に /<マシ�
   assert.equal(sessionForTitle(sessions, 'knowledge-1/mac', '/p/knowledge')?.sessionId, 's-k1');
   assert.equal(sessionForTitle(sessions, 'scratch-test', '/tmp/scratch'), null);
   assert.equal(sessionForTitle(sessions, '', '/tmp/scratch'), null);
+  // `/<マシン>` の形は1段だけ。名前の後ろに `/` で何段も続くタイトルには当てない。
+  assert.equal(sessionForTitle(sessions, 'orca-scratch-68/mac/x', '/tmp/scratch'), null);
+});
+
+test('名前そのものに当たるものを、名前に /<マシン> を足した形より先にする', () => {
+  const both = [
+    { pid: 1, sessionId: 'short', name: 'a', cwd: '/w' },
+    { pid: 2, sessionId: 'long', name: 'a/b', cwd: '/w' },
+  ];
+  assert.equal(sessionForTitle(both, 'a/b', '/w')?.sessionId, 'long');
+  assert.equal(sessionForTitle(both, 'a/mac', '/w')?.sessionId, 'short');
 });
 
 test('同じ名前が2つあれば作業フォルダーで絞り、それでも決まらなければ引かない', () => {
@@ -111,9 +125,18 @@ test('送った文が入力欄より上の会話に出ていれば、受け取�
   assert.equal(submittedOnScreen(null, request), false);
 });
 
-test('シェルに打つパスは単一引用符で囲む。単一引用符を含むパスは扱わない', () => {
-  assert.equal(shellQuote('/p/my repo'), "'/p/my repo'");
-  assert.equal(shellQuote("/p/it's"), null);
+test('シェルのプロンプトが打ちかけ無しで出ているときだけ、打ち込んでよいとみなす', () => {
+  assert.equal(shellPromptReady(['Resume this session with:', 'claude --resume abc', '…/scratchpad/orca-scratch ❯', '', ''].join('\n')), true);
+  assert.equal(shellPromptReady('PS C:\\Users\\me\\repo>'), true);
+  assert.equal(shellPromptReady('…/repo ❯ git sta'), false);
+  // claude の入力欄が見えていれば、まだ claude の画面。
+  assert.equal(shellPromptReady(screen('').join('\n')), false);
+  assert.equal(shellPromptReady(null), false);
+});
+
+test('登録簿の pid が claude のプロセスかを、ps のコマンドの名前で見る', () => {
+  const out = ['39992 claude --plugin-dir /x --resume abc', '  501 /Users/me/.local/bin/claude', '  777 node /usr/lib/node_modules/@anthropic-ai/claude-code/cli.js', '  888 node /opt/homebrew/bin/claude', '  999 /usr/bin/vim notes-claude.md'].join('\n');
+  assert.deepEqual([...claudePidsFromPs(out)].sort((a, b) => a - b), [501, 888, 39992]);
 });
 
 test('道具は HERDR_ENV=1 を先に、次に ORCA_TERMINAL_HANDLE で見分ける', () => {

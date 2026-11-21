@@ -6,13 +6,15 @@
 // 起動や読み込みが失敗すれば呼び出し元は生き残る。終了コードと SKIP・FAIL の決まりも同じ。
 // Herdr 版との違い:
 // - 名前は claude が付ける。新しいセッションは新しい名前になるので、名前の付け外しは無い（2つ目の引数は受けるが使わない）。
-// - 分割した端末は起動のコマンドを持たせず、シェルに `cd <場所> && claude` を打つ。起動のコマンドにすると、
+// - 分割した端末は起動のコマンドを持たせず、シェルに `claude` だけを打つ。起動のコマンドにすると、
 //   Orca は窓を開き直すときに流し直し、claude が2つ動く（2026-11-21 に実際に起きた）。
+//   分割した端末のシェルは、元の端末のシェルの場所でなく、Orca の作業フォルダーで始まる（実測）。`cd` を打つと、
+//   シェルごとに書き方（`&&`・引用）が違って壊れうるので、claude の cwd が作業フォルダーと同じときだけ進める。
 
-import { isAbsolute } from 'node:path';
+import { realpathSync } from 'node:fs';
 
 import { handoffProblem } from './lib/handoff.mjs';
-import { backgroundWorkHint, orca, orcaError, selfSession, shellQuote, submitAndConfirm, terminalInfo, waitForClaude } from './lib/orca.mjs';
+import { backgroundWorkHint, orca, orcaError, selfSession, submitAndConfirm, terminalInfo, waitForClaude, waitForShellPrompt } from './lib/orca.mjs';
 import { paceNote } from './lib/pace.mjs';
 import { attachGuide } from './lib/prompts.mjs';
 
@@ -52,11 +54,21 @@ const terminal = terminalInfo(self);
 if (terminal === null) skip(`自分の端末 ${self} を Orca から引けない（${orcaError()}）`);
 if (terminal.agentIdentity !== 'claude') skip(`この端末で動いているのは claude ではない: ${terminal.agentIdentity ?? '不明'}`);
 
-// 新しい端末は「このセッションと同じ場所」で起動する。分割した端末のシェルは作業フォルダーで始まり、claude の cwd とは限らない。
-const cwd = entry.cwd;
-if (typeof cwd !== 'string' || !isAbsolute(cwd)) skip('claude の cwd を登録簿から取れない。新しい端末をどこで起動するか決められないので止まる');
-const quoted = shellQuote(cwd);
-if (quoted === null) skip(`cwd に単一引用符が入っていて、シェルに打つ文を組めない: ${cwd}`);
+// 新しい端末は「このセッションと同じ場所」で起動する。別の場所で起動すると、CLAUDE.md も AGENTS.md も読まないセッションができる。
+// 同じかは実体のパスで比べる（macOS の /tmp と /private/tmp のような別名で食い違わないため）。
+const real = (path) => {
+  try {
+    return realpathSync(path);
+  } catch {
+    return '';
+  }
+};
+if (!entry.cwd || real(entry.cwd) !== real(terminal.worktreePath ?? '')) {
+  skip(
+    `claude の cwd（${entry.cwd || '取れない'}）が Orca の作業フォルダー（${terminal.worktreePath ?? '取れない'}）と違う。分割した端末は作業フォルダーで始まるので、同じ場所で立て直せない。` +
+      `手で立て直すなら、資料を書いてから /exit し、同じ端末のシェルで cwd に移って claude を起動し、@<資料> を渡す`,
+  );
+}
 
 if (!allowBackground) {
   const hint = backgroundWorkHint(self);
@@ -93,8 +105,11 @@ log(`新しい端末 ${created}`);
 const closeCreated = () =>
   orca(['terminal', 'close', '--terminal', created]) !== null ? '新しい端末は閉じた。' : `新しい端末 ${created} が残っている（orca terminal close --terminal ${created} で閉じること）。`;
 
-// シェルへは貼り付けでなく、そのまま打ち込む。
-if (orca(['terminal', 'send', '--terminal', created, '--text', `cd ${quoted} && claude\r`]) === null) {
+// シェルが上がるのを待ってから、貼り付けでなくそのまま打ち込む。
+if (!waitForShellPrompt(created, 15)) {
+  fail(`新しい端末 ${created} にシェルのプロンプトが出ない。${closeCreated()}旧セッションはそのまま`);
+}
+if (orca(['terminal', 'send', '--terminal', created, '--text', 'claude\r']) === null) {
   fail(`新しい端末のシェルに claude を打てなかった（${orcaError()}）。${closeCreated()}旧セッションはそのまま`);
 }
 

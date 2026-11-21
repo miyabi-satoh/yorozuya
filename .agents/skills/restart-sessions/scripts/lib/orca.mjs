@@ -5,7 +5,7 @@
 // セッションIDと名前は Claude Code の登録簿（<設定のフォルダー>/sessions/<pid>.json）から引き、端末とは端末のタイトルで結ぶ。
 // claude は自分のセッションの名前を端末のタイトルに出す（`✳ knowledge-10/mac` のように、頭に状態の印が付く）。
 
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -53,6 +53,7 @@ export function orca(args) {
 
 // --- 画面 ---
 
+// 同じ読み方を mod（mod/hooks/register.ts の orcaScreenOf）と heavy-task の run-in-tab.mjs も持つ。変えるときはそちらも直す。
 // terminal read --screen の結果から画面の文字を作る。空白がノーブレークスペースで来ても揃える（herdr.mjs の readScreen と同じ）。
 // --screen で頼んでも描けなかったとき（source が screen-unavailable）は、流れた出力の積み重ねで、画面とは別物なので読めない扱いにする。
 export function screenFromRead(result) {
@@ -100,10 +101,14 @@ export function terminalInfo(handle) {
   return orca(['terminal', 'show', '--terminal', handle])?.terminal ?? null;
 }
 
-// 端末のタイトルから、claude が頭に付ける状態の印（✳・◐ など）を外す。
+// claude が端末のタイトルの頭に付ける状態の印と、続く空白。見たのは ✳・◐・◑（2.1.330）。回る印の残りの形（◒・◓・✻ など・点字の回る印）も入れる。
+// 知っている印だけを外す。記号で始まる名前（`_wip` など）を削って、別の名前と読まないため。
+const STATUS_GLYPH = /^[✳✻✽✶✢·◐◑◒◓\u2800-\u28ff]\s+/u;
+
 export function stripTitle(title) {
   return String(title ?? '')
-    .replace(/^[^\p{L}\p{N}]+/u, '')
+    .trim()
+    .replace(STATUS_GLYPH, '')
     .trim();
 }
 
@@ -138,6 +143,46 @@ export function pidAlive(pid) {
   }
 }
 
+// pid が claude のプロセスか。落ちた claude の登録が残り、その pid が別のプロセスに使い回されていても、生きた claude と見ないため。
+// 1回の ps（Windows は tasklist）でまとめて見る。見られなければ pid が生きていることだけで信じる（見られないせいで止めないため）。
+// Windows は名前の取れる版（claude.exe）か、npm で入れた版の node.exe を claude とみなす。
+export function claudePids(pids) {
+  const alive = pids.filter(pidAlive);
+  if (alive.length === 0) return new Set();
+  try {
+    if (process.platform === 'win32') {
+      const out = execFileSync('tasklist', ['/FO', 'CSV', '/NH'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000 });
+      const found = new Set();
+      for (const line of out.split(/\r?\n/)) {
+        const [image, pid] = line.split('","').map((cell) => cell.replace(/"/g, ''));
+        if (/^(claude|node)\.exe$/i.test(image ?? '') && alive.includes(Number(pid))) found.add(Number(pid));
+      }
+      return found;
+    }
+    const out = execFileSync('ps', ['-o', 'pid=,args=', '-p', alive.join(',')], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000 });
+    return claudePidsFromPs(out);
+  } catch {
+    return new Set(alive);
+  }
+}
+
+// `ps -o pid=,args=` の出力から、コマンドの名前が claude の pid を拾う（npm で入れた版は `node …/claude …`）。
+export function claudePidsFromPs(out) {
+  const found = new Set();
+  for (const line of out.split('\n')) {
+    const match = line.trim().match(/^(\d+)\s+(.*)$/);
+    if (!match) continue;
+    const [command, script] = match[2].split(/\s+/);
+    const isClaude = (word) => /(^|[\\/])claude(\.exe)?$/i.test(word ?? '');
+    if (isClaude(command) || (/(^|[\\/])node(\.exe)?$/i.test(command) && isClaude(script))) found.add(Number(match[1]));
+  }
+  return found;
+}
+
+export function isClaudePid(pid) {
+  return claudePids([pid]).has(pid);
+}
+
 // 生きている claude の登録を全部。読めない登録は飛ばす。
 export function liveSessions() {
   let names;
@@ -146,16 +191,17 @@ export function liveSessions() {
   } catch {
     return [];
   }
-  const sessions = [];
+  const entries = [];
   for (const name of names) {
     try {
       const entry = JSON.parse(readFileSync(join(sessionsDir(), name), 'utf8'));
-      if (pidAlive(entry?.pid) && typeof entry.sessionId === 'string') sessions.push(entry);
+      if (Number.isInteger(entry?.pid) && typeof entry.sessionId === 'string') entries.push(entry);
     } catch {
       // 書きかけ・消えかけの登録は飛ばす。
     }
   }
-  return sessions;
+  const claudes = claudePids(entries.map((entry) => entry.pid));
+  return entries.filter((entry) => claudes.has(entry.pid));
 }
 
 export function sessionOfPid(pid) {
@@ -164,11 +210,14 @@ export function sessionOfPid(pid) {
 
 // 端末のタイトルに当たる登録。タイトルは名前そのもの（`knowledge-10/mac`）か、名前に `/<マシン>` を足したもの
 // （登録の名前が `orca-scratch-68`、タイトルが `orca-scratch-68/mac`）がある（どちらも実測）。
+// 名前そのものに当たるものを先にする。`/<マシン>` の形は、マシンの名前に `/` を含まないものだけ（`foo` が `foo/bar/baz` に当たらないため）。
 // 1つに決まらなければ cwd が端末の作業フォルダーと同じものに絞り、それでも決まらなければ null（取り違えて別のセッションを止めないため）。
 export function sessionForTitle(sessions, title, worktreePath) {
   const name = stripTitle(title);
   if (!name) return null;
-  const hits = sessions.filter((entry) => typeof entry.name === 'string' && entry.name && (name === entry.name || name.startsWith(`${entry.name}/`)));
+  const named = sessions.filter((entry) => typeof entry.name === 'string' && entry.name);
+  const exact = named.filter((entry) => name === entry.name);
+  const hits = exact.length > 0 ? exact : named.filter((entry) => name.startsWith(`${entry.name}/`) && /^[\w.-]+$/.test(name.slice(entry.name.length + 1)));
   if (hits.length === 1) return hits[0];
   const here = hits.filter((entry) => entry.cwd === worktreePath);
   return here.length === 1 ? here[0] : null;
@@ -300,8 +349,22 @@ export function waitForClaude(handle, seconds, exceptPid) {
   return null;
 }
 
-// シェルに打つ文の引用。POSIX のシェルと PowerShell の両方で、単一引用符の中は字義どおりに読まれる。
-// 単一引用符そのものは2つのシェルで書き方が違うので、含むパスは扱わない（null）。
-export function shellQuote(path) {
-  return path.includes("'") ? null : `'${path}'`;
+// シェルのプロンプトが出ていて、打ちかけが無いか。claude の入力欄が無く、最後の文のある行がプロンプトの印で終わる
+// （zsh・bash の `❯`・`$`・`%`・`#`、PowerShell の `>`）。claude が終わった後や、作った端末のシェルが上がったかを見る。
+// 印の後ろに文があれば、打ちかけか、シェルでない何かなので、打ち込まない。
+export function shellPromptReady(screen) {
+  if (screen === null) return false;
+  const lines = screen.split('\n');
+  if (bottomBorder(lines) >= 0) return false;
+  const last = lines.map((line) => line.trimEnd()).filter(Boolean).at(-1) ?? '';
+  return /[❯$%#>]$/.test(last);
+}
+
+// シェルのプロンプトが出るまで待つ。出れば true。
+export function waitForShellPrompt(handle, seconds) {
+  for (let i = 0; i <= seconds; i += 1) {
+    if (shellPromptReady(readScreen(handle))) return true;
+    if (i < seconds) sleep(1);
+  }
+  return false;
 }
