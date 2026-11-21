@@ -45,12 +45,12 @@ description: 重い処理を始める前に、マシンの負荷を確かめて�
 
 - `guard-heavy-commands.cjs` hook（このスキルの `scripts/`）が、重いコマンドを流す瞬間に手順と同じ目安で測り、CPU が厳しければ止める。hook が拾うコマンドは、この手順で測らずにそのまま流す。hook も、測れないときは止めずに通す。
   - 拾うコマンドは、hook の既定と、プロジェクトの `.claude/heavy-commands.json` で決まる（既定と書き方は `README.md` の「使い方」）。
-  - 拾わないのは、既定にも `heavy-commands.json` にも無いコマンドと、ほかのコマンドの引数として渡すコマンド（`herdr pane run` でペインへ送るものは拾う）。これらは手順で測る。繰り返し流すコマンドは `heavy-commands.json` に足す。
+  - 拾わないのは、既定にも `heavy-commands.json` にも無いコマンドと、ほかのコマンドの引数として渡すコマンド（`herdr pane run` や `orca terminal create|send|split` の `--command`・`--text` でペインへ送るものは拾う）。これらは手順で測る。繰り返し流すコマンドは `heavy-commands.json` に足す。
 - hook に止められたときは、heavy-wait の mod（このスキルの `mod/`）が1分ごとに空きを測り、空いたとき（15分たっても厳しいときも）にプラグインのメッセージで知らせる。自分で測り直して待たず、知らせを待つ間に軽い作業を進める。
 - mod が無いときや、hook が拾わないコマンドを自分で測って待つときは、foreground の `sleep` が使えないので、`Monitor` などで待つ。
 - Claude Code は、OS からメモリ逼迫の通知を受けると、バックグラウンドの Bash・PowerShell を "stopped because the system is running low on memory" で打ち切る（逼迫が critical で、端末への入力が30分以上無く、ターンもサブエージェントも動いていないとき）。フォアグラウンドの Bash と Monitor は対象外。macOS・Linux・Windows のどれでも起きる。macOS と Windows は OS の判定をそのまま使い、Linux（WSL を含む）は空きメモリが10%未満かつ 4 GiB 未満のときだけ打ち切る。ユーザーの環境変数 `CLAUDE_CODE_DISABLE_BG_SHELL_PRESSURE_REAP=1` を入れると打ち切らない（設定の後に起動した Claude Code にだけ効く）。打ち切りが多く、打ち切られるのが主に下の待ち手でメモリが空かないマシンでは、これで止める。
-  - Herdr の中（`HERDR_ENV=1`）では、Herdr の別のタブで流す（下の「Herdr のタブで流す」）。タブの中の処理は Claude Code のバックグラウンドの処理でないので、打ち切られず、時間の上限も無い（打ち切られうるのは、終わりを待つバックグラウンドの待ち手だけ。タブの処理は動き続けるので、待ち直せばよい）。hook が拾うコマンドをタブの外で流そうとすると、hook が止める。
-  - Herdr の外では、10分以内に終わる処理は、`run_in_background` を使わず、フォアグラウンドで `timeout: 600000` を付けて走らせる（時間切れでバックグラウンドに回ると打ち切りの対象になる）。10分を超える処理は、バックグラウンドで走らせ、`timeout` に見込みの2倍ほどを付ける（バックグラウンドの処理は `timeout` で打ち切られ、既定は30分、上限は2時間。2時間を超えそうな処理は流さず、Herdr の中で流すかをユーザーに聞く）。
+  - Herdr の中（`HERDR_ENV=1`）と Orca の端末（`ORCA_TERMINAL_HANDLE` がある）では、別のタブで流す（下の「Herdr・Orca のタブで流す」）。タブの中の処理は Claude Code のバックグラウンドの処理でないので、打ち切られず、時間の上限も無い（打ち切られうるのは、終わりを待つバックグラウンドの待ち手だけ。タブの処理は動き続けるので、待ち直せばよい）。hook が拾うコマンドをタブの外で流そうとすると、hook が止める。
+  - Herdr の中でも Orca の端末でもなければ、10分以内に終わる処理は、`run_in_background` を使わず、フォアグラウンドで `timeout: 600000` を付けて走らせる（時間切れでバックグラウンドに回ると打ち切りの対象になる）。10分を超える処理は、バックグラウンドで走らせ、`timeout` に見込みの2倍ほどを付ける（バックグラウンドの処理は `timeout` で打ち切られ、既定は30分、上限は2時間。2時間を超えそうな処理は流さず、Herdr か Orca の中で流すかをユーザーに聞く）。
 - 打ち切られたら、その場でマシンの状態を採取する。結果は scratchpad に保存し、打ち切られた時刻と要約をユーザーに報告する。自分からは流し直さず、流し直すかをユーザーに聞く。打ち切りの知らせが、メモリがまだ足りないかもしれないので、頼まれたときだけ流し直すよう求めるため。
   - macOS: `sysctl -n kern.memorystatus_vm_pressure_level`、`vm_stat`、`sysctl -n vm.swapusage`、`ps -Ao rss,comm | sort -rn | head -15`、`pgrep -x node | wc -l`
   - macOS のカーネルログ: `/usr/bin/log show --last 30m --style compact --predicate 'sender == "kernel" AND eventMessage CONTAINS "memorystatus"'`。`memorystatus_available_pages` と `compressor_size` の推移で、逼迫に至る流れを追える。zsh では `log` が組み込みコマンドに奪われるため、フルパスで呼ぶ。
@@ -58,12 +58,13 @@ description: 重い処理を始める前に、マシンの負荷を確かめて�
   - Linux: `cat /proc/pressure/memory`、`free -m`、`ps aux --sort=-rss | head -15`、`journalctl -k --since '-30min' | grep -iE 'oom|out of memory'`
   - Windows（PowerShell）: `Get-CimInstance Win32_OperatingSystem | Select-Object TotalVisibleMemorySize,FreePhysicalMemory,TotalVirtualMemorySize,FreeVirtualMemory | Format-List`（KB。物理メモリとコミットの空き）、`Get-Process | Group-Object Name | ForEach-Object { [pscustomobject]@{ Name = $_.Name; MB = [int](($_.Group | Measure-Object PrivateMemorySize64 -Sum).Sum / 1MB) } } | Sort-Object MB -Descending | Select-Object -First 15`
 
-### Herdr のタブで流す
+### Herdr・Orca のタブで流す
 
 高負荷の処理・長時間の処理・出力を読む場合がある処理（ビルド・テスト・検査・ジョブやスクリプトの実行など）は、別のタブで流す。失敗や中断の理由がログと終了コードに残り、理由が分からないまま流し直さずに済む。すぐ終わる読み取り（`git status`・`grep` など）は対象にしない。
 
 `node <このスキル>/scripts/run-in-tab.mjs --label <用途> -- '<コマンド>'`
 
+- Herdr なら同じワークスペースのタブ、Orca なら呼び出し元と同じ作業フォルダー（`ORCA_WORKTREE_ID`）に作る端末のタブで流す。どちらの中かは環境変数で見分ける（両方なら Herdr）。
 - タブ名は `<セッションの名前>: <用途>` になる（Claude Code のセッションの名前が無ければ `<リポジトリの名前>: <用途>`）。
 - タブを作って流し、終わるのを待ち、ログの末尾と終了コードを出してタブを閉じる。コマンドの終了コードをそのまま返す（シグナルで落ちたら 128 + 番号。Windows でタブが閉じられたら 129）。125 は、記録の無いままタブが閉じられたか、処理が始まらなかったとき（どちらかは出力の文で分かる）。124 は、`--expect` の見込みを過ぎたとき（コマンド自身の 124 とは出力の文で分かる）。
 - コマンドは引用で1つにまとめ、スクリプトのパスは引用せずに書く（引用すると、hook が中のコマンドの CPU の負荷を見られない）。
