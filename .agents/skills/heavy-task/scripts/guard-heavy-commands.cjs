@@ -13,8 +13,9 @@
 //   }
 //
 // 引用の中身と heredoc・here-string の本文は見ず、コマンドの位置 (行頭、`;` `&` `|` `(` の後) に来たものだけを見る。
-// 例外は `herdr pane run <ペイン> <コマンド>` と `node run-in-tab.mjs ... -- <コマンド>` で、ペインへ送るコマンドも同じように見る (ビルドやテストもペインで流すことがあるため)。
-// Herdr の中では、重い処理をペインの外で流すのも止める。ログと終了コードがタブの側に残り、途中で打ち切られても理由が分かるため。
+// 例外は `herdr pane run <ペイン> <コマンド>`・`orca terminal create|send|split ... --command|--text <コマンド>`・`node run-in-tab.mjs ... -- <コマンド>` で、
+// ペインへ送るコマンドも同じように見る (ビルドやテストもペインで流すことがあるため)。
+// Herdr の中と Orca の端末では、重い処理をペインの外で流すのも止める。ログと終了コードがタブの側に残り、途中で打ち切られても理由が分かるため。
 // 測れないときや入力が読めないときは、何もせずに通す (hook の不具合で作業を止めないため)。
 // 3つの OS で同じに動くよう、負荷は node の os モジュールで測る。
 
@@ -94,8 +95,15 @@ function commandWords(segment) {
 }
 
 // `herdr pane run <ペイン> <コマンド>` か `node run-in-tab.mjs ... -- <コマンド>` なら、ペインへ送るコマンドを返す。引用で渡していれば、その中身に戻す。
+// Orca は `--command` か `--text` の次の1語 (`--text=<値>` の形も。引用ならその中身) を送るコマンドとみなす。
+// 引用しない複数の語は、シェルが別の引数に分けるので、Orca に渡るのも1語目だけ。
 // quotes は、この区切りに出てくる引用の中身 (出てきた順)。
 function paneCommand(segment, quotes) {
+  const toOrca = segment.match(/^(.*?\borca\s+terminal\s+(?:create|send|split)\s+(?:.*?\s)?--(?:command|text)(?:\s+|=))(\S+)/s);
+  if (toOrca) {
+    let next = (toOrca[1].match(/''|""/g) ?? []).length;
+    return toOrca[2].replace(/''|""/g, () => quotes[next++] ?? '');
+  }
   const sent = segment.match(/^(.*?\bherdr\s+pane\s+run\s+\S+\s+|.*?\brun-in-tab\.mjs\s+(?:.*?\s)?--\s+)(\S.*)$/s);
   if (!sent) return null;
   let next = (sent[1].match(/''|""/g) ?? []).length;
@@ -113,7 +121,7 @@ function commandSegments(command, nested = false) {
     if (words.length === 0) continue;
     segments.push(words);
     // ペインへ送るコマンドの中の `herdr pane run` までは追わない。
-    const sendsToPane = words[0] === 'herdr' || (words[0] === 'node' && /(^|[\\/])run-in-tab\.mjs$/.test(words[1] ?? ''));
+    const sendsToPane = words[0] === 'herdr' || words[0] === 'orca' || (words[0] === 'node' && /(^|[\\/])run-in-tab\.mjs$/.test(words[1] ?? ''));
     const sent = !nested && sendsToPane ? paneCommand(segment, quotes) : null;
     if (sent === null) continue;
     for (const inner of commandSegments(sent, true)) segments.push(Object.assign(inner, { inPane: true }));
@@ -236,9 +244,16 @@ function output(hookSpecificOutput) {
   process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', ...hookSpecificOutput } }));
 }
 
-function outsideTabReason() {
+// 重い処理をタブへ回す道具の名前。Herdr の中か Orca の端末でなければ null (タブへ回させない)。
+// 両方の中にいれば Herdr を先にする (restart-sessions の scripts/lib/mux.mjs と同じ見分け方)。
+function tabTool() {
+  if (process.env.HERDR_ENV === '1') return 'Herdr';
+  return process.env.ORCA_TERMINAL_HANDLE ? 'Orca' : null;
+}
+
+function outsideTabReason(tool) {
   return [
-    '重い処理は、Herdr の別のタブで流してください。ログと終了コードが残り、途中で打ち切られても理由が分かります。',
+    `重い処理は、${tool} の別のタブで流してください。ログと終了コードが残り、途中で打ち切られても理由が分かります。`,
     `node ${path.join(__dirname, 'run-in-tab.mjs')} --label <用途> -- '<コマンド>'`,
     `タブで流せない事情があるときだけ、コマンドの頭に ${FORCE_MARK} を付けます。`,
   ].join('\n');
@@ -274,8 +289,9 @@ async function main() {
   }
   const cwd = input.cwd || projectDir;
   const prePush = (dir) => hasPrePushHook(path.resolve(cwd, dir));
-  if (process.env.HERDR_ENV === '1' && runsOutsideTab(input, config, prePush)) {
-    output({ permissionDecision: 'deny', permissionDecisionReason: outsideTabReason() });
+  const tool = tabTool();
+  if (tool && runsOutsideTab(input, config, prePush)) {
+    output({ permissionDecision: 'deny', permissionDecisionReason: outsideTabReason(tool) });
     return;
   }
   if (!isHeavy(input, config, prePush)) return;

@@ -43,9 +43,39 @@ export const versionOf = (stdout: string) => stdout.trim().split(/\s+/)[0] || un
 // 文字のまま書くと、エディタや整形で普通の空白に化けても見分けられないので、コードで作る。
 const NBSP = new RegExp(String.fromCharCode(0xa0), 'g')
 
-async function readScreen($: EngineInterface, pane: string) {
-  const { exitCode, stdout } = await $.process.run(['herdr', 'pane', 'read', pane, '--source', 'visible'])
+// 自分の端末。Herdr の中なら HERDR_ENV=1 と HERDR_PANE_ID、Orca の端末なら ORCA_TERMINAL_HANDLE がある。
+// 両方あれば Herdr を先にする（scripts/lib/mux.mjs と同じ見分け方）。どちらでもなければ見張らない。
+type Terminal = { kind: 'herdr'; pane: string } | { kind: 'orca'; handle: string; worktree: string | undefined }
+
+async function ownTerminal($: EngineInterface): Promise<Terminal | undefined> {
+  const pane = await $.env.get('HERDR_PANE_ID')
+  if ((await $.env.get('HERDR_ENV')) === '1') return pane === undefined ? undefined : { kind: 'herdr', pane }
+  const handle = await $.env.get('ORCA_TERMINAL_HANDLE')
+  return handle ? { kind: 'orca', handle, worktree: await $.env.get('ORCA_WORKTREE_ID') } : undefined
+}
+
+// orca terminal read --screen --json の結果から画面の文字を取る。描けなかったとき（source が screen でない）は読めない扱い。
+// 読み方は scripts/lib/orca.mjs の screenFromRead と同じ（変えるときは両方を直す）。mod は外の CLI を $.process で呼ぶ決まりで、scripts のモジュールを読み込まないので写している。
+export function orcaScreenOf(stdout: string): string | null {
+  try {
+    const terminal = JSON.parse(stdout)?.result?.terminal
+    if (!Array.isArray(terminal?.tail) || (terminal.source !== undefined && terminal.source !== 'screen')) return null
+    return terminal.tail.join('\n') as string
+  } catch {
+    return null
+  }
+}
+
+// Orca で読めなければ null（Orca を開き直した後の古いハンドルなど、読めないまま続くことがある）。
+// 呼び出し側は読めないときに知らせを見送る。Herdr は読めなければ '' のまま（分ける前と同じ）。
+async function readScreen($: EngineInterface, own: Terminal): Promise<string | null> {
   // 空白がノーブレークスペースで来ることがある（scripts/lib/herdr.mjs の readScreen と同じに揃える）。
+  if (own.kind === 'orca') {
+    const { exitCode, stdout } = await $.process.run(['orca', 'terminal', 'read', '--terminal', own.handle, '--screen', '--json'])
+    const screen = exitCode === 0 ? orcaScreenOf(stdout) : null
+    return screen === null ? null : screen.replace(NBSP, ' ')
+  }
+  const { exitCode, stdout } = await $.process.run(['herdr', 'pane', 'read', own.pane, '--source', 'visible'])
   return exitCode === 0 ? stdout.replace(NBSP, ' ') : ''
 }
 
@@ -60,7 +90,11 @@ export function agentNameOf(listJson: string, pane: string): string | undefined 
 }
 
 // `/goal` が動いている間は知らせない（区切りの確かめで、目標追従を途中で止めることになるため）。
-const isGoalActive = async ($: EngineInterface, pane: string) => (await readScreen($, pane)).includes(GOAL_PATTERN)
+// 画面を読めなければ、/goal が動いているかもしれないので、動いているとみなして見送る。
+const isGoalActive = async ($: EngineInterface, own: Terminal) => {
+  const screen = await readScreen($, own)
+  return screen === null || screen.includes(GOAL_PATTERN)
+}
 
 // 更新の知らせは、入力欄の上枠のすぐ上の1行に出る。画面全体に当てると、会話に出てきた同じ文言を拾う。
 // 下から見て最初の「─ だけの行」を下枠、その上で最初の「─ で始まる行」を上枠とみなす（scripts/watch-context.mjs と同じ読み方）。
@@ -75,8 +109,8 @@ export function noticeRowOf(screen: string) {
 }
 
 async function check($: EngineInterface) {
-  const pane = await $.env.get('HERDR_PANE_ID')
-  if ((await $.env.get('HERDR_ENV')) !== '1' || pane === undefined) return
+  const own = await ownTerminal($)
+  if (own === undefined) return
   const dir = await skillDir($)
   const guide = `${dir}/restart-self.md に従って、このセッション自身を再起動する。`
   const current = await read($, told)
@@ -85,7 +119,7 @@ async function check($: EngineInterface) {
     const config = await $.fs.read(`${dir}/config.local.json`).catch(() => undefined)
     const threshold = thresholdOf(typeof config === 'string' ? config : undefined)
     const { percent } = (await $.session.usage()).context
-    if (percent !== undefined && percent >= threshold && !(await isGoalActive($, pane))) {
+    if (percent !== undefined && percent >= threshold && !(await isGoalActive($, own))) {
       await update($, told, t => ({ ...t, over: true }))
       await $.prompt.submit({ text: `[コンテキストの見張り] OVER ${percent}%（閾値 ${threshold}%）。${guide}` })
       return
@@ -95,7 +129,7 @@ async function check($: EngineInterface) {
   const { exitCode, stdout } = await $.process.run(['claude', '--version'])
   const installed = exitCode === 0 ? versionOf(stdout) : undefined
   const { version: running } = await $.session.version()
-  if (installed !== undefined && installed !== running && current.update !== installed && !(await isGoalActive($, pane))) {
+  if (installed !== undefined && installed !== running && current.update !== installed && !(await isGoalActive($, own))) {
     await update($, told, t => ({ ...t, update: installed }))
     await $.prompt.submit({ text: `[コンテキストの見張り] UPDATE ${running} → ${installed}。Claude Code の更新を反映するため、${guide}` })
     return
@@ -106,12 +140,14 @@ async function check($: EngineInterface) {
   // セッションをまたぐので $.store に持つ）。名前が取れなければ、再起動の後も同じ鍵になる版だけで見る。
   // 新しい版が入っていれば、再起動は UPDATE の側に任せる（知らせ済みで再起動を待っている間と、/goal で見送った間）。
   if (installed !== undefined && installed !== running) return
-  const screen = await readScreen($, pane)
+  const screen = await readScreen($, own)
+  if (screen === null) return
   const row = noticeRowOf(screen)
   if (!row.includes(UPDATE_FAILED_PATTERN) || screen.includes(GOAL_PATTERN)) return
-  const list = await $.process.run(['herdr', 'agent', 'list'])
-  const name = list.exitCode === 0 ? agentNameOf(list.stdout, pane) : undefined
-  const failedKey = `updateFailed:${name ?? '-'}`
+  const keyName = await failedKeyName($, own)
+  // Orca で作業フォルダーが分からなければ、ほかのセッションと鍵を分けられないので知らせない。
+  if (own.kind === 'orca' && keyName === undefined) return
+  const failedKey = `updateFailed:${keyName ?? '-'}`
   if ((await $.store.get(failedKey)) !== running) {
     // OVER・UPDATE と同じく、送る前に覚えて消さない。submit が知らせのターンを終えてから返るなら、
     // 後で覚えると再起動で落ちて覚えられず、繰り返しを止められないため。送れなかったときの再試行はしない。
@@ -120,15 +156,25 @@ async function check($: EngineInterface) {
   }
 }
 
+// 自動更新の失敗を1回だけにする鍵の名前。Herdr は名前を再起動の後へ引き継ぐ。
+// Orca では claude の名前も端末のハンドルもセッションIDも再起動のたびに変わる（自己再起動は端末を分割して移る）ので、
+// 再起動の前後で変わらない作業フォルダー（ORCA_WORKTREE_ID）で代える。変わるものを鍵に入れると、再起動のたびに別の鍵になり、
+// 同じ版で失敗し続ける間、再起動を繰り返す。同じ作業フォルダーの2つ目のセッションには知らせないが、1つ目の再起動で更新がやり直される。
+async function failedKeyName($: EngineInterface, own: Terminal) {
+  if (own.kind === 'orca') return own.worktree ? `orca:${own.worktree}` : undefined
+  const list = await $.process.run(['herdr', 'agent', 'list'])
+  return list.exitCode === 0 ? agentNameOf(list.stdout, own.pane) : undefined
+}
+
 // 放置されて大きくなったら、モデルのターンを使わずに自分のペインで /clear して続ける（idle-clear-self.mjs）。
 async function checkIdle($: EngineInterface) {
-  const pane = await $.env.get('HERDR_PANE_ID')
-  if ((await $.env.get('HERDR_ENV')) !== '1' || pane === undefined) return
+  const own = await ownTerminal($)
+  if (own === undefined) return
   const now = await $.clock.now()
   if (now - lastAnswerAt < IDLE_AFTER_MS || now - idleSkippedAt < IDLE_RETRY_AFTER_MS) return
   if ((await read($, told)).idle) return
   const { tokens } = (await $.session.usage()).context
-  if (tokens === undefined || tokens < IDLE_MIN_TOKENS || (await isGoalActive($, pane))) return
+  if (tokens === undefined || tokens < IDLE_MIN_TOKENS || (await isGoalActive($, own))) return
   const { exitCode } = await $.process.run(['node', `${await skillDir($)}/scripts/idle-clear-self.mjs`])
   if (exitCode === 0) await update($, told, t => ({ ...t, idle: true }))
   else idleSkippedAt = now

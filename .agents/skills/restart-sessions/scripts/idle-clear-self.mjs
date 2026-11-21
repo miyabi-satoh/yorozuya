@@ -12,7 +12,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { agentStatus, backgroundWorkHint, currentPane, herdrError, inputDraft, prompt, sleep } from './lib/herdr.mjs';
+import { sleep } from './lib/herdr.mjs';
+import { backgroundWorkHint, idleStatus, inputDraft, isOrca, lastError, prompt, self as selfOf } from './lib/mux.mjs';
 
 const skip = (message) => {
   process.stderr.write(`[idle-clear-self] SKIP: ${message}\n`);
@@ -22,9 +23,21 @@ const skip = (message) => {
 const [, , mode, pane, handoff, shells] = process.argv;
 
 // 切り離した子: /clear を送り、画面が入れ替わるのを待ってから続きを送る。
+// Orca の端末では、/clear を送れなければ続きを送らず、待つ間にユーザーが打ち始めたか何かが動き出していても送らない
+// （続きが打ちかけの末尾につながって送信されるため）。入力欄が読めない（/clear の後でまだ描かれていない）間は数回読み直し、
+// 書きかけが見えたときだけやめる。やめると /clear の後の会話に資料が渡らないので、読めないだけでは止めない。Herdr は分ける前のまま。
 if (mode === '--send') {
-  prompt(pane, '/clear');
+  const orcaHere = isOrca();
+  if (!prompt(pane, '/clear') && orcaHere) process.exit(1);
   sleep(3);
+  if (orcaHere) {
+    let draft = inputDraft(pane);
+    for (let i = 0; draft === null && i < 5; i += 1) {
+      sleep(1);
+      draft = inputDraft(pane);
+    }
+    if (draft || ['working', 'blocked'].includes(idleStatus(pane).status)) process.exit(1);
+  }
   prompt(
     pane,
     `@${handoff} /clear で消えた前任（このペインの直前のセッション）の会話ログです。最新のやり取りは「# 前の資料」の見出しの直前までで、見出しの下は古い世代です。読んで状況を短く確かめ、ユーザーの答え待ちだったなら同じ問いを出し直し、そうでなければ指示を待ってください（作業は始めない）。${shells === 'yes' ? '前任のバックグラウンドのシェルが残っています。その終わりの知らせが届いたら、会話ログにある予定に沿って続けてかまいません。' : ''}`,
@@ -32,14 +45,13 @@ if (mode === '--send') {
   process.exit(0);
 }
 
-const current = currentPane();
-const self = current?.pane_id ?? '';
-const sid = current?.agent_session?.value ?? '';
-if (!self || !sid) skip(`自分のペインかセッションIDを特定できない（${herdrError()}）`);
+// Herdr のペインか Orca の端末（lib/mux.mjs）。切り離した子は、親の環境を引き継ぐので同じ道具に送る。
+const { id: self, sid } = selfOf();
+if (!self || !sid) skip(`自分のペインかセッションIDを特定できない（${lastError()}）`);
 
 // idle-clear.md の手順1と同じ照合。どれかに当たれば流さない。
-const status = agentStatus(self);
-if (status !== 'idle') skip(`ペインが idle でない（${status || '取れない'}）`);
+const { idle, status } = idleStatus(self);
+if (!idle) skip(`ペインが idle でない（${status || '取れない'}）`);
 const draft = inputDraft(self);
 if (draft === null) skip('入力欄を読めない');
 if (draft !== '') skip('入力欄に書きかけがある');
