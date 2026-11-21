@@ -9,7 +9,7 @@
 // 画面からの読み取りで後戻りできない操作まで進めない。読み違えても、依頼が早いか遅いかで済むようにする。
 //
 // stdout の1行が1件の知らせ（Monitor で受ける前提）。列と扱いは watch.md にある。
-// START は --start を付けたときだけ、Herdr の一覧が最初に取れた回に、その回の知らせより先に出す。
+// START は --start を付けたときだけ、Herdr か Orca の一覧が最初に取れた回に、その回の知らせより先に出す。
 // 既定で出さないのは、Monitor で張り直すたびに START で起こされないため。`| grep -v '^START'` で落とす手は使わない。
 // Claude Code のシェルでは grep が別物（組み込みの ugrep のシェル関数）に差し替わっていて、走りっぱなしの入力では行が流れず、OVER も UPDATE も届かなくなる（2026-09-20 に実測）。
 // OVER・UPDATE・IDLE と WARN（ペインごと）はセッションごとに1回だけ出す。覚えているのはこのプロセスの中だけ。
@@ -27,7 +27,8 @@
 
 import { parseArgs } from 'node:util';
 import { CONFIG, loadConfig } from './lib/config.mjs';
-import { AGENT_LIST_LINE, bottomBorder, herdr, herdrError, herdrJson, readScreen } from './lib/herdr.mjs';
+import { AGENT_LIST_LINE, bottomBorder } from './lib/herdr.mjs';
+import { claudes as listClaudes, label as muxLabel, lastError, readScreen } from './lib/mux.mjs';
 
 const usage = 'usage: watch-context.mjs [--pattern <正規表現>] [--threshold <使用率>] [--interval 120] [--update-pattern <正規表現>] [--idle-pattern <正規表現>] [--goal-pattern <正規表現>] [--no-update] [--no-idle] [--no-goal] [--start] [--once]\n--pattern は引数か config.local.json の watch.pattern で必ず渡す';
 
@@ -195,38 +196,38 @@ function noticeRow(screen) {
 }
 
 function tick() {
-  const agents = herdrJson(['agent', 'list'])?.result?.agents;
-  if (!Array.isArray(agents)) {
+  // Herdr のペインか Orca の端末の claude（lib/mux.mjs の claudes）。id はペインIDか端末のハンドル。
+  const claudes = listClaudes();
+  if (!Array.isArray(claudes)) {
     listFailures += 1;
-    const reason = herdrError() || 'agents の一覧が出力に無い';
+    const reason = lastError() || 'agents の一覧が出力に無い';
     if (options.once) {
-      emit('WARN', clean(`Herdr のエージェント一覧を取れない（${reason}）`));
+      emit('WARN', clean(`${muxLabel()} のエージェント一覧を取れない（${reason}）`));
       process.exitCode = 1;
     } else if (listFailures === MISS_LIMIT) {
-      emit('WARN', clean(`Herdr のエージェント一覧を ${MISS_LIMIT} 回続けて取れない（${reason}）`));
+      emit('WARN', clean(`${muxLabel()} のエージェント一覧を ${MISS_LIMIT} 回続けて取れない（${reason}）`));
     }
     return;
   }
   listFailures = 0;
 
-  const claudes = agents.filter((agent) => agent.agent === 'claude' && agent.pane_id);
   const readings = [];
   const events = [];
   let read = 0;
   for (const agent of claudes) {
-    const label = clean(agent.terminal_title_stripped || agent.name || agent.pane_id);
-    const id = agent.agent_session?.value || '';
+    const label = clean(agent.label);
+    const id = agent.sid;
     // 重複除けのキー。ID が空のペインはペインIDで代える（空文字のままだと全ペインで重なる）。
-    const key = id || `pane:${agent.pane_id}`;
-    const where = [agent.pane_id, clean(agent.name || '-'), label, clean(id || '-'), clean(agent.cwd)];
+    const key = id || `pane:${agent.id}`;
+    const where = [agent.id, clean(agent.name || '-'), label, clean(id || '-'), clean(agent.cwd)];
 
     // blocked のペインには依頼が届かないので、何も出さない。1回しか出さないので、ここで使い切らない。
-    if (agent.agent_status === 'blocked') {
+    if (agent.status === 'blocked') {
       readings.push(`${label}=blocked`);
       continue;
     }
 
-    const screen = readScreen(agent.pane_id);
+    const screen = readScreen(agent.id);
 
     const row = screen !== null && (updatePattern || idlePattern || goalPattern) ? noticeRow(screen) : '';
 
@@ -263,7 +264,7 @@ function tick() {
       misses.set(key, count);
       if (count >= MISS_LIMIT && !warned.has(key)) {
         warned.add(key);
-        events.push(['WARN', `${label} の使用率を ${MISS_LIMIT} 回続けて読めない（${agent.pane_id}）`]);
+        events.push(['WARN', `${label} の使用率を ${MISS_LIMIT} 回続けて読めない（${agent.id}）`]);
       }
       continue;
     }

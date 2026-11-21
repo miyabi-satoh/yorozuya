@@ -1,10 +1,11 @@
 # restart-sessions
 
-[Herdr](https://herdr.dev) 上のセッションを、別のセッションから会話ログを引き継いで再起動する。
+[Herdr](https://herdr.dev) か [Orca](https://orca.dev) 上のセッションを、別のセッションから会話ログを引き継いで再起動する。
 
 ## 読む前に
 
-- **Herdr が要る。** tmux ではない
+- **Herdr か Orca が要る。** tmux ではない。どちらで動いているかは環境変数で見分ける（`HERDR_ENV=1` なら Herdr、`ORCA_TERMINAL_HANDLE` があれば Orca。両方なら Herdr）
+- **Orca で通したのは macOS（Orca 1.4.268）だけ。** 再起動・自己再起動・放置の `/clear`・見張りの読み取りを、使い捨ての端末で通した。Linux・Windows、SSH 先のホストは試していない
 - **実機確認は macOS と Windows 11 だけ。** Linux は未確認
 - **会話に出た秘密情報は、資料にもそのまま残る。** 引き継ぎ資料は旧セッションの会話ログ（ユーザー・アシスタント・他のセッションの発言と、バックグラウンドの処理の知らせのテキスト）をそのまま抜き出したもので、要約を挟まない。貼ったトークン・パスワードなどがあれば、渡す前に見て消すこと
 - **Claude Code と Herdr の、公式に保証されていない振る舞いに頼っている。** どちらの更新でも壊れうる（[頼っている外部の振る舞い](#頼っている外部の振る舞い)）
@@ -113,7 +114,7 @@ Claude Code の更新の知らせ（再起動で反映される）や、放置�
 | `config.example.json` | 環境ごとの設定（`config.local.json`）の形。`config.local.json` は git 管理外 |
 | `scripts/` | 後戻りできない連鎖と、コンテキストの見張り（読むだけ） |
 
-スクリプトが外部に呼び出すのは `herdr` と `node` だけ（週次枠のペースを添えるときは、[weekly-pace](../weekly-pace/README.md) を通じて `codex` も）。Claude Code は「読む前に」のとおり別に要る。
+スクリプトが外部に呼び出すのは `herdr` か `orca` と、`node` だけ（週次枠のペースを添えるときは、[weekly-pace](../weekly-pace/README.md) を通じて `codex` も）。Claude Code は「読む前に」のとおり別に要る。
 
 ## 頼っている外部の振る舞い
 
@@ -146,6 +147,15 @@ Claude Code の更新の知らせ（再起動で反映される）や、放置�
 - 閉じたペインのIDは使い回されない（照合したペインと `/exit` や `pane close` を送るペインが同じであることは、これに頼っている）
 - `herdr pane read --source visible` で、ステータスラインまで含めた画面が読める（見張り）
 - `herdr agent wait --until` が指定した状態になるまで待ち、時間切れなら `timeout` のエラーを返す。`herdr agent send-keys <name> Enter` で入力欄の中身が送信される（再起動の後に、資料を読ませる依頼が送信されたかの確認）
+
+**Orca**（1.4.268 で確かめた）
+
+- `orca terminal list` / `terminal show` / `terminal read --screen` / `terminal send` / `terminal split` / `terminal close` / `agent list` の `--json` の出力の構造
+- `terminal read --screen` の `draft` に、claude の入力欄の書きかけが分かれて入り、`tail` から外れる。薄字の案内は `draft` に入らない
+- claude と見分けた端末への `terminal send --enter` は貼り付けで入り、`/exit`・`/clear`・`@<path>` が効く
+- claude が終わっても `agentIdentity` は claude のまま残る（シェルに戻ったかは、登録簿の claude のプロセスが消えたかで見る）
+- claude は自分の名前を端末のタイトルに出す（Claude Code の振る舞い。端末と登録簿 `~/.claude/sessions/<pid>.json` をこれで結ぶ）
+- 端末の起動のコマンドは、Orca が窓を開き直すときに流し直される（だから起動はシェルに打ち込む）
 
 **週次枠のペース**（添えるときだけ。詳しくは [weekly-pace](../weekly-pace/README.md)）
 

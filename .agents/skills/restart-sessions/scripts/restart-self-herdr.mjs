@@ -1,0 +1,219 @@
+#!/usr/bin/env node
+// 呼び出し元自身のセッションを、自ペインを分割した新ペインで立て直す。
+// usage: restart-self.mjs [--allow-background] <資料の絶対パス> [name]
+//
+// 対象セッションの再起動とは手順が逆になる。死ぬ側が /exit を送るとスクリプトも道連れに
+// なるため、新セッションを先に立て、旧ペインを閉じるのは新セッションに任せる。
+// 資料を読み終えてから閉じるので、起動や読み込みが失敗すれば呼び出し元は生き残る。
+//
+// 終了コード: 0 依頼まで完了 / 1 失敗。失敗は2種類あり、stderr の接頭辞で見分ける。
+//   SKIP — 何も変えずに止まった。
+//   FAIL — 新ペインを立てた後に止まった。何が残ったかをメッセージに書く。
+
+import { basename, isAbsolute } from 'node:path';
+
+import { handoffProblem } from './lib/handoff.mjs';
+import { paceNote } from './lib/pace.mjs';
+import { attachGuide } from './lib/prompts.mjs';
+import {
+  backgroundWorkHint,
+  currentPane,
+  herdr,
+  herdrError,
+  herdrJson,
+  NAME_PATTERN,
+  paneHoldingName,
+  startAgent,
+  submitAndConfirm,
+  waitForNameRelease,
+} from './lib/herdr.mjs';
+
+const rawArgs = process.argv.slice(2);
+const allowBackground = rawArgs.includes('--allow-background');
+const [handoff, nameArg] = rawArgs.filter((arg) => arg !== '--allow-background');
+if (!handoff) {
+  process.stderr.write('usage: restart-self.mjs [--allow-background] <資料の絶対パス> [name]\n');
+  process.exit(1);
+}
+
+const log = (message) => process.stderr.write(`[restart-self] ${message}\n`);
+const skip = (message) => {
+  process.stderr.write(`[restart-self] SKIP: ${message}\n`);
+  process.exit(1);
+};
+const fail = (message) => {
+  process.stderr.write(`[restart-self] FAIL: ${message}\n`);
+  process.exit(1);
+};
+
+// --- 何かを変える前に、確かめられることは全部ここで確かめる ---
+
+const problem = handoffProblem(handoff, '新セッション');
+if (problem) skip(problem);
+
+const current = currentPane();
+const self = current?.pane_id ?? '';
+const sid = current?.agent_session?.value ?? '';
+if (!self || !sid) skip(`自分のペインかセッションIDを特定できない（${herdrError()}）`);
+// 時間がかかりうるので、照合の前に済ませる
+const note = paceNote(self);
+
+// このスクリプトは「自分は claude で、資料を書き終えている」前提で、新セッションに旧ペインを
+// 閉じさせる。claude 以外から呼ばれると、無関係のペインを強制終了させることになる。
+if (current.agent !== 'claude') skip(`このペインで動いているのは claude ではない: ${current.agent ?? '不明'}`);
+
+// 新ペインは「このセッションと同じ場所」で起動したい。
+// process.cwd() は cd した先に動くので使わない。schema 上 cwd は必須ではないので、
+// 取れなければ foreground_cwd を見る。どちらも無ければ止める。適当な値で代用すると、
+// リポジトリの外で起動して CLAUDE.md も AGENTS.md も読まないセッションができる。
+const cwd = [current.cwd, current.foreground_cwd].find((value) => typeof value === 'string' && isAbsolute(value));
+if (!cwd) skip('ペインの cwd を Herdr から取れない。新ペインをどこで起動するか決められないので止まる');
+
+// 新ペインの名前。指定が無ければ旧ペインの名前を引き継ぎ、名前が無ければ cwd のフォルダー名から作る。
+// 呼び出し元への依頼は名前で届くので、立て直しの前後で名前を変えない。
+const agents = herdrJson(['agent', 'list'])?.result?.agents;
+const ownName = Array.isArray(agents) ? agents.find((agent) => agent.pane_id === self)?.name : undefined;
+const name =
+  nameArg ??
+  ownName ??
+  basename(cwd)
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, '-')
+    .replace(/^[^a-z]+/, '')
+    .slice(0, 32);
+if (!NAME_PATTERN.test(name)) skip(`Herdr の名前の規則（先頭は小文字・英数と _ - のみ・32字以内）に合わない: ${name || '（空）'}。2つ目の引数で名前を渡すこと`);
+
+// 自分の申告（「見張りは止めた」など）も、自分自身の記憶違いで実際の追跡と食い違いうる。
+// モードラインは記憶に頼らない表示なので、旧ペインを道連れにする前にここで機械的に照合する。
+if (!allowBackground) {
+  const hint = backgroundWorkHint(self);
+  if (hint) {
+    skip(
+      `自分のモードラインに「${hint}」と出ている。Monitor を TaskStop で止め、走らせ直すコマンドを資料に書いたか確かめること。` +
+        `--allow-background は、ペインを閉じても動き続けると確かめた独立したプロセスにだけ使う（Monitor やシェルはペインと一緒に止まる）`,
+    );
+  }
+}
+
+// 旧ペイン（自分）が同じ名前を握っていると、新ペインで agent start が失敗する。
+// Herdr の名前は一意なので、起動の直前に外し、失敗したら戻す。
+const holder = paneHoldingName(name);
+if (holder === null) skip(`Herdr のエージェント一覧を取得できない（${herdrError()}）`);
+if (holder && holder !== self) skip(`名前 ${name} は ${holder} が使用中。別の名前を2つ目の引数で渡すこと`);
+const selfHoldsName = holder === self;
+
+// 進め方を資料の前につないだファイルを作り、新セッションにはそちらを渡す。資料そのものは書き換えない。
+// 手順は資料の側に書き、新セッションへ送る依頼は1行にする（lib/prompts.mjs の先頭）。
+const steps = `# 自己再起動の手順
+
+このセッション自身の再起動。前セッション（ペイン ${self} / セッション ${sid}）は資料を書き終えて、閉じられるのを待っている。
+
+1. この資料を読んで現状を把握する。
+2. 把握できたら 'herdr pane close ${self}' で前セッションのペインを閉じる。閉じると前セッションは強制終了になる（資料は書けているので問題ない。戻りたくなったら 'claude --resume ${sid}'）。読み終える前に閉じないこと。
+3. ユーザーに再起動の結果を報告し、下の「再起動した先の進め方」に従って引き継ぐ。
+
+1 と 2 は確認を挟まずに進める。3 は、どれも（処理の立ち上げ直しも、作業の再開も、問いの出し直しや状態を聞く問いも）旧ペインを閉じてから行う。先に問いを出すと、答えを待つ間ずっと旧ペインが残る。`;
+const { path: sent, error: guideProblem } = attachGuide(handoff, note, steps);
+if (guideProblem) skip(guideProblem);
+
+// 縦長のペインは下に割る。旧を閉じれば新が元の大きさに戻る。
+// 焦点は呼び出し元に残す。旧ペインが閉じた時点で焦点は別のペインへ移る（移り先は Herdr 任せ）。
+// --cwd は省かない。省くと新ペインの cwd が利用者の terminal.new_cwd 設定に従う。
+const splitOut = herdr(['pane', 'split', '--current', '--direction', 'down', '--cwd', cwd, '--no-focus']);
+if (splitOut === null) skip(`ペインを分割できなかった（${herdrError()}）。何も変えていない`);
+
+let created = '';
+try {
+  created = JSON.parse(splitOut)?.result?.pane?.pane_id ?? '';
+} catch {
+  /* 出力が JSON として読めない。分割そのものは成功している */
+}
+// herdr が 0 を返した以上、ペインはできている。ID が読めないだけ。
+// ここで「何も変えていない」と言うと、再実行のたびにペインが増える。
+if (!created) {
+  fail(
+    `ペインは分割できたが ID を読み取れない（Herdr の出力の形が変わった可能性）。新しいペインが残っているので手で閉じること。出力: ${splitOut.trim().slice(0, 200)}`,
+  );
+}
+log(`新ペイン ${created}`);
+// 以降の起動・名前の付け外し・閉じる操作は created をそのまま使う。ペインIDは使い回されないので
+// （Herdr の文書）、途中でこのペインが閉じられても、同じIDの別ペインに作用することは無い。
+
+// --- ここから先は、失敗したら何が残ったかを必ず伝える ---
+
+let nameCleared = false;
+
+// createdOpen は、新ペインを閉じずに残した経路かどうか。2つの経路で名前の外し方が違う。
+// - 残した経路（起動失敗）: agent start が agent_not_ready で失敗すると、Herdr は名前を新ペインに
+//   割り当てたまま保つ（ダイアログに答えてから続けられるように）。閉じないので解放されない。
+//   握られていたら先に --clear で外す。外さずに rename すると重複で失敗し、生きている旧セッションが
+//   無名のまま残り、名前で届く先が文脈の無いペインになる。
+// - 閉じた経路（依頼の送信失敗）: 閉じた直後は、閉じたペインがしばらく名前を握って見える。
+//   そのペインはもう無いので --clear は効かない。解放を待ってから rename する。
+const restoreName = (createdOpen) => {
+  if (!nameCleared) return '';
+  // 一覧が一度取れなかった（null）だけで「握っていない」と見なすと、残したペインが握ったままの名前を
+  // 解放されないまま待ち、rename が重複で失敗して旧セッションが無名で残る。分からないときも --clear を試す。
+  const holder = createdOpen ? paneHoldingName(name) : '';
+  if (createdOpen && (holder === created || holder === null) && herdr(['agent', 'rename', created, '--clear']) === null) {
+    return `新ペイン ${created} が Herdr 名 ${name} を握ったままで、外せなかった（${herdrError()}）。旧セッションは無名のまま。まず 'herdr agent rename ${created} --clear' を手で試し、通ったら 'herdr agent rename ${self} ${name}' で戻す。通らなければ新ペインを閉じ（閉じれば名前は数秒で外れる）、'herdr agent list' で名前が消えたのを確かめてから 'herdr agent rename ${self} ${name}' で戻す。`;
+  }
+  waitForNameRelease(name, 10);
+  return herdr(['agent', 'rename', self, name]) !== null
+    ? `旧ペインの名前は ${name} に戻した。`
+    : `旧ペインの Herdr 名を戻せなかった（${herdrError()}）。'herdr agent rename ${self} ${name}' を手で実行すること。`;
+};
+
+const closeCreated = () =>
+  herdr(['pane', 'close', created]) !== null
+    ? '新ペインは閉じた。'
+    : `新ペイン ${created} が残っている（herdr pane close ${created} で閉じること）。`;
+
+if (selfHoldsName) {
+  if (herdr(['agent', 'rename', self, '--clear']) === null) {
+    const error = herdrError();
+    fail(`旧ペインの Herdr 名を外せなかった（${error}）。${closeCreated()}旧セッションはそのまま`);
+  }
+  nameCleared = true;
+}
+
+// 起動に失敗しても新ペインは閉じない。信頼ダイアログのように「ユーザーがそのペインで
+// 答えれば進む」種類の失敗があり、閉じると答えようとした画面が目の前で消える。
+// 2026-09-12 に実際にそれを起こしている。事前に設定ファイルを覗いて予測するのではなく、
+// 失敗したときに答えられる状態で止まる形にした。
+if (!startAgent(name, created)) {
+  // restoreName() は中で herdr を呼ぶので、先に理由を取り出しておく。
+  // 名前を手で戻す手順があるときは、ペインを閉じる案内より先に読ませる。
+  const error = herdrError();
+  const nameNote = restoreName(true);
+  fail(
+    `新セッションを起動できなかった（${error}）。新ペイン ${created} は開いたまま残した。${nameNote}` +
+      `信頼ダイアログや確認が出ていればペインで答えること。答えたら 'herdr pane close ${created}' で閉じてから、同じ引数で呼び直す。` +
+      `閉じずに呼び直すとペインが増える。旧セッションはそのまま`,
+  );
+}
+log('起動');
+
+const request = `@${sent} このセッション自身の再起動です。資料の先頭の「自己再起動の手順」に従うこと。`;
+
+// 送っただけでは、claude が受け取ったかは分からないので、動き出すまでこちらで見る。
+// 確かめる者がほかにいないため（ほかのセッションの再起動は、呼んだセッションが SKILL.md の手順6で確かめる）。
+// 新セッションが資料を読み終えて旧ペインを閉じれば、このスクリプトも待っている途中で終わる。
+const submitted = submitAndConfirm(created, request);
+// 弾かれたときは起動済みで、資料だけが渡っていない。ユーザーが答えれば進む状態ではないので、閉じて元の一枚に戻す。
+if (submitted.result === 'refused') {
+  fail(`新セッションに依頼を送れなかった（${submitted.detail}）。${closeCreated()}${restoreName(false)}旧セッションはそのまま`);
+}
+if (submitted.result === 'unknown') {
+  fail(
+    `新ペイン ${created} の新セッションが資料を読み始めたのを確かめられない（${submitted.detail}）。呼び直さない（ペインが増える）。` +
+      `新ペインを見て、起動の時のダイアログには答え、入力欄に依頼が残っていれば Enter を押す。claude が終わってシェルに戻っていれば 'herdr pane close ${created}' で閉じ、名前が外れたら 'herdr agent rename ${self} ${name}' で旧ペインに名前を付け直してから呼び直す。旧セッションはそのまま`,
+  );
+}
+if (submitted.result === 'resent') log('依頼が入力欄に残っていたので、Enter を送り直した');
+
+process.stdout.write(`OK\t${self}\t${created}\t${name}\t${handoff}\tresume:${sid}\n`);
+
+// 呼び出し元はここで黙って止まる。報告は新セッションが行う。
+// 旧ペインは読み終えた新セッションに閉じられるので、ここから先の出力は誰にも読まれない。
+log('ここで止まる。報告は不要（この先の出力は読まれないまま消える）');
