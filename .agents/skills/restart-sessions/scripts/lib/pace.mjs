@@ -9,7 +9,7 @@
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { currentPane } from './herdr.mjs';
-import { isOrca } from './mux.mjs';
+import { isHc, isOrca } from './mux.mjs';
 import { screenFromRead, selfSession } from './orca.mjs';
 
 const SCRIPTS = fileURLToPath(new URL('../../../weekly-pace/scripts/', import.meta.url));
@@ -36,8 +36,11 @@ function claudePace(pane) {
   const fromApi = pace('pace.mjs', '', 10000);
   if (fromApi || !pane) return fromApi;
   let screen;
+  const read = (command, args) => execFileSync(command, args, { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] });
   try {
-    screen = isOrca()
+    screen = isHc()
+      ? (JSON.parse(read('hc', ['read', '--json', pane])).text ?? null)
+      : isOrca()
       ? screenFromRead(
           JSON.parse(
             execFileSync('orca', ['terminal', 'read', '--terminal', pane, '--screen', '--json'], {
@@ -59,8 +62,8 @@ function claudePace(pane) {
   return pace('pace.mjs', screen, 3000);
 }
 
-// 既定は呼び出し元自身のペイン（Orca なら端末のハンドル）。
-export function paceNote(pane = isOrca() ? selfSession()?.handle : currentPane()?.pane_id) {
+// 既定は呼び出し元自身のペイン（Orca なら端末のハンドル、hc なら端末の address）。
+export function paceNote(pane = isHc() ? process.env.HC_TERMINAL_ID : isOrca() ? selfSession()?.handle : currentPane()?.pane_id) {
   const claude = claudePace(pane);
   if (!claude || claude.projected === null || claude.projected <= 100) return '';
 

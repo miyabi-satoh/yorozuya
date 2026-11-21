@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 
-import { IDLE_AFTER_MS, noticeRowOf, orcaScreenOf, thresholdOf, versionOf } from './register'
+import { hcCwdOf, hcScreenOf, IDLE_AFTER_MS, noticeRowOf, orcaScreenOf, thresholdOf, versionOf } from './register'
 
 test('閾値は config.local.json の watch.threshold、無ければ 50', () => {
   expect(thresholdOf('{"watch":{"threshold":40}}')).toBe(40)
@@ -28,13 +28,27 @@ test('知らせの行は、入力欄の上枠のすぐ上の1行', () => {
 
 // 使用率・入っている版・画面を決め、セッションに届いた知らせを集める。
 // orca を立てると、Herdr でなく Orca の端末として動かす（pane は端末のハンドル、worktree は ORCA_WORKTREE_ID）。
+// hc を立てると hc の端末として動かす（pane は HC_TERMINAL_ID、cwd は hc get の cwd）。hc の端末が引き継ぐ HERDR_ENV も入れておく。
 function setUp(
   on: any,
-  s: { percent?: number; tokens?: number; installed?: string; screen?: string; herdr?: boolean; orca?: boolean; orcaFail?: boolean; pane?: string; worktree?: string | null },
+  s: {
+    percent?: number
+    tokens?: number
+    installed?: string
+    screen?: string
+    herdr?: boolean
+    orca?: boolean
+    orcaFail?: boolean
+    hc?: boolean
+    cwd?: string | null
+    pane?: string
+    worktree?: string | null
+  },
 ) {
   const sent: string[] = []
   const runs: string[][] = []
   const env = (): Record<string, string> => {
+    if (s.hc) return { HC_TERMINAL_ID: s.pane ?? 't3', HERDR_ENV: '1', HERDR_PANE_ID: 'w1:p1' }
     if (s.orca) {
       const env: Record<string, string> = { ORCA_TERMINAL_HANDLE: s.pane ?? 'term_1' }
       if (s.worktree !== null) env.ORCA_WORKTREE_ID = s.worktree ?? 'r1::/w'
@@ -56,6 +70,10 @@ function setUp(
   on('process.run', (_$: any, e: any) => {
     runs.push(e.argv)
     if (e.argv[0] === 'claude') return { value: { exitCode: 0, stdout: `${s.installed ?? '2.1.289'} (Claude Code)\n`, stderr: '' } }
+    if (e.argv[0] === 'hc') {
+      if (e.argv[1] === 'get') return { value: { exitCode: 0, stdout: JSON.stringify(s.cwd === null ? {} : { cwd: s.cwd ?? '/w' }), stderr: '' } }
+      return { value: { exitCode: 0, stdout: JSON.stringify({ text: s.screen ?? '', complete: true, how: 'screen' }), stderr: '' } }
+    }
     if (e.argv[0] === 'orca') {
       if (s.orcaFail) return { value: { exitCode: 1, stdout: '{"ok":false,"error":{"code":"terminal_handle_stale"}}', stderr: '' } }
       const tail = (s.screen ?? '').split('\n')
@@ -189,6 +207,52 @@ describe('Orca の端末での見張り', () => {
     expect(sent.length).toBe(1)
     expect(sent[0]).toContain('UPDATE FAILED 2.1.289')
     expect(sent.runs.some(argv => argv[0] === 'herdr')).toBe(false)
+  })
+})
+
+test('hc の画面は read --json の text、作業フォルダーは get --json の前景の cwd を先にする', () => {
+  expect(hcScreenOf(JSON.stringify({ text: 'a\nb', complete: true, how: 'screen' }))).toBe('a\nb')
+  expect(hcScreenOf('not json')).toBeNull()
+  expect(hcCwdOf(JSON.stringify({ cwd: '/launch', foreground: { cwd: '/now' } }))).toBe('/now')
+  expect(hcCwdOf(JSON.stringify({ cwd: '/launch', foreground: null }))).toBe('/launch')
+  expect(hcCwdOf('not json')).toBeUndefined()
+})
+
+describe('hc の端末での見張り', () => {
+  test('HERDR_ENV も入っていても hc の端末として見て、画面は hc で読む', async ($, on) => {
+    mock.clock(on, { now: 0 })
+    const sent = setUp(on, { percent: 80, hc: true, screen: '… /goal active (5m) …' })
+    await $.turn.complete(turn)
+    expect(sent).toEqual([])
+    expect(sent.runs.some(argv => argv[0] === 'hc' && argv[1] === 'read' && argv.includes('t3'))).toBe(true)
+    expect(sent.runs.some(argv => argv[0] === 'herdr')).toBe(false)
+  })
+
+  test('閾値を超えたら、自分を再起動するよう1回だけ知らせる', async ($, on) => {
+    mock.clock(on, { now: 0 })
+    const sent = setUp(on, { percent: 52, hc: true })
+    await $.turn.complete(turn)
+    await $.turn.complete(turn)
+    expect(sent.length).toBe(1)
+    expect(sent[0]).toContain('OVER 52%')
+  })
+
+  test('自動更新の失敗は、作業フォルダーと版の組みごとに1回だけ（立て直しで端末が変わっても繰り返さない）', async ($, on) => {
+    mock.clock(on, { now: 0 })
+    const s = { percent: 10, hc: true, screen: screenWith('✘ Auto-update failed · Run claude doctor'), pane: 't3' }
+    const sent = setUp(on, s)
+    await $.turn.complete(turn)
+    s.pane = 't9'
+    await $.turn.complete(turn)
+    expect(sent.length).toBe(1)
+    expect(sent[0]).toContain('UPDATE FAILED 2.1.289')
+  })
+
+  test('作業フォルダーが分からなければ、自動更新の失敗は知らせない', async ($, on) => {
+    mock.clock(on, { now: 0 })
+    const sent = setUp(on, { percent: 10, hc: true, cwd: null, screen: screenWith('✘ Auto-update failed · Run claude doctor') })
+    await $.turn.complete(turn)
+    expect(sent).toEqual([])
   })
 })
 

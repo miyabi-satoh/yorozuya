@@ -34,7 +34,7 @@ Claude・Codex の週次枠を、リセットまで今のペースで使い続�
 
 ### Claude側
 
-Claude の使用量 API から直接取れる。画面を読む必要はなく、Herdr や Orca の外でも、どの OS でも動く。クォータは消費しない。
+Claude の使用量 API から直接取れる。画面を読む必要はなく、Herdr・Orca・hc の外でも、どの OS でも動く。クォータは消費しない。
 
 ```
 node <このスキルのディレクトリ>/scripts/pace.mjs
@@ -42,10 +42,11 @@ node <このスキルのディレクトリ>/scripts/pace.mjs
 
 1. 上を流す（`--json` を付けると数値で返る）。
 2. 出力をそのままユーザーに伝える。判定不可（稼働の時間帯の中の経過が2時間未満）のときはその旨だけ伝える。
-3. 取れなかったとき（アクセストークンが切れている・API が 429 を返し続ける など）は、ステータスラインから読む。claude ペインの画面（Claude から使うなら自分のペイン。`herdr pane current --current` の `result.pane.pane_id`。Orca の端末なら `$ORCA_TERMINAL_HANDLE`）を渡す。
+3. 取れなかったとき（アクセストークンが切れている・API が 429 を返し続ける など）は、ステータスラインから読む。claude ペインの画面（Claude から使うなら自分のペイン。`herdr pane current --current` の `result.pane.pane_id`。Orca の端末なら `$ORCA_TERMINAL_HANDLE`、hc の端末なら `$HC_TERMINAL_ID`）を渡す。
    ```
    herdr pane read <pane_id> --source visible | node <このスキルのディレクトリ>/scripts/pace.mjs
    orca terminal read --terminal "$ORCA_TERMINAL_HANDLE" --screen --json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).result.terminal.tail.join("\n")))' | node <このスキルのディレクトリ>/scripts/pace.mjs
+   hc read "$HC_TERMINAL_ID" | node <このスキルのディレクトリ>/scripts/pace.mjs
    ```
 
 `claude-usage.mjs` 単体は、`codex-usage.mjs` と同じ形の JSON を返す（`primary`=5時間枠、`secondary`=週次枠）。API はすぐに 429 を返すので、15分はキャッシュの値を返す。

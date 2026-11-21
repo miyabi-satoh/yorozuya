@@ -43,11 +43,14 @@ export const versionOf = (stdout: string) => stdout.trim().split(/\s+/)[0] || un
 // 文字のまま書くと、エディタや整形で普通の空白に化けても見分けられないので、コードで作る。
 const NBSP = new RegExp(String.fromCharCode(0xa0), 'g')
 
-// 自分の端末。Herdr の中なら HERDR_ENV=1 と HERDR_PANE_ID、Orca の端末なら ORCA_TERMINAL_HANDLE がある。
-// 両方あれば Herdr を先にする（scripts/lib/mux.mjs と同じ見分け方）。どちらでもなければ見張らない。
-type Terminal = { kind: 'herdr'; pane: string } | { kind: 'orca'; handle: string; worktree: string | undefined }
+// 自分の端末。hc の端末なら HC_TERMINAL_ID、Herdr の中なら HERDR_ENV=1 と HERDR_PANE_ID、Orca の端末なら ORCA_TERMINAL_HANDLE がある。
+// hc を先に見る（hc の端末は core を起動した環境の HERDR_ENV を引き継ぐ）。Herdr と Orca の両方あれば Herdr を先にする
+// （scripts/lib/mux.mjs と同じ見分け方）。どれでもなければ見張らない。
+type Terminal = { kind: 'hc'; id: string } | { kind: 'herdr'; pane: string } | { kind: 'orca'; handle: string; worktree: string | undefined }
 
 async function ownTerminal($: EngineInterface): Promise<Terminal | undefined> {
+  const id = await $.env.get('HC_TERMINAL_ID')
+  if (id) return { kind: 'hc', id }
   const pane = await $.env.get('HERDR_PANE_ID')
   if ((await $.env.get('HERDR_ENV')) === '1') return pane === undefined ? undefined : { kind: 'herdr', pane }
   const handle = await $.env.get('ORCA_TERMINAL_HANDLE')
@@ -66,10 +69,25 @@ export function orcaScreenOf(stdout: string): string | null {
   }
 }
 
-// Orca で読めなければ null（Orca を開き直した後の古いハンドルなど、読めないまま続くことがある）。
+// hc の read --json の結果から画面の文字を取る。読めなければ null（scripts/lib/hc.mjs の readScreen と同じ読み方）。
+export function hcScreenOf(stdout: string): string | null {
+  try {
+    const text = JSON.parse(stdout)?.text
+    return typeof text === 'string' ? text : null
+  } catch {
+    return null
+  }
+}
+
+// Orca と hc で読めなければ null（Orca を開き直した後の古いハンドルなど、読めないまま続くことがある）。
 // 呼び出し側は読めないときに知らせを見送る。Herdr は読めなければ '' のまま（分ける前と同じ）。
 async function readScreen($: EngineInterface, own: Terminal): Promise<string | null> {
   // 空白がノーブレークスペースで来ることがある（scripts/lib/herdr.mjs の readScreen と同じに揃える）。
+  if (own.kind === 'hc') {
+    const { exitCode, stdout } = await $.process.run(['hc', 'read', '--json', own.id])
+    const screen = exitCode === 0 ? hcScreenOf(stdout) : null
+    return screen === null ? null : screen.replace(NBSP, ' ')
+  }
   if (own.kind === 'orca') {
     const { exitCode, stdout } = await $.process.run(['orca', 'terminal', 'read', '--terminal', own.handle, '--screen', '--json'])
     const screen = exitCode === 0 ? orcaScreenOf(stdout) : null
@@ -77,6 +95,16 @@ async function readScreen($: EngineInterface, own: Terminal): Promise<string | n
   }
   const { exitCode, stdout } = await $.process.run(['herdr', 'pane', 'read', own.pane, '--source', 'visible'])
   return exitCode === 0 ? stdout.replace(NBSP, ' ') : ''
+}
+
+// hc の get --json の結果から claude の作業フォルダーを取る（前景のプロセスの cwd、無ければ端末を作ったときの cwd。scripts/lib/hc.mjs の cwdOf と同じ）。
+export function hcCwdOf(stdout: string): string | undefined {
+  try {
+    const info = JSON.parse(stdout)
+    return [info?.foreground?.cwd, info?.cwd].find(value => typeof value === 'string' && value !== '')
+  } catch {
+    return undefined
+  }
 }
 
 // 自分の Herdr の名前。restart-self.mjs は新しいペインに割って起動し直し、名前だけを引き継ぐ。
@@ -145,8 +173,8 @@ async function check($: EngineInterface) {
   const row = noticeRowOf(screen)
   if (!row.includes(UPDATE_FAILED_PATTERN) || screen.includes(GOAL_PATTERN)) return
   const keyName = await failedKeyName($, own)
-  // Orca で作業フォルダーが分からなければ、ほかのセッションと鍵を分けられないので知らせない。
-  if (own.kind === 'orca' && keyName === undefined) return
+  // Orca・hc で作業フォルダーが分からなければ、ほかのセッションと鍵を分けられないので知らせない。
+  if (own.kind !== 'herdr' && keyName === undefined) return
   const failedKey = `updateFailed:${keyName ?? '-'}`
   if ((await $.store.get(failedKey)) !== running) {
     // OVER・UPDATE と同じく、送る前に覚えて消さない。submit が知らせのターンを終えてから返るなら、
@@ -160,8 +188,14 @@ async function check($: EngineInterface) {
 // Orca では claude の名前も端末のハンドルもセッションIDも再起動のたびに変わる（自己再起動は端末を分割して移る）ので、
 // 再起動の前後で変わらない作業フォルダー（ORCA_WORKTREE_ID）で代える。変わるものを鍵に入れると、再起動のたびに別の鍵になり、
 // 同じ版で失敗し続ける間、再起動を繰り返す。同じ作業フォルダーの2つ目のセッションには知らせないが、1つ目の再起動で更新がやり直される。
+// hc も、立て直すと端末の address と名前（`<名前>` と `<名前>-2` を行き来する）が変わるので、claude の作業フォルダーで代える。
 async function failedKeyName($: EngineInterface, own: Terminal) {
   if (own.kind === 'orca') return own.worktree ? `orca:${own.worktree}` : undefined
+  if (own.kind === 'hc') {
+    const got = await $.process.run(['hc', 'get', '--json', own.id])
+    const cwd = got.exitCode === 0 ? hcCwdOf(got.stdout) : undefined
+    return cwd ? `hc:${cwd}` : undefined
+  }
   const list = await $.process.run(['herdr', 'agent', 'list'])
   return list.exitCode === 0 ? agentNameOf(list.stdout, own.pane) : undefined
 }
