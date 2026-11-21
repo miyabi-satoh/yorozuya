@@ -5,7 +5,7 @@
 ## 読む前に
 
 - **Herdr・hc・Orca のどれかが要る。** tmux ではない。どれで動いているかは環境変数で見分ける（`HC_TERMINAL_ID` があれば hc、`HERDR_ENV=1` なら Herdr、`ORCA_TERMINAL_HANDLE` があれば Orca。hc を一番先に見る。hc の端末は core を起動した環境の `HERDR_ENV=1` を引き継ぐことがあるため。Herdr と Orca の両方なら Herdr）
-- **hc で通したのは macOS（hc 0.1.21）の部品だけ。** 使い捨ての端末で、端末の作成・読み取り・送信・閉じ方、claude を起動する形の端末の作成と旧の端末の閉じ方、見分け方（`HERDR_ENV=1` も入った hc の端末）、各スクリプトの SKIP までを通した。claude を実際に立て直すところ（`/exit` の効き方・引数で渡した `@<資料>` の読まれ方・claude が知らせる状態の移り）は通していない。hc の端末の claude には、SessionStart の hook でラベル `claude_transcript`（会話の記録のパス）を付けておく（セッションIDをここから取る）
+- **hc で通したのは macOS（hc 0.1.21）だけ。** 使い捨ての claude で、自分の再起動とほかのセッションの再起動を最後まで通した（`/exit` で終わり、新しい端末の claude が引数の `@<資料>` を読み、旧の端末を閉じる）。hc の端末の claude には、SessionStart の hook でラベル `claude_transcript`（会話の記録のパス）を付けておく（セッションIDをここから取る。例: `hc label "$HC_TERMINAL_ID" "claude_transcript=<hook の入力の transcript_path>"`）
 - **Orca で通したのは macOS（Orca 1.4.268）だけ。** 再起動・自己再起動・放置の `/clear`・見張りの読み取りを、使い捨ての端末で通した。Linux・Windows、SSH 先のホストは試していない
 - **実機確認は macOS と Windows 11 だけ。** Linux は未確認
 - **会話に出た秘密情報は、資料にもそのまま残る。** 引き継ぎ資料は旧セッションの会話ログ（ユーザー・アシスタント・他のセッションの発言と、バックグラウンドの処理の知らせのテキスト）をそのまま抜き出したもので、要約を挟まない。貼ったトークン・パスワードなどがあれば、渡す前に見て消すこと
@@ -91,7 +91,7 @@ Claude Code の更新の知らせ（再起動で反映される）や、放置�
 
 3. 各セッションに自分を見張らせるなら、`mod/`（Claude Code の function hooks。早期アクセスの API で、版ごとに変わりうる。2.1.289 で確かめた）をプラグインのフォルダーとして読み込ませる（`claude --plugin-dir <このディレクトリ>/mod`、または `~/.claude/settings.json` の `env` の `CLAUDE_CODE_PLUGIN_DIRS`）。ターンの終わりに使用率と更新を見て、自分で再起動する。放置で大きくなった会話は、自分のペインで `/clear` して続ける。読み込ませれば、手順2の hook も外の見張りも要らない（hook は、mod が読み込まれていれば何も差し込まない）
    - 新しく足した mod は、そのとき動いているセッションには、起動し直すまで読み込まれない（読み込み済みの mod のファイルは、保存すれば読み直される）。動いているセッションは、このスキルで一度再起動する
-4. ターミナルで [Herdr](https://herdr.dev) を起動し、使う側のプロジェクトのディレクトリで `claude` を起動する
+4. ターミナルで [Herdr](https://herdr.dev) を起動し、使う側のプロジェクトのディレクトリで `claude` を起動する（hc なら `hc run --bg --no-parent --cwd <使う側のプロジェクト> --name <名前> claude`。hc の core は、立ち上げた側の環境を端末に引き継ぐので、claude の中からでなく、ログインしたままの環境で立ち上げておく）
 
 あとは Claude に頼む。**スクリプトを直接叩く必要はない。**
 
