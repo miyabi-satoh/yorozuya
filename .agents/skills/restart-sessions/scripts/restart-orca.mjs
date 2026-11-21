@@ -1,15 +1,17 @@
 #!/usr/bin/env node
-// restart.mjs の Orca 版。対象の端末の claude を終了させ、同じ端末のシェルで起動し直して引き継ぎ資料を読ませる。
+// restart.mjs の Orca 版。対象の端末の claude を終了させ、同じ作業フォルダーに作り直した端末で起動し直して引き継ぎ資料を読ませる。
 // usage: restart.mjs [--allow-background] <端末のハンドル> <名前> <資料の絶対パス>
 //   名前は端末のタイトルから状態の印を外したもの（`clipkeep-2c/mac` など。lib/orca.mjs の stripTitle）。取り違えの照合に使う。
 //
 // Herdr 版（restart-herdr.mjs）と同じく、/exit から資料を渡すまでを1つのプロセスで走り切る。終了コードと SKIP・FAIL の決まりも同じ。
 // Herdr 版との違い:
-// - 新しい端末を作らず、claude が終わって残ったシェルに `claude` を打つ。端末の起動のコマンドにすると、
-//   Orca は窓を開き直すときに起動のコマンドを流し直し、同じ会話の claude が2つ動く（2026-11-21 に実際に起きた）。
+// - claude が動いたことのある端末には打ち込まない。終わった後の画面がシェルに戻ったかを見分ける決め手が無く
+//   （画面からの見分けは、ステータスラインの形などで外れる）、別の何かへ打ち込むおそれがあるため。
+//   claude の pid が消えたら、同じ作業フォルダーに同じタイトルの端末を作り、その新しい端末に `claude` を打ってから、元の端末を閉じる。
+//   タブの位置は変わる。作ったばかりの端末へ打った文字は、シェルが上がる前でも端末が預かって読ませる（実測）。
+// - 起動のコマンド（--command）にはしない。Orca は窓を開き直すときに起動のコマンドを流し直し、同じ会話の claude が2つ動く（2026-11-21 に実際に起きた）。
 // - 名前は Orca でなく claude が付ける。新しいセッションは新しい名前になるので、名前の付け外しは無い。
-// - シェルに戻ったかは、登録簿にある claude のプロセスが消えたかで見る。Orca の agentIdentity は claude が終わっても残る（実測）。
-//   消えた後、画面にシェルのプロンプトが打ちかけ無しで出ているのを確かめてから `claude` を打つ（打ちかけの末尾につながって流れないため）。
+// - 終わったかは、登録簿にある claude のプロセスが消えたかで見る。Orca の agentIdentity は claude が終わっても残る（実測）。
 
 import { handoffProblem } from './lib/handoff.mjs';
 import {
@@ -31,7 +33,6 @@ import {
   submitAndConfirm,
   terminalInfo,
   waitForClaude,
-  waitForShellPrompt,
 } from './lib/orca.mjs';
 import { paceNote } from './lib/pace.mjs';
 import { attachGuide, HOW_TO_PROCEED } from './lib/prompts.mjs';
@@ -97,7 +98,7 @@ if (guideProblem) skip(guideProblem);
 
 // --- ここから後戻りできない ---
 
-const recovery = `新しいセッションで続けるなら、端末のシェルで 'claude' を打ち、起動したら '@${sent}' を打つ。元の会話に戻るなら、端末で 'claude --resume ${sid}'`;
+const recovery = `新しいセッションで続けるなら、端末を見て、シェルに戻っていれば 'claude' を打ち、起動したら '@${sent}' を打つ。元の会話に戻るなら、端末で 'claude --resume ${sid}'`;
 
 // 入力欄に書きかけがあれば送らない。/exit が書きかけの末尾につながり、書きかけごと送信される（Herdr 版と同じ）。
 const draft = inputDraft(handle);
@@ -120,7 +121,7 @@ let back = false;
 for (let i = 0; i < 60; i += 1) {
   sleep(1);
   // 終わったかは pid が消えたかで見る（claude かの見分けに頼ると、見分け損ねたときに動いている claude を終わったと読む）。
-  // 消えた後に別のプロセスが同じ pid を使っても、続くプロンプトの確かめで止まる。
+  // 消えないまま（同じ pid が使い回された・/exit がターンの後ろに並んだ）なら、時間切れで止まり、何も打たない。
   if (!pidAlive(entry.pid)) {
     back = true;
     break;
@@ -131,28 +132,31 @@ for (let i = 0; i < 60; i += 1) {
     );
   }
 }
-if (!back) fail(`シェルに戻らない。端末を見ること。終了してシェルに戻っていたら、${recovery}`);
+if (!back) fail(`60秒たっても claude のプロセスが消えない。何も打っていない。端末を見ること。終了してシェルに戻っていたら、${recovery}`);
 
-if (!waitForShellPrompt(handle, 10)) {
-  fail(`claude は終わったが、端末にシェルのプロンプトが打ちかけ無しで出ていない（シェルでない何かが動いているか、打ちかけがある）。端末を見ること。シェルに戻っていて打ちかけが無ければ、${recovery}`);
-}
-
+// 作り直す端末のタイトルは、claude が終わって戻った元の端末のタイトル（claude の名前でなく、タブに付いていたもの）。
+const after = terminalInfo(handle);
+const tabTitle = after?.title ?? '';
 log('起動');
-// シェルへは貼り付けでなく、そのまま打ち込む（--enter を付けると、claude と見なしたままの端末へは貼り付けで送られる）。
-if (orca(['terminal', 'send', '--terminal', handle, '--text', 'claude\r']) === null) {
-  fail(`シェルに claude を打てなかった（${orcaError()}）。${recovery}`);
+const created = orca(['terminal', 'create', '--worktree', `id:${terminal.worktreeId}`, ...(tabTitle ? ['--title', tabTitle] : [])])?.terminal?.handle ?? '';
+if (!created) fail(`新しい端末を作れなかった（${orcaError() || 'ハンドルが無い'}）。元の端末 ${handle} は残っている。${recovery}`);
+log(`新しい端末 ${created}`);
+const recoveryNew = `新しい端末 ${created} を見て、claude が上がっていれば（ダイアログには答えてから）'@${sent}' を打つ。元の会話に戻るなら 'claude --resume ${sid}'`;
+// 貼り付けでなく、そのまま打ち込む。
+if (orca(['terminal', 'send', '--terminal', created, '--text', 'claude\r']) === null) {
+  fail(`新しい端末に claude を打てなかった（${orcaError()}）。元の端末 ${handle} も残っている。${recoveryNew}`);
 }
-const started = waitForClaude(handle, 60, entry.pid);
-if (!started) {
-  fail(
-    `起動を確かめられない。端末を見ること。確認やダイアログ（フォルダーの信頼など）が出ていれば答え、claude が上がっていれば '@${sent}' を打つ。シェルのままなら、${recovery}`,
-  );
-}
+// claude が終わって空いた元の端末を閉じる。閉じられなくても、新しい端末で続けられる。
+const closed = orca(['terminal', 'close', '--terminal', handle]) !== null;
+if (!closed) log(`元の端末 ${handle} を閉じられなかった（${orcaError()}）。手で閉じること`);
 
-const submitted = submitAndConfirm(handle, `@${sent} 前セッションの引き継ぎ資料です。${HOW_TO_PROCEED}`);
+const started = waitForClaude(created, 60, entry.pid);
+if (!started) fail(`新しい端末で claude の起動を確かめられない。${recoveryNew}`);
+
+const submitted = submitAndConfirm(created, `@${sent} 前セッションの引き継ぎ資料です。${HOW_TO_PROCEED}`);
 if (submitted.result === 'refused' || submitted.result === 'unknown') {
-  fail(`起動はしたが資料を読み始めたのを確かめられない（${submitted.detail}）。端末を見て、入力欄に依頼が残っていれば Enter を押し、空なら @${sent} と打つ`);
+  fail(`起動はしたが資料を読み始めたのを確かめられない（${submitted.detail}）。新しい端末 ${created} を見て、入力欄に依頼が残っていれば Enter を押し、空なら @${sent} と打つ`);
 }
 if (submitted.result === 'resent') log('依頼が入力欄に残っていたので、Enter を送り直した');
 
-process.stdout.write(`OK\t${handle}\t${name}\t${handoff}\tresume:${sid}\tnew:${started.name ?? ''}\n`);
+process.stdout.write(`OK\t${created}\t${name}\t${handoff}\tresume:${sid}\tnew:${started.name ?? ''}\n`);

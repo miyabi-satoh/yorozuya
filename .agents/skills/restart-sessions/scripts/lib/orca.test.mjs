@@ -13,7 +13,6 @@ import {
   screenFromRead,
   sendStarted,
   sessionForTitle,
-  shellPromptReady,
   claudePidsFromPs,
   stripTitle,
   submittedOnScreen,
@@ -123,24 +122,6 @@ test('送った文が入力欄より上の会話に出ていれば、受け取�
   assert.equal(submittedOnScreen(shown, request), true);
   assert.equal(submittedOnScreen(screen(request).join('\n'), request), false);
   assert.equal(submittedOnScreen(null, request), false);
-});
-
-test('シェルのプロンプトが打ちかけ無しで出ているときだけ、打ち込んでよいとみなす', () => {
-  assert.equal(shellPromptReady(['Resume this session with:', 'claude --resume abc', '…/scratchpad/orca-scratch ❯', '', ''].join('\n')), true);
-  assert.equal(shellPromptReady('PS C:\\Users\\me\\repo>'), true);
-  assert.equal(shellPromptReady('…/repo ❯ git sta'), false);
-  // claude の入力欄が見えていれば、まだ claude の画面。
-  assert.equal(shellPromptReady(screen('').join('\n')), false);
-  assert.equal(shellPromptReady(null), false);
-});
-
-test('終わった claude の画面が上に残っていても、その下のプロンプトを見る。右に寄せた表示は外して見る', () => {
-  const left = [...screen(''), 'Resume this session with:', 'claude --resume abc', '…/repo ❯'].join('\n');
-  assert.equal(shellPromptReady(left), true);
-  assert.equal(shellPromptReady('~/repo ❯                                   ✔ 14:02:11'), true);
-  assert.equal(shellPromptReady('~/repo ❯ git sta                           ✔ 14:02:11'), false);
-  // 下枠の下が字下げされたステータスラインだけなら、まだ claude の画面。
-  assert.equal(shellPromptReady(['─'.repeat(10), '  Ctx Used: 7.0%'].join('\n')), false);
 });
 
 test('登録簿の pid が claude のプロセスかを、ps のコマンドの名前（comm）か頭の語で見る', () => {

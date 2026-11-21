@@ -14,7 +14,7 @@
 import { realpathSync } from 'node:fs';
 
 import { handoffProblem } from './lib/handoff.mjs';
-import { backgroundWorkHint, orca, orcaError, selfSession, submitAndConfirm, terminalInfo, waitForClaude, waitForShellPrompt } from './lib/orca.mjs';
+import { backgroundWorkHint, orca, orcaError, selfSession, submitAndConfirm, terminalInfo, waitForClaude } from './lib/orca.mjs';
 import { paceNote } from './lib/pace.mjs';
 import { attachGuide } from './lib/prompts.mjs';
 
@@ -107,10 +107,7 @@ log(`新しい端末 ${created}`);
 const closeCreated = () =>
   orca(['terminal', 'close', '--terminal', created]) !== null ? '新しい端末は閉じた。' : `新しい端末 ${created} が残っている（orca terminal close --terminal ${created} で閉じること）。`;
 
-// シェルが上がるのを待ってから、貼り付けでなくそのまま打ち込む。
-if (!waitForShellPrompt(created, 15)) {
-  fail(`新しい端末 ${created} にシェルのプロンプトが出ない。${closeCreated()}旧セッションはそのまま`);
-}
+// 作ったばかりの端末へ、貼り付けでなくそのまま打ち込む。シェルが上がる前に打っても、端末が預かって読ませる（実測）。
 if (orca(['terminal', 'send', '--terminal', created, '--text', 'claude\r']) === null) {
   fail(`新しい端末のシェルに claude を打てなかった（${orcaError()}）。${closeCreated()}旧セッションはそのまま`);
 }

@@ -201,10 +201,9 @@ export function liveSessions() {
       // 書きかけ・消えかけの登録は飛ばす。
     }
   }
-  // 生きた pid のどれも claude と見分けられないときは、見分け方の方が外れている（見慣れない起動の仕方など）ので、生きていることだけで信じる。
-  // 見分けられないまま全部を落とすと、自分も相手も引けず、再起動が止まる。
+  // ps・tasklist が使えないときだけ、生きていることだけで信じる。見分けられたうえで1つも claude でなければ、どれも生きていない。
   const claudes = claudePids(entries.map((entry) => entry.pid));
-  if (claudes === null || claudes.size === 0) return entries.filter((entry) => pidAlive(entry.pid));
+  if (claudes === null) return entries.filter((entry) => pidAlive(entry.pid));
   return entries.filter((entry) => claudes.has(entry.pid));
 }
 
@@ -353,25 +352,3 @@ export function waitForClaude(handle, seconds, exceptPid) {
   return null;
 }
 
-// シェルのプロンプトが出ていて、打ちかけが無いか。claude が終わった後や、作った端末のシェルが上がったかを見る。
-// 見るのは、最後の「─ だけの行」（claude の入力欄の下枠。終わった claude の画面が上に残ることがある）より下の、最後の文のある行だけ。
-// その行が字下げされておらず（claude のステータスラインは字下げされている）、プロンプトの印（zsh・bash の `❯`・`$`・`%`・`#`、
-// PowerShell の `>`）で終わればよい。右に寄せた表示（zsh の RPROMPT・時刻など）は、3つ以上の空白の後ろを外して見る。
-// 印の後ろに文があれば、打ちかけか、シェルでない何かなので、打ち込まない。
-export function shellPromptReady(screen) {
-  if (screen === null) return false;
-  const lines = screen.split('\n');
-  const below = lines.slice(bottomBorder(lines) + 1);
-  const last = below.map((line) => line.trimEnd()).filter(Boolean).at(-1) ?? '';
-  if (!last || /^\s/.test(last)) return false;
-  return /[❯$%#>]$/.test(last.split(/\s{3,}/)[0]);
-}
-
-// シェルのプロンプトが出るまで待つ。出れば true。
-export function waitForShellPrompt(handle, seconds) {
-  for (let i = 0; i <= seconds; i += 1) {
-    if (shellPromptReady(readScreen(handle))) return true;
-    if (i < seconds) sleep(1);
-  }
-  return false;
-}

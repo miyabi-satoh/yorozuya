@@ -140,10 +140,10 @@ description: Herdr か Orca 上の Claude セッションを、会話ログを�
 Orca の端末（`ORCA_TERMINAL_HANDLE` がある。`HERDR_ENV=1` もあれば Herdr が先）でも同じ手順で進める。スクリプトは道具を見分けて Orca 版（`scripts/*-orca.mjs`）に進む。違うところだけ書く。
 
 - 手順1: 対象は端末のハンドル（`term_…`）と名前（端末のタイトルから頭の状態の印を外したもの。`clipkeep-2c/mac` の形）で指す。`orca terminal list --json` の `handle`・`title` で引く。状態は `orca agent list --json` の `state`（`working`・`blocked`・`waiting`・`done`。端末とは `paneKey` が `<tabId>:<leafId>` で結ぶ）。Orca は claude のセッションIDを持たないので、Claude Code の登録簿（`~/.claude/sessions/<pid>.json`）のうち `name` が端末のタイトルに当たるものの `sessionId` を使う（タイトルは名前そのものか、名前に `/<マシン>` を足したもの）。`node scripts/watch-context.mjs --once --start` の知らせの列にも、ハンドル・名前・セッションIDが並ぶ。
-- 手順5: `scripts/restart.mjs <端末のハンドル> <名前> <資料の絶対パス>`。同じ端末で `/exit` し、残ったシェルに `claude` を打って起動し直す。端末の起動のコマンドにしないのは、Orca が窓を開き直すときに起動のコマンドを流し直し、同じ会話の claude が2つ動くため。新しいセッションは新しい名前になり、`OK` の行の末尾に `new:<名前>` で出る。
+- 手順5: `scripts/restart.mjs <端末のハンドル> <名前> <資料の絶対パス>`。`/exit` して claude のプロセスが消えたら、同じ作業フォルダーに同じタイトルの端末を作り直し、その新しい端末に `claude` を打って起動し、元の端末を閉じる（タブの位置は変わる）。claude が動いたことのある端末には打ち込まない。シェルに戻ったかを画面から確かに見分けられないため。60秒たっても消えなければ、何も打たずに FAIL で止まる。端末の起動のコマンドにしないのは、Orca が窓を開き直すときに起動のコマンドを流し直し、同じ会話の claude が2つ動くため。新しいセッションは新しい名前になる。`OK` の行の2列目は新しい端末のハンドルで、末尾に `new:<名前>` が出る。
 - 手順6: スクリプトが、自己再起動と同じ確かめ（動き出したか・依頼が会話に出たか。入力欄に依頼だけが残っていれば Enter を送り直す）まで行う。`OK` なら手順7へ。
 - 入力欄の書きかけは、Orca が画面から外して `draft` に分けて返すので、それで見る（`orca terminal read --terminal <ハンドル> --screen --json`）。Orca の画面には色が無いので、`draft` に分けられなかった文は、薄字のサジェストでも書きかけとみなして止まる（`Try "…"` の案内だけは空とみなす）。
-- FAIL の後に手で戻すときは、Herdr の `agent start` の代わりに、端末のシェルで `claude` を打つ。
+- FAIL の後に手で戻すときは、Herdr の `agent start` の代わりに、端末を見てシェルに戻っていれば `claude` を打つ（メッセージに書いてある端末で）。
 
 ### 判断の基準
 
