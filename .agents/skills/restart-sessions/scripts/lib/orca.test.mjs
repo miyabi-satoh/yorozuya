@@ -13,6 +13,7 @@ import {
   screenFromRead,
   sendStarted,
   sessionForTitle,
+  sessionsForTitle,
   claudePidsFromPs,
   sameDir,
   stripTitle,
@@ -150,4 +151,14 @@ test('フォルダーは実体のパスで比べ、解決できなければ違�
   assert.equal(sameDir(dir, fileURLToPath(new URL('..', import.meta.url))), false);
   assert.equal(sameDir('', dir), false);
   assert.equal(sameDir('/no/such/dir', '/no/such/dir'), false);
+});
+
+test('タイトルに当たる登録を全部返す。当たらなければ空、2つあれば2つ（閉じてよいかの見分けで、空だけを「claude がいない」とする）', () => {
+  const twins = [
+    { pid: 1, sessionId: 'a', name: 'x-1', cwd: '/a' },
+    { pid: 2, sessionId: 'b', name: 'x-1', cwd: '/b' },
+  ];
+  assert.equal(sessionsForTitle(twins, 'x-1/mac').length, 2);
+  assert.deepEqual(sessionsForTitle(twins, 'clipkeep'), []);
+  assert.deepEqual(sessionsForTitle(twins, null), []);
 });

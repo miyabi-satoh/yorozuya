@@ -214,16 +214,21 @@ export function sessionOfPid(pid) {
   return liveSessions().find((entry) => entry.pid === pid) ?? null;
 }
 
+// タイトルに当たる登録の全部（作業フォルダーで絞る前）。名前そのものに当たるものがあれば、それだけ。
+export function sessionsForTitle(sessions, title) {
+  const name = stripTitle(title);
+  if (!name) return [];
+  const named = sessions.filter((entry) => typeof entry.name === 'string' && entry.name);
+  const exact = named.filter((entry) => name === entry.name);
+  return exact.length > 0 ? exact : named.filter((entry) => name.startsWith(`${entry.name}/`) && /^[\w.-]+$/.test(name.slice(entry.name.length + 1)));
+}
+
 // 端末のタイトルに当たる登録。タイトルは名前そのもの（`knowledge-10/mac`）か、名前に `/<マシン>` を足したもの
 // （登録の名前が `orca-scratch-68`、タイトルが `orca-scratch-68/mac`）がある（どちらも実測）。
 // 名前そのものに当たるものを先にする。`/<マシン>` の形は、マシンの名前に `/` を含まないものだけ（`foo` が `foo/bar/baz` に当たらないため）。
 // 1つに決まらなければ cwd が端末の作業フォルダーと同じものに絞り、それでも決まらなければ null（取り違えて別のセッションを止めないため）。
 export function sessionForTitle(sessions, title, worktreePath) {
-  const name = stripTitle(title);
-  if (!name) return null;
-  const named = sessions.filter((entry) => typeof entry.name === 'string' && entry.name);
-  const exact = named.filter((entry) => name === entry.name);
-  const hits = exact.length > 0 ? exact : named.filter((entry) => name.startsWith(`${entry.name}/`) && /^[\w.-]+$/.test(name.slice(entry.name.length + 1)));
+  const hits = sessionsForTitle(sessions, title);
   if (hits.length === 1) return hits[0];
   const here = hits.filter((entry) => entry.cwd === worktreePath);
   return here.length === 1 ? here[0] : null;
@@ -275,6 +280,7 @@ export function claudeTerminalsFrom(terminals, agents, sessions) {
 
 // 2つのフォルダーが同じか。実体のパスで比べる（macOS の /tmp と /private/tmp のような別名で食い違わないため）。
 // Windows のパスは大文字と小文字を区別しない。どちらかが解決できなければ違うとみなす（止まる側に倒す）。
+// macOS の大文字と小文字を区別しないボリュームでも書き分けは揃えない（実体のパスは登録されたときの書き方で返り、食い違えば SKIP で止まるだけのため）。
 export function sameDir(a, b) {
   const real = (path) => {
     try {
