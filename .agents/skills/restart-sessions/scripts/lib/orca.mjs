@@ -300,7 +300,12 @@ export function sameDir(a, b) {
 export function mayCloseOldTerminal(since, matches, started) {
   if (!Array.isArray(since?.tail) || !since.tail.every((line) => line.trim() === '')) return false;
   if (!Array.isArray(matches)) return false;
-  return matches.every((entry) => entry.pid === started?.pid || entry.sessionId === started?.sessionId);
+  // 新しいセッションと見なすのは、pid が一致するものだけ（pid は新しい claude を起動して確かめた値）。
+  // ID が欠けたもの同士（undefined === undefined）や、sessionId だけの一致で別の claude を見逃さないため。
+  if (started?.pid == null) return false;
+  return matches.every(
+    (entry) => entry.pid === started.pid && (entry.sessionId == null || started.sessionId == null || entry.sessionId === started.sessionId),
+  );
 }
 
 // 流れた出力の位置。数の形でなければ null（位置が分からないので、後から出たものを見分けられない）。

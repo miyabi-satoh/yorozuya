@@ -170,7 +170,11 @@ test('元の端末を閉じるのは、後から文のある出力が無く、�
   const started = { pid: 10, sessionId: 'new' };
   assert.equal(mayCloseOldTerminal(quiet, [], started), true);
   assert.equal(mayCloseOldTerminal(quiet, [{ pid: 10, sessionId: 'new' }], started), true);
-  assert.equal(mayCloseOldTerminal(quiet, [{ pid: 11, sessionId: 'new' }], started), true);
+  // sessionId だけの一致は新しいセッションと見なさない（別の claude かもしれない）。
+  assert.equal(mayCloseOldTerminal(quiet, [{ pid: 11, sessionId: 'new' }], started), false);
+  // ID が欠けたもの同士を一致と見なさない。
+  assert.equal(mayCloseOldTerminal(quiet, [{ pid: 12 }], {}), false);
+  assert.equal(mayCloseOldTerminal(quiet, [], null), false);
   assert.equal(mayCloseOldTerminal(quiet, [{ pid: 10, sessionId: 'new' }, { pid: 12, sessionId: 'other' }], started), false);
   assert.equal(mayCloseOldTerminal(quiet, null, started), false);
   assert.equal(mayCloseOldTerminal({ tail: ['…/repo ❯ echo x', 'x', ''] }, [], started), false);
