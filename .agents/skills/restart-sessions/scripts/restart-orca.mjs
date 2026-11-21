@@ -18,8 +18,8 @@ import {
   agentStateOf,
   backgroundWorkHint,
   inputDraft,
-  isClaudePid,
   liveSessions,
+  pidAlive,
   orca,
   orcaError,
   orcaErrorCode,
@@ -119,7 +119,9 @@ if (!prompt(handle, '/exit')) {
 let back = false;
 for (let i = 0; i < 60; i += 1) {
   sleep(1);
-  if (!isClaudePid(entry.pid)) {
+  // 終わったかは pid が消えたかで見る（claude かの見分けに頼ると、見分け損ねたときに動いている claude を終わったと読む）。
+  // 消えた後に別のプロセスが同じ pid を使っても、続くプロンプトの確かめで止まる。
+  if (!pidAlive(entry.pid)) {
     back = true;
     break;
   }

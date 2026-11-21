@@ -52,7 +52,7 @@ case "$sub" in
   'terminal create') if [ -e "$state/no-handle" ]; then echo '{"ok":true,"result":{"terminal":{}}}'; else echo '{"ok":true,"result":{"terminal":{"handle":"term_1"}}}'; fi ;;
   'terminal send') printf '%s' "$text" > "$state/sent"; { [ -e "$state/no-run" ] || sh -c "$(printf '%s' "$text" | tr -d '\\r')"; } >/dev/null 2>&1 & echo '{"ok":true,"result":{"send":{"accepted":true}}}' ;;
   'terminal show') if [ -e "$state/gone" ]; then echo '{"ok":false,"error":{"code":"terminal_handle_stale"}}'; exit 1; fi; echo '{"ok":true,"result":{"terminal":{"connected":true}}}' ;;
-  'terminal read') echo '{"ok":true,"result":{"terminal":{"tail":["~ ❯",""],"source":"screen"}}}' ;;
+  'terminal read') if [ -e "$state/boxed" ]; then echo '{"ok":true,"result":{"terminal":{"tail":["──────","❯","──────","  Ctx Used: 1%"],"source":"screen"}}}'; else echo '{"ok":true,"result":{"terminal":{"tail":["~ ❯",""],"source":"screen"}}}'; fi ;;
   'terminal close') touch "$state/closed"; echo '{"ok":true,"result":{}}' ;;
 esac
 `,
@@ -252,4 +252,15 @@ test('Orca の端末を作った出力にハンドルが無ければ、流さず
   assert.equal(result.status, 1);
   assert.match(result.stderr, /ハンドルが無い/);
   assert.equal(fs.existsSync(path.join(state, 'sent')), false);
+});
+
+test('Orca の作った端末にシェルが出ず claude の入力欄が見えれば、打ち込まずに止めてタブを閉じる', () => {
+  const { env, state } = fakeOrca();
+  fs.writeFileSync(path.join(state, 'boxed'), '');
+  const dir = tmp();
+  const result = run(env, '--dir', dir, '--', 'echo x');
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /打ち込まずに止めた/);
+  assert.equal(fs.existsSync(path.join(state, 'sent')), false);
+  assert.equal(fs.existsSync(path.join(state, 'closed')), true);
 });

@@ -219,20 +219,31 @@ function readTabScreen(job) {
   return (orca('terminal', 'read', '--terminal', job.terminal, '--screen').terminal?.tail ?? []).slice(-20).join('\n');
 }
 
-// 作った端末のシェルが上がるのを待つ。最後の文のある行がプロンプトの印で終われば上がった（restart-sessions の lib/orca.mjs の shellPromptReady と同じ見方）。
-// 待っても見えなければ、そのまま打つ。打った文字は端末が預かり、シェルが上がってから読む。見慣れないプロンプトで止めないため。
+// 作った端末のシェルが上がるのを待つ。見方は restart-sessions の lib/orca.mjs の shellPromptReady と同じ（変えるときは両方を直す）。
+// 待っても見えなければ、もう一度だけ読み、claude の入力欄（─ だけの行）か書きかけが見えれば止める。シェルでない何かへ打ち込まないため。
+// そうでなければ打つ。打った文字は端末が預かり、シェルが上がってから読む。見慣れないプロンプトで止めないため。
 const SHELL_WAIT_MS = 15_000;
+function promptReady(tail) {
+  const border = tail.findLastIndex((line) => /^─+\s*$/.test(line));
+  const last = tail.slice(border + 1).map((line) => line.trimEnd()).filter(Boolean).at(-1) ?? '';
+  return Boolean(last) && !/^\s/.test(last) && /[❯$%#>]$/.test(last.split(/\s{3,}/)[0]);
+}
+function readTerminal(terminal) {
+  try {
+    return orca('terminal', 'read', '--terminal', terminal, '--screen').terminal ?? {};
+  } catch {
+    return {};
+  }
+}
 function waitForShell(terminal) {
   const until = Date.now() + SHELL_WAIT_MS;
   while (Date.now() < until) {
-    try {
-      const tail = orca('terminal', 'read', '--terminal', terminal, '--screen').terminal?.tail ?? [];
-      const last = tail.map((line) => line.trimEnd()).filter(Boolean).at(-1) ?? '';
-      if (/[❯$%#>]$/.test(last)) return;
-    } catch {
-      // 読めなくても、打つことはできる。
-    }
+    if (promptReady(readTerminal(terminal).tail ?? [])) return;
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 300);
+  }
+  const seen = readTerminal(terminal);
+  if ((seen.tail ?? []).some((line) => /^─+\s*$/.test(line)) || (typeof seen.draft === 'string' && seen.draft.trim())) {
+    throw new Error(`作った端末（${terminal}）にシェルのプロンプトが出ず、claude の入力欄か書きかけが見えるので、打ち込まずに止めた`);
   }
 }
 

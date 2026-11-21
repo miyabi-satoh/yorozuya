@@ -144,43 +144,44 @@ export function pidAlive(pid) {
 }
 
 // pid が claude のプロセスか。落ちた claude の登録が残り、その pid が別のプロセスに使い回されていても、生きた claude と見ないため。
-// 1回の ps（Windows は tasklist）でまとめて見る。見られなければ pid が生きていることだけで信じる（見られないせいで止めないため）。
-// Windows は名前の取れる版（claude.exe）か、npm で入れた版の node.exe を claude とみなす。
+// ps（Windows は tasklist）でまとめて見る。見られなければ null（呼び出し側は pid が生きていることだけで信じる）。
+// Windows は claude.exe だけ（Windows のマシンで実際の名前を確かめた）。
 export function claudePids(pids) {
   const alive = pids.filter(pidAlive);
   if (alive.length === 0) return new Set();
+  const run = (command, args) => execFileSync(command, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000 });
   try {
     if (process.platform === 'win32') {
-      const out = execFileSync('tasklist', ['/FO', 'CSV', '/NH'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000 });
       const found = new Set();
-      for (const line of out.split(/\r?\n/)) {
+      for (const line of run('tasklist', ['/FO', 'CSV', '/NH']).split(/\r?\n/)) {
         const [image, pid] = line.split('","').map((cell) => cell.replace(/"/g, ''));
-        if (/^(claude|node)\.exe$/i.test(image ?? '') && alive.includes(Number(pid))) found.add(Number(pid));
+        if (/^claude\.exe$/i.test(image ?? '') && alive.includes(Number(pid))) found.add(Number(pid));
       }
       return found;
     }
-    const out = execFileSync('ps', ['-o', 'pid=,args=', '-p', alive.join(',')], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000 });
-    return claudePidsFromPs(out);
+    const list = alive.join(',');
+    return claudePidsFromPs(run('ps', ['-o', 'pid=,comm=', '-p', list]), run('ps', ['-o', 'pid=,args=', '-p', list]));
   } catch {
-    return new Set(alive);
+    return null;
   }
 }
 
-// `ps -o pid=,args=` の出力から、コマンドの名前が claude の pid を拾う（npm で入れた版は `node …/claude …`）。
-export function claudePidsFromPs(out) {
+// `ps -o pid=,comm=` と `ps -o pid=,args=` の出力から claude の pid を拾う。
+// コマンドの名前（comm）が claude か、コマンドの頭の語が claude か、`node …/claude …`（npm で入れた版）なら claude。
+export function claudePidsFromPs(commOut, argsOut = '') {
   const found = new Set();
-  for (const line of out.split('\n')) {
+  const isClaude = (word) => /(^|[\\/])claude(\.exe)?$/i.test(word ?? '');
+  for (const line of commOut.split('\n')) {
+    const match = line.trim().match(/^(\d+)\s+(.*)$/);
+    if (match && isClaude(match[2].trim())) found.add(Number(match[1]));
+  }
+  for (const line of argsOut.split('\n')) {
     const match = line.trim().match(/^(\d+)\s+(.*)$/);
     if (!match) continue;
     const [command, script] = match[2].split(/\s+/);
-    const isClaude = (word) => /(^|[\\/])claude(\.exe)?$/i.test(word ?? '');
     if (isClaude(command) || (/(^|[\\/])node(\.exe)?$/i.test(command) && isClaude(script))) found.add(Number(match[1]));
   }
   return found;
-}
-
-export function isClaudePid(pid) {
-  return claudePids([pid]).has(pid);
 }
 
 // 生きている claude の登録を全部。読めない登録は飛ばす。
@@ -200,7 +201,10 @@ export function liveSessions() {
       // 書きかけ・消えかけの登録は飛ばす。
     }
   }
+  // 生きた pid のどれも claude と見分けられないときは、見分け方の方が外れている（見慣れない起動の仕方など）ので、生きていることだけで信じる。
+  // 見分けられないまま全部を落とすと、自分も相手も引けず、再起動が止まる。
   const claudes = claudePids(entries.map((entry) => entry.pid));
+  if (claudes === null || claudes.size === 0) return entries.filter((entry) => pidAlive(entry.pid));
   return entries.filter((entry) => claudes.has(entry.pid));
 }
 
@@ -349,15 +353,18 @@ export function waitForClaude(handle, seconds, exceptPid) {
   return null;
 }
 
-// シェルのプロンプトが出ていて、打ちかけが無いか。claude の入力欄が無く、最後の文のある行がプロンプトの印で終わる
-// （zsh・bash の `❯`・`$`・`%`・`#`、PowerShell の `>`）。claude が終わった後や、作った端末のシェルが上がったかを見る。
+// シェルのプロンプトが出ていて、打ちかけが無いか。claude が終わった後や、作った端末のシェルが上がったかを見る。
+// 見るのは、最後の「─ だけの行」（claude の入力欄の下枠。終わった claude の画面が上に残ることがある）より下の、最後の文のある行だけ。
+// その行が字下げされておらず（claude のステータスラインは字下げされている）、プロンプトの印（zsh・bash の `❯`・`$`・`%`・`#`、
+// PowerShell の `>`）で終わればよい。右に寄せた表示（zsh の RPROMPT・時刻など）は、3つ以上の空白の後ろを外して見る。
 // 印の後ろに文があれば、打ちかけか、シェルでない何かなので、打ち込まない。
 export function shellPromptReady(screen) {
   if (screen === null) return false;
   const lines = screen.split('\n');
-  if (bottomBorder(lines) >= 0) return false;
-  const last = lines.map((line) => line.trimEnd()).filter(Boolean).at(-1) ?? '';
-  return /[❯$%#>]$/.test(last);
+  const below = lines.slice(bottomBorder(lines) + 1);
+  const last = below.map((line) => line.trimEnd()).filter(Boolean).at(-1) ?? '';
+  if (!last || /^\s/.test(last)) return false;
+  return /[❯$%#>]$/.test(last.split(/\s{3,}/)[0]);
 }
 
 // シェルのプロンプトが出るまで待つ。出れば true。

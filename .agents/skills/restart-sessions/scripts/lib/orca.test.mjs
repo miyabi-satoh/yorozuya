@@ -134,9 +134,20 @@ test('シェルのプロンプトが打ちかけ無しで出ているときだ�
   assert.equal(shellPromptReady(null), false);
 });
 
-test('登録簿の pid が claude のプロセスかを、ps のコマンドの名前で見る', () => {
-  const out = ['39992 claude --plugin-dir /x --resume abc', '  501 /Users/me/.local/bin/claude', '  777 node /usr/lib/node_modules/@anthropic-ai/claude-code/cli.js', '  888 node /opt/homebrew/bin/claude', '  999 /usr/bin/vim notes-claude.md'].join('\n');
-  assert.deepEqual([...claudePidsFromPs(out)].sort((a, b) => a - b), [501, 888, 39992]);
+test('終わった claude の画面が上に残っていても、その下のプロンプトを見る。右に寄せた表示は外して見る', () => {
+  const left = [...screen(''), 'Resume this session with:', 'claude --resume abc', '…/repo ❯'].join('\n');
+  assert.equal(shellPromptReady(left), true);
+  assert.equal(shellPromptReady('~/repo ❯                                   ✔ 14:02:11'), true);
+  assert.equal(shellPromptReady('~/repo ❯ git sta                           ✔ 14:02:11'), false);
+  // 下枠の下が字下げされたステータスラインだけなら、まだ claude の画面。
+  assert.equal(shellPromptReady(['─'.repeat(10), '  Ctx Used: 7.0%'].join('\n')), false);
+});
+
+test('登録簿の pid が claude のプロセスかを、ps のコマンドの名前（comm）か頭の語で見る', () => {
+  const comm = ['39992 claude', '  123 /Users/me/.local/share/claude/versions/2.1.330', '  999 vim'].join('\n');
+  const args = ['39992 claude --plugin-dir /x --resume abc', '  501 /Users/me/.local/bin/claude', '  777 node /usr/lib/node_modules/@anthropic-ai/claude-code/cli.js', '  888 node /opt/homebrew/bin/claude', '  999 /usr/bin/vim notes-claude.md'].join('\n');
+  assert.deepEqual([...claudePidsFromPs(comm, args)].sort((x, y) => x - y), [501, 888, 39992]);
+  assert.deepEqual([...claudePidsFromPs('42 /opt/bin/claude\n', '')], [42]);
 });
 
 test('道具は HERDR_ENV=1 を先に、次に ORCA_TERMINAL_HANDLE で見分ける', () => {
