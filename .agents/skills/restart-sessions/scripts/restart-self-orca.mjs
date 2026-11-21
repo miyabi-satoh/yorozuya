@@ -11,10 +11,8 @@
 //   分割した端末のシェルは、元の端末のシェルの場所でなく、Orca の作業フォルダーで始まる（実測）。`cd` を打つと、
 //   シェルごとに書き方（`&&`・引用）が違って壊れうるので、claude の cwd が作業フォルダーと同じときだけ進める。
 
-import { realpathSync } from 'node:fs';
-
 import { handoffProblem } from './lib/handoff.mjs';
-import { backgroundWorkHint, orca, orcaError, selfSession, submitAndConfirm, terminalInfo, waitForClaude } from './lib/orca.mjs';
+import { backgroundWorkHint, orca, orcaError, sameDir, selfSession, submitAndConfirm, terminalInfo, waitForClaude } from './lib/orca.mjs';
 import { paceNote } from './lib/pace.mjs';
 import { attachGuide } from './lib/prompts.mjs';
 
@@ -55,17 +53,8 @@ if (terminal === null) skip(`自分の端末 ${self} を Orca から引けない
 if (terminal.agentIdentity !== 'claude') skip(`この端末で動いているのは claude ではない: ${terminal.agentIdentity ?? '不明'}`);
 
 // 新しい端末は「このセッションと同じ場所」で起動する。別の場所で起動すると、CLAUDE.md も AGENTS.md も読まないセッションができる。
-// 同じかは実体のパスで比べる（macOS の /tmp と /private/tmp のような別名で食い違わないため）。Windows のパスは大文字と小文字を区別しない。
-// 作業フォルダーの下のフォルダーで起動した claude も、ここで止まる（cd を打つと、シェルごとに書き方が違って壊れうるため）。
-const real = (path) => {
-  try {
-    const resolved = realpathSync.native(path);
-    return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
-  } catch {
-    return '';
-  }
-};
-if (!entry.cwd || !real(entry.cwd) || real(entry.cwd) !== real(terminal.worktreePath ?? '')) {
+// 比べ方は lib/orca.mjs の sameDir。作業フォルダーの下のフォルダーで起動した claude も、ここで止まる（cd を打つと、シェルごとに書き方が違って壊れうるため）。
+if (!sameDir(entry.cwd, terminal.worktreePath)) {
   skip(
     `claude の cwd（${entry.cwd || '取れない'}）が Orca の作業フォルダー（${terminal.worktreePath ?? '取れない'}）と違う。分割した端末は作業フォルダーで始まるので、同じ場所で立て直せない。` +
       `手で立て直すなら、資料を書いてから /exit し、同じ端末のシェルで cwd に移って claude を起動し、@<資料> を渡す`,

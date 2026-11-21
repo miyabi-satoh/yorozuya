@@ -26,6 +26,7 @@ import {
   orcaError,
   orcaErrorCode,
   prompt,
+  sameDir,
   SEND_REFUSED,
   sessionForTitle,
   sleep,
@@ -75,6 +76,19 @@ if (title !== name) skip(`端末 ${handle} のタイトルは ${title || '（空
 const entry = sessionForTitle(liveSessions(), terminal.title, terminal.worktreePath);
 if (!entry) skip(`端末 ${handle} の claude を登録簿から1つに決められない。resume の手がかりが無いまま終了させたくないので止まる`);
 const sid = entry.sessionId;
+
+// 新しい端末は同じ作業フォルダーに作り、作業フォルダーで始まる（実測）。作業フォルダーが分からないか、claude の cwd が
+// 作業フォルダーと違えば（下のフォルダーで起動したなど）、同じ場所で起動し直せないので、/exit の前に止まる。
+if (!terminal.worktreeId || !terminal.worktreePath) skip(`端末 ${handle} の作業フォルダーを Orca から取れない。新しい端末をどこに作るか決められないので止まる`);
+if (!sameDir(entry.cwd, terminal.worktreePath)) {
+  skip(
+    `claude の cwd（${entry.cwd || '取れない'}）が Orca の作業フォルダー（${terminal.worktreePath}）と違う。作り直す端末は作業フォルダーで始まるので、同じ場所で起動し直せない。` +
+      `手で再起動するなら、対象に /exit してもらい、同じ端末のシェルで claude を起動して @<資料> を渡す`,
+  );
+}
+// 作り直す端末のタイトル。claude が動いている間のタイトルは claude の名前なので、タブに付いた名前（paneTitle）を先にし、
+// 無ければ状態の印を外した今のタイトルにする。
+const newTitle = (typeof terminal.paneTitle === 'string' && terminal.paneTitle.trim()) || stripTitle(terminal.title);
 
 // 承認・質問ダイアログで止まっている相手には、打ち込んでも届かない。
 if (agentStateOf(agentList(), terminal) === 'blocked') {
@@ -134,10 +148,8 @@ for (let i = 0; i < 60; i += 1) {
 }
 if (!back) fail(`60秒たっても claude のプロセスが消えない。何も打っていない。端末を見ること。終了してシェルに戻っていたら、${recovery}`);
 
-// 作り直す端末のタイトルは、claude が終わって戻った元の端末のタイトル（claude の名前でなく、タブに付いていたもの）。
-const after = terminalInfo(handle);
-const tabTitle = after?.title ?? '';
 log('起動');
+const tabTitle = newTitle || stripTitle(terminalInfo(handle)?.title);
 const created = orca(['terminal', 'create', '--worktree', `id:${terminal.worktreeId}`, ...(tabTitle ? ['--title', tabTitle] : [])])?.terminal?.handle ?? '';
 if (!created) fail(`新しい端末を作れなかった（${orcaError() || 'ハンドルが無い'}）。元の端末 ${handle} は残っている。${recovery}`);
 log(`新しい端末 ${created}`);
@@ -146,17 +158,21 @@ const recoveryNew = `新しい端末 ${created} を見て、claude が上がっ�
 if (orca(['terminal', 'send', '--terminal', created, '--text', 'claude\r']) === null) {
   fail(`新しい端末に claude を打てなかった（${orcaError()}）。元の端末 ${handle} も残っている。${recoveryNew}`);
 }
-// claude が終わって空いた元の端末を閉じる。閉じられなくても、新しい端末で続けられる。
-const closed = orca(['terminal', 'close', '--terminal', handle]) !== null;
-if (!closed) log(`元の端末 ${handle} を閉じられなかった（${orcaError()}）。手で閉じること`);
-
 const started = waitForClaude(created, 60, entry.pid);
-if (!started) fail(`新しい端末で claude の起動を確かめられない。${recoveryNew}`);
+if (!started) fail(`新しい端末で claude の起動を確かめられない。元の端末 ${handle} も残している。${recoveryNew}`);
 
 const submitted = submitAndConfirm(created, `@${sent} 前セッションの引き継ぎ資料です。${HOW_TO_PROCEED}`);
 if (submitted.result === 'refused' || submitted.result === 'unknown') {
   fail(`起動はしたが資料を読み始めたのを確かめられない（${submitted.detail}）。新しい端末 ${created} を見て、入力欄に依頼が残っていれば Enter を押し、空なら @${sent} と打つ`);
 }
 if (submitted.result === 'resent') log('依頼が入力欄に残っていたので、Enter を送り直した');
+
+// 新しいセッションが資料を受け取ってから、claude が終わって空いた元の端末を閉じる。先に閉じると、新しい側が上がらなかったときに、
+// 元の端末に残っていたもの（シェルの処理や、/exit の後に打たれた文）まで失う。
+// 元の端末で claude がまた動いていれば（誰かが打った）、閉じない。閉じられなくても、新しい端末で続けられる。
+const now = terminalInfo(handle);
+const again = now ? sessionForTitle(liveSessions(), now.title, now.worktreePath) : null;
+if (again && again.pid !== started.pid) log(`元の端末 ${handle} で claude（${again.name}）が動いているので閉じない`);
+else if (orca(['terminal', 'close', '--terminal', handle]) === null) log(`元の端末 ${handle} を閉じられなかった（${orcaError()}）。手で閉じること`);
 
 process.stdout.write(`OK\t${created}\t${name}\t${handoff}\tresume:${sid}\tnew:${started.name ?? ''}\n`);

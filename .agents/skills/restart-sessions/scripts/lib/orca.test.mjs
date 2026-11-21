@@ -14,6 +14,7 @@ import {
   sendStarted,
   sessionForTitle,
   claudePidsFromPs,
+  sameDir,
   stripTitle,
   submittedOnScreen,
 } from './orca.mjs';
@@ -141,4 +142,12 @@ test('道具は HERDR_ENV=1 を先に、次に ORCA_TERMINAL_HANDLE で見分け
   assert.equal(which({ HERDR_ENV: '1', ORCA_TERMINAL_HANDLE: 'term_1' }), 'herdr');
   assert.equal(which({ ORCA_TERMINAL_HANDLE: 'term_1' }), 'orca');
   assert.equal(which({}), 'null');
+});
+
+test('フォルダーは実体のパスで比べ、解決できなければ違うとみなす', () => {
+  const dir = fileURLToPath(new URL('.', import.meta.url));
+  assert.equal(sameDir(dir, `${dir}/.`), true);
+  assert.equal(sameDir(dir, fileURLToPath(new URL('..', import.meta.url))), false);
+  assert.equal(sameDir('', dir), false);
+  assert.equal(sameDir('/no/such/dir', '/no/such/dir'), false);
 });

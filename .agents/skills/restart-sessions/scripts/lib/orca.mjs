@@ -6,7 +6,7 @@
 // claude は自分のセッションの名前を端末のタイトルに出す（`✳ knowledge-10/mac` のように、頭に状態の印が付く）。
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { readdirSync, readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -202,6 +202,9 @@ export function liveSessions() {
     }
   }
   // ps・tasklist が使えないときだけ、生きていることだけで信じる。見分けられたうえで1つも claude でなければ、どれも生きていない。
+  // 見分けられたうえで1つも claude でないときに pid が生きていることで信じ直さないのは、落ちた claude の登録の pid が
+  // 別のプロセスに使い回されると、生きたセッションに見えるため。claude の見分け方は macOS（`…/claude` で始まる args）と
+  // Windows（claude.exe）で確かめてある。
   const claudes = claudePids(entries.map((entry) => entry.pid));
   if (claudes === null) return entries.filter((entry) => pidAlive(entry.pid));
   return entries.filter((entry) => claudes.has(entry.pid));
@@ -268,6 +271,21 @@ export function claudeTerminalsFrom(terminals, agents, sessions) {
     });
   }
   return found;
+}
+
+// 2つのフォルダーが同じか。実体のパスで比べる（macOS の /tmp と /private/tmp のような別名で食い違わないため）。
+// Windows のパスは大文字と小文字を区別しない。どちらかが解決できなければ違うとみなす（止まる側に倒す）。
+export function sameDir(a, b) {
+  const real = (path) => {
+    try {
+      const resolved = realpathSync.native(path);
+      return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+    } catch {
+      return '';
+    }
+  };
+  const left = a ? real(a) : '';
+  return left !== '' && left === (b ? real(b) : '');
 }
 
 // --- 入力 ---
