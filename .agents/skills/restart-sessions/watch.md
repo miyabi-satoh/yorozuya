@@ -4,11 +4,11 @@
 
 - ターンの終わりに、自分の使用率（`$.session.usage()`）が `config.local.json` の `watch.threshold`（無ければ 50）以上なら `OVER`、入っている Claude Code（`claude --version`）が動いている版と違えば `UPDATE`、自動更新の失敗（`✘ Auto-update failed · Run claude doctor`）が入力欄の上枠のすぐ上の行に出ていれば `UPDATE FAILED` を、自分へのメッセージで知らせる。受けたセッションは [restart-self.md](restart-self.md) で自分を再起動する。ターンの終わりは区切りなので、区切りを尋ねる依頼と返信は要らない。
 - 最後の応答から75分たち、コンテキストが10万トークン以上なら、モデルのターンを使わずに `scripts/idle-clear-self.mjs` で自分のペインを `/clear` し、抜き出した会話ログを読ませる（[idle-clear.md](idle-clear.md) を自分に当てる形）。idle でない・入力欄に書きかけがある・Monitor かバックグラウンドのサブエージェントが動いているときは見送り、10分後に見直す。バックグラウンドのシェルだけなら流し、続きのプロンプトで、シェルの終わりの知らせが来たら予定に沿って続けてよいと伝える。
-- `/goal` が動いている間と、Herdr の中でも Orca の端末でもないときは何もしない。Orca の端末では、画面を `orca terminal read --screen` で読む。知らせはセッションごとに1回。`UPDATE FAILED` は、起動し直しても同じ版で失敗し続けたときに再起動を繰り返さないよう、Herdr の名前（再起動で引き継がれる）と動いている版の組みごとに1回（セッションをまたいで覚える）。Orca では claude の名前が再起動で変わるので、名前の代わりに作業フォルダー（`ORCA_WORKTREE_ID`）で覚える。
+- `/goal` が動いている間と、hc・Orca の端末でも Herdr の中でもないときは何もしない。Orca の端末では、画面を `orca terminal read --screen` で、hc の端末では `hc read` で読む。知らせはセッションごとに1回。`UPDATE FAILED` は、起動し直しても同じ版で失敗し続けたときに再起動を繰り返さないよう、Herdr の名前（再起動で引き継がれる）と動いている版の組みごとに1回（セッションをまたいで覚える）。Orca では claude の名前が再起動で変わるので、名前の代わりに作業フォルダー（`ORCA_WORKTREE_ID`）で覚える。hc でも立て直すと端末と名前が変わるので、claude の作業フォルダーで覚える。
 
 以下は、mod を使わずにほかのセッションを外から見張るとき。
 
-`scripts/watch-context.mjs` が各 claude ペイン（Orca の端末では、登録簿に当たる claude の端末。SKILL.md の「Orca の端末では」）のステータスラインから使用率を読み、閾値以上になったセッションを1行で知らせる。
+`scripts/watch-context.mjs` が各 claude ペイン（Orca の端末では、登録簿に当たる claude の端末。SKILL.md の「Orca の端末では」。hc の端末では、このマシンの hc の端末のうち前景が claude のもの）のステータスラインから使用率を読み、閾値以上になったセッションを1行で知らせる。
 Claude Code の更新の知らせ（再起動で反映される）と、「放置から戻ったときのヒント」（`new task? /clear to save …`）が出ているセッションも、それぞれ1行で知らせる。
 知らせは聞きに行くきっかけにすぎない。区切りの判断は、いつもどおり対象がする。
 

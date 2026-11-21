@@ -1,26 +1,37 @@
-// claude を動かしている端末の道具（Herdr か Orca）を環境変数で見分け、どちらでも同じ形で呼べるようにする。
-// Herdr の中なら HERDR_ENV=1、Orca の端末なら ORCA_TERMINAL_HANDLE がある。Orca の端末には HERDR_ENV を引き継がせていないが、
-// 両方があれば Herdr を先にする（Herdr の中で Orca の CLI を叩いても、自分の端末には届かないため）。
-// どちらでもなければ Herdr として扱う。どちらでもないときに Herdr の CLI が失敗して止まるのは、分ける前と同じ。
+// claude を動かしている端末の道具（hc・Herdr・Orca）を環境変数で見分け、どれでも同じ形で呼べるようにする。
+// hc（herdr-core）の端末なら HC_TERMINAL_ID、Herdr の中なら HERDR_ENV=1、Orca の端末なら ORCA_TERMINAL_HANDLE がある。
+// hc を一番先に見る。hc の端末は hc の core を起動した環境を引き継ぐので、Herdr の中で起動した core の端末には HERDR_ENV=1 と
+// HERDR_PANE_ID（core を起動したペインのもの）も入る（実測）。それを信じて Herdr の CLI を叩くと、別のペインに届く。
+// Herdr と Orca の両方があれば Herdr を先にする（Herdr の中で Orca の CLI を叩いても、自分の端末には届かないため）。
+// どれでもなければ Herdr として扱う。どれでもないときに Herdr の CLI が失敗して止まるのは、分ける前と同じ。
 
+import * as hc from './hc.mjs';
 import * as herdr from './herdr.mjs';
 import * as orca from './orca.mjs';
 
 export function backend() {
+  if (process.env.HC_TERMINAL_ID) return 'hc';
   if (process.env.HERDR_ENV === '1') return 'herdr';
   if (process.env.ORCA_TERMINAL_HANDLE) return 'orca';
   return null;
 }
 
+export const isHc = () => backend() === 'hc';
 export const isOrca = () => backend() === 'orca';
 
 // 知らせや失敗の文に出す名前。
-export const label = () => (isOrca() ? 'Orca' : 'Herdr');
+export const label = () => (isHc() ? 'hc' : isOrca() ? 'Orca' : 'Herdr');
 
-export const lastError = () => (isOrca() ? orca.orcaError() : herdr.herdrError());
+const pick = () => (isHc() ? hc : isOrca() ? orca : herdr);
 
-// 呼び出し元自身の { id, sid }。id は Herdr のペインID か Orca の端末のハンドル。取れなければ空文字。
+export const lastError = () => (isHc() ? hc.hcError() : isOrca() ? orca.orcaError() : herdr.herdrError());
+
+// 呼び出し元自身の { id, sid }。id は hc の端末の address、Herdr のペインID か Orca の端末のハンドル。取れなければ空文字。
 export function self() {
+  if (isHc()) {
+    const id = hc.selfId();
+    return { id, sid: hc.sessionIdOf(hc.terminalInfo(id)) };
+  }
   if (isOrca()) {
     const found = orca.selfSession();
     return { id: found?.handle ?? '', sid: found?.entry?.sessionId ?? '' };
@@ -29,8 +40,13 @@ export function self() {
   return { id: current?.pane_id ?? '', sid: current?.agent_session?.value ?? '' };
 }
 
-// 入力を待っているか。Herdr は idle、Orca は done（ターンを終えて入力を待つ）。返すのは { idle, status }。
+// 入力を待っているか。Herdr は idle、Orca は done（ターンを終えて入力を待つ）、hc は claude が知らせる語のままで idle か done。
+// 返すのは { idle, status }。
 export function idleStatus(id) {
+  if (isHc()) {
+    const status = hc.agentStatus(id);
+    return { idle: status === 'idle' || status === 'done', status };
+  }
   if (isOrca()) {
     const status = orca.agentState(id);
     return { idle: status === 'done', status };
@@ -39,14 +55,15 @@ export function idleStatus(id) {
   return { idle: status === 'idle', status };
 }
 
-export const readScreen = (id) => (isOrca() ? orca.readScreen(id) : herdr.readScreen(id));
-export const inputDraft = (id) => (isOrca() ? orca.inputDraft(id) : herdr.inputDraft(id));
-export const backgroundWorkHint = (id) => (isOrca() ? orca.backgroundWorkHint(id) : herdr.backgroundWorkHint(id));
-export const prompt = (id, text) => (isOrca() ? orca.prompt(id, text) : herdr.prompt(id, text));
+export const readScreen = (id) => pick().readScreen(id);
+export const inputDraft = (id) => pick().inputDraft(id);
+export const backgroundWorkHint = (id) => pick().backgroundWorkHint(id);
+export const prompt = (id, text) => pick().prompt(id, text);
 
 // 見張り（watch-context.mjs）が読む claude の一覧。{ id, name, label, sid, cwd, status } の配列で、取れなければ null。
-// blocked は承認や選択式の問いの待ち（Herdr の agent_status と Orca の state で同じ語）。
+// blocked は承認や選択式の問いの待ち（Herdr の agent_status・Orca の state・hc の status で同じ語）。
 export function claudes() {
+  if (isHc()) return hc.claudeTerminals();
   if (isOrca()) return orca.claudeTerminals();
   const agents = herdr.herdrJson(['agent', 'list'])?.result?.agents;
   if (!Array.isArray(agents)) return null;

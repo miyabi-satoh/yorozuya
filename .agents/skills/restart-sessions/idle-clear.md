@@ -4,6 +4,7 @@
 SKILL.md の「手順」の4（`extract-transcript.mjs`）と同じ抽出なので、画面のスクロールバックと違って前半も欠けない。`/clear` は新セッションの開始にあたるので、旧セッションのJSONLはそこで書き込みが止まるだけでファイルは残る。`/clear` の前でも後でも抽出できる。元の会話は `claude --resume <セッションID>` で戻せる（知らせの列のID）。
 
 Orca の端末では、`herdr` の代わりに `orca` で同じことをする（ペインは端末のハンドル。SKILL.md の「Orca の端末では」）。状態は `orca agent list` の `state` が `done` なら入力を待っている。書きかけは `orca terminal read --terminal <ハンドル> --screen --json` の `draft`。送るのは `orca terminal send --terminal <ハンドル> --text "<文>" --enter`（`/clear` も効く。2026-11-21 に確かめた）。
+hc の端末では、`hc` で同じことをする（ペインは端末の address。SKILL.md の「hc の端末では」）。状態は `hc get <address> --json` の `status.state` が `idle` か `done` なら入力を待っている。書きかけは `hc read <address>` の入力欄（色が無いので、`Try "…"` の案内のほかは書きかけとみなす）。送るのは `env -u HC_TERMINAL_ID hc send <address> "<文>"`（claude の端末の中から送ると hc が文を `<hc from=…>` で包み、`/clear` が効かないため）。
 
 1. ペインとセッションIDを引き直す。IDが違えば済んでいるので捨てる。`agent_status` が `idle` でなければ（`working`・`blocked`）流さない。入力欄に書きかけがあれば（`herdr pane read <pane> --source visible --format ansi` で、薄字でない文字がある）流さない。`/clear` が書きかけの末尾につながって送信される。
    モードラインに Monitor・バックグラウンドのサブエージェントが見えていたら流さない（`N monitor`・`N tasks` など）。`/clear` の後にどうなるかを確かめていないため。見送ったら、次の `IDLE`（張り直した見張りが出す）で改めて見る。

@@ -1,10 +1,11 @@
 # restart-sessions
 
-[Herdr](https://herdr.dev) か [Orca](https://orca.dev) 上のセッションを、別のセッションから会話ログを引き継いで再起動する。
+[Herdr](https://herdr.dev)・herdr-core（`hc`）・[Orca](https://orca.dev) 上のセッションを、別のセッションから会話ログを引き継いで再起動する。
 
 ## 読む前に
 
-- **Herdr か Orca が要る。** tmux ではない。どちらで動いているかは環境変数で見分ける（`HERDR_ENV=1` なら Herdr、`ORCA_TERMINAL_HANDLE` があれば Orca。両方なら Herdr）
+- **Herdr・hc・Orca のどれかが要る。** tmux ではない。どれで動いているかは環境変数で見分ける（`HC_TERMINAL_ID` があれば hc、`HERDR_ENV=1` なら Herdr、`ORCA_TERMINAL_HANDLE` があれば Orca。hc を一番先に見る。hc の端末は core を起動した環境の `HERDR_ENV=1` を引き継ぐことがあるため。Herdr と Orca の両方なら Herdr）
+- **hc で通したのは macOS（hc 0.1.21）だけ。** 使い捨ての claude で、自分の再起動とほかのセッションの再起動を最後まで通した（`/exit` で終わり、新しい端末の claude が引数の `@<資料>` を読み、旧の端末を閉じる）。hc の端末の claude には、SessionStart の hook でラベル `claude_transcript`（会話の記録のパス）を付けておく（セッションIDをここから取る。例: `hc label "$HC_TERMINAL_ID" "claude_transcript=<hook の入力の transcript_path>"`）
 - **Orca で通したのは macOS（Orca 1.4.268）だけ。** 再起動・自己再起動・放置の `/clear`・見張りの読み取りを、使い捨ての端末で通した。Linux・Windows、SSH 先のホストは試していない
 - **実機確認は macOS と Windows 11 だけ。** Linux は未確認
 - **会話に出た秘密情報は、資料にもそのまま残る。** 引き継ぎ資料は旧セッションの会話ログ（ユーザー・アシスタント・他のセッションの発言と、バックグラウンドの処理の知らせのテキスト）をそのまま抜き出したもので、要約を挟まない。貼ったトークン・パスワードなどがあれば、渡す前に見て消すこと
@@ -16,7 +17,7 @@
 - **会話ログの抽出は、Claude Code が `~/.claude/projects/<project>/<session-id>.jsonl` に保存する内部形式に頼っている。** 公式に文書化された形式ではない（[頼っている外部の振る舞い](#頼っている外部の振る舞い)）
 - **資料を読ませる入力が、送信されずに入力欄に残ることがある。** 原因は分かっていない。再起動した側のセッションが確かめ、残っていれば Enter を送る。自己再起動では、旧ペインが閉じられるまでの間に `restart-self.mjs` が同じことをする
 - **mod（`mod/`）を読み込ませると、各セッションが自分を見張る。** ターンの終わりに使用率（既定 50%）と Claude Code の更新（自動更新の失敗を含む）を見て自分で再起動し、75分放置して10万トークン以上なら自分のペインを `/clear` する。外の見張りと SessionStart の hook は要らない。実物で通したのは、OVER の知らせが届いて自分で再起動に入るところまで（macOS・Claude Code 2.1.289）
-- **mod を使わずに、`config.local.json` を置き、使う側に SessionStart の hook を置くと、起動のたびにコンテキストの見張りが始まり、知らせは確認なしで流す。** 見張るのは Herdr 上の claude ペインすべて（他のプロジェクトのものも）。使用率が閾値（既定 30%）以上になるか更新の知らせが出たセッションは会話ログを引き継いで再起動し、放置のヒントが出たセッションには `/clear` を送る。知らせのたびに確認させたいなら、`config.local.json` の `confirm` を `true` にする
+- **mod を使わずに、`config.local.json` を置き、使う側に SessionStart の hook を置くと、起動のたびにコンテキストの見張りが始まり、知らせは確認なしで流す。** 見張るのは Herdr 上の claude ペインすべて（他のプロジェクトのものも。hc の端末で始めたときは、このマシンの hc の端末の claude）。使用率が閾値（既定 30%）以上になるか更新の知らせが出たセッションは会話ログを引き継いで再起動し、放置のヒントが出たセッションには `/clear` を送る。知らせのたびに確認させたいなら、`config.local.json` の `confirm` を `true` にする
 - **コンテキストの見張りは、ステータスラインに使用率が出ていることが前提。** 出していなければ、見張りだけ使えない。ステータスラインは自分で設定するもので、[ccstatusline](https://github.com/sirmalloc/ccstatusline) などで出せる
 - **見張りには `config.local.json` が要る。** スキルのディレクトリで `cp config.example.json config.local.json` として作り、`watch.pattern` をステータスラインの使用率の表示に合わせる（例は ccstatusline の `Ctx Used: 12.3%` 用）。無ければ見張りは始まらない。このリポジトリの `.gitignore` で除外しているので、pull しても上書きされない（skill を symlink でなく写したなら、使う側の `.gitignore` に足す）
 - **再起動の依頼に、週次枠のペースの一文を添えることがある。** Claude がハイペースで Codex に余裕があるとき（[weekly-pace](../weekly-pace/README.md) の判定）、判断の質が落ちにくい作業を Codex に回すよう新セッションに書く。取れなければ（Claude の使用量 API もステータスラインの Weekly も読めない・`codex` が無い）何も添えない
@@ -90,7 +91,7 @@ Claude Code の更新の知らせ（再起動で反映される）や、放置�
 
 3. 各セッションに自分を見張らせるなら、`mod/`（Claude Code の function hooks。早期アクセスの API で、版ごとに変わりうる。2.1.289 で確かめた）をプラグインのフォルダーとして読み込ませる（`claude --plugin-dir <このディレクトリ>/mod`、または `~/.claude/settings.json` の `env` の `CLAUDE_CODE_PLUGIN_DIRS`）。ターンの終わりに使用率と更新を見て、自分で再起動する。放置で大きくなった会話は、自分のペインで `/clear` して続ける。読み込ませれば、手順2の hook も外の見張りも要らない（hook は、mod が読み込まれていれば何も差し込まない）
    - 新しく足した mod は、そのとき動いているセッションには、起動し直すまで読み込まれない（読み込み済みの mod のファイルは、保存すれば読み直される）。動いているセッションは、このスキルで一度再起動する
-4. ターミナルで [Herdr](https://herdr.dev) を起動し、使う側のプロジェクトのディレクトリで `claude` を起動する
+4. ターミナルで [Herdr](https://herdr.dev) を起動し、使う側のプロジェクトのディレクトリで `claude` を起動する（hc なら `hc run --bg --no-parent --cwd <使う側のプロジェクト> --name <名前> claude`。hc の core は、立ち上げた側の環境を端末に引き継ぐので、claude の中からでなく、ログインしたままの環境で立ち上げておく）
 
 あとは Claude に頼む。**スクリプトを直接叩く必要はない。**
 
@@ -114,7 +115,7 @@ Claude Code の更新の知らせ（再起動で反映される）や、放置�
 | `config.example.json` | 環境ごとの設定（`config.local.json`）の形。`config.local.json` は git 管理外 |
 | `scripts/` | 後戻りできない連鎖と、コンテキストの見張り（読むだけ） |
 
-スクリプトが外部に呼び出すのは `herdr` か `orca` と、`node` だけ（週次枠のペースを添えるときは、[weekly-pace](../weekly-pace/README.md) を通じて `codex` も）。Claude Code は「読む前に」のとおり別に要る。
+スクリプトが外部に呼び出すのは `herdr`・`hc`・`orca` のどれかと、`node` だけ（週次枠のペースを添えるときは、[weekly-pace](../weekly-pace/README.md) を通じて `codex` も）。Claude Code は「読む前に」のとおり別に要る。
 
 ## 頼っている外部の振る舞い
 
@@ -157,6 +158,15 @@ Claude Code の更新の知らせ（再起動で反映される）や、放置�
 - claude は自分の名前を端末のタイトルに出す（Claude Code の振る舞い。端末と登録簿 `~/.claude/sessions/<pid>.json` をこれで結ぶ）
 - 端末の起動のコマンドは、Orca が窓を開き直すときに流し直される（だから起動はシェルに打ち込む）
 - 作ったばかりの端末へ打った文字は、シェルが上がる前でも端末が預かってシェルに読ませる（だから claude の動いたことのない、作ったばかりの端末にだけ打ち込む。ほかの再起動では端末を作り直すので、タブの位置が変わる）
+
+**hc**（0.1.21 で確かめた）
+
+- `hc ls` / `get` / `read` / `send` / `run` / `kill` / `rm` の `--json` の出力の構造（成功は stdout、失敗は stderr の `{"error":{"kind"}}`）。`ls` には前景とラベルが載らないので、端末ごとに `get` で引く
+- 状態を知らせたことのある端末（claude の端末）の中から `hc send` すると、文が `<hc from=…>` で包まれる。`HC_TERMINAL_ID` を外して送ると包まれない（だから送るときは外す）
+- 端末から起動した端末は既定でその子になり、親が終わると一緒に終わる（だから claude の立て直しは `--no-parent`、`run-in-tab.mjs` は `--outlive-parent`）
+- 名前は生きた端末の間で一意で、付け替えられない。終わった端末の名前は外れる（だから立て直しは `<名前>` と `<名前>-2` を行き来する）
+- claude が OSC 7501 で知らせる状態が `get` の `status.state` に出る（`blocked`・`idle`・`working`・`done`）
+- `read` の画面には色が無い（薄字のサジェストは見分けられない）
 
 **週次枠のペース**（添えるときだけ。詳しくは [weekly-pace](../weekly-pace/README.md)）
 

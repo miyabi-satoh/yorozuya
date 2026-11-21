@@ -10,9 +10,9 @@ skill は、決まったコマンドを順に叩くスクリプトではなく�
 
 | skill | できること | 要るもの・実機確認 |
 | --- | --- | --- |
-| [restart-sessions](.agents/skills/restart-sessions/README.md) | [Herdr](https://herdr.dev) か [Orca](https://orca.dev) 上のセッションを、会話ログを引き継いで再起動する。SessionStart の hook を置いたプロジェクトで起動すると、コンテキストの使用率を見張り、知らせの出たセッションを確認なしで再起動する | Herdr か Orca。見張りには、使用率を出すステータスラインと `config.local.json`。実機確認は Herdr が macOS・Windows 11、Orca が macOS |
+| [restart-sessions](.agents/skills/restart-sessions/README.md) | [Herdr](https://herdr.dev)・herdr-core（`hc`）・[Orca](https://orca.dev) 上のセッションを、会話ログを引き継いで再起動する。SessionStart の hook を置いたプロジェクトで起動すると、コンテキストの使用率を見張り、知らせの出たセッションを確認なしで再起動する | Herdr・hc・Orca のどれか。見張りには、使用率を出すステータスラインと `config.local.json`。実機確認は Herdr が macOS・Windows 11、Orca が macOS、hc は macOS で部品まで |
 | [weekly-pace](.agents/skills/weekly-pace/README.md) | Claude と Codex の週次枠の使用ペースを概算する。restart-sessions が、Claude がハイペースのとき再起動した先に Codex へ作業を回すよう書き添えるのに使う | Claude 側は Claude Code のログイン（使用量 API を読む）。Codex 側は `codex` CLI |
-| [heavy-task](.agents/skills/heavy-task/README.md) | hook が CPU の厳しいときに重いコマンドを止め、mod が空いたらセッションに知らせる。hook が拾わない重い処理は、始める前に CPU の空きを測る手順で、始めるか待つかを決める。Herdr の中と Orca の端末では重い処理を別のタブで流し、ログと終了コードを残す | 何が重いかを足す、使う側の `.claude/heavy-commands.json`（無ければ既定だけを見る）。hook と mod は Claude Code 用（mod は 2.1.289 の function hooks）。止めて知らせるところまでの実機確認は macOS のみ |
+| [heavy-task](.agents/skills/heavy-task/README.md) | hook が CPU の厳しいときに重いコマンドを止め、mod が空いたらセッションに知らせる。hook が拾わない重い処理は、始める前に CPU の空きを測る手順で、始めるか待つかを決める。hc・Orca の端末と Herdr の中では重い処理を別のタブで流し、ログと終了コードを残す | 何が重いかを足す、使う側の `.claude/heavy-commands.json`（無ければ既定だけを見る）。hook と mod は Claude Code 用（mod は 2.1.289 の function hooks）。止めて知らせるところまでの実機確認は macOS のみ |
 | [cleanup](.agents/skills/cleanup/README.md) | ディスクのゴミの候補を調べてレポートし、選んだものだけ消す。mod が空きを見張り、ラインを切ったら各セッションに自分のリポジトリを片付けさせる | 削除まで通したのは Windows のみ。mod は Claude Code 用で、実機確認は macOS のみ |
 | [machine-setup](.agents/skills/machine-setup/README.md) | 新しいマシンにアプリ・ツールを入れ、設定ファイルを取り込む | Claude Code。最後まで通したのは Ubuntu（Docker）のみ |
 | [pick-three](.agents/skills/pick-three/README.md) | 画面・文言の見せ方や、選択肢の多い決定・絡み合う決定など、文章より並べて見比べたほうが選びやすい判断を1枚のページに並べて選んでもらい、選ばれた案をプロジェクトの決めごとに書く | 使ったのは Claude Code のアーティファクトのみ。ほかのエージェント向けの HTML ファイルで出す形は未確認 |

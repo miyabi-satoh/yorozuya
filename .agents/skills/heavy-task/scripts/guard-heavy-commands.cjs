@@ -13,9 +13,10 @@
 //   }
 //
 // 引用の中身と heredoc・here-string の本文は見ず、コマンドの位置 (行頭、`;` `&` `|` `(` の後) に来たものだけを見る。
-// 例外は `herdr pane run <ペイン> <コマンド>`・`orca terminal create|send|split ... --command|--text <コマンド>`・`node run-in-tab.mjs ... -- <コマンド>` で、
+// 例外は `herdr pane run <ペイン> <コマンド>`・`orca terminal create|send|split ... --command|--text <コマンド>`・
+// `hc run [オプション] <コマンド>`・`hc send <端末> <文>`・`node run-in-tab.mjs ... -- <コマンド>` で、
 // ペインへ送るコマンドも同じように見る (ビルドやテストもペインで流すことがあるため)。
-// Herdr の中と Orca の端末では、重い処理をペインの外で流すのも止める。ログと終了コードがタブの側に残り、途中で打ち切られても理由が分かるため。
+// hc・Orca の端末と Herdr の中では、重い処理をペインの外で流すのも止める。ログと終了コードがタブの側に残り、途中で打ち切られても理由が分かるため。
 // 測れないときや入力が読めないときは、何もせずに通す (hook の不具合で作業を止めないため)。
 // 3つの OS で同じに動くよう、負荷は node の os モジュールで測る。
 
@@ -98,7 +99,20 @@ function commandWords(segment) {
 // Orca は `--command` か `--text` の次の1語 (`--text=<値>` の形も。引用ならその中身) を送るコマンドとみなす。
 // 引用しない複数の語は、シェルが別の引数に分けるので、Orca に渡るのも1語目だけ。
 // quotes は、この区切りに出てくる引用の中身 (出てきた順)。
-function paneCommand(segment, quotes) {
+// hc run はオプションの後の残り全部 (引用1つなら、その中身がシェルの行になる)、hc send は端末の次の1語 (Orca の --text と同じ) を送るコマンドとみなす。
+// 値を取る hc run のオプションは hc run --help のもの。hc exec は端末を作らずに流すので、ここに入れない (タブの外とみなす)。
+const HC_RUN_VALUE_OPTIONS = '--(?:name|cwd|on|label|parent|timeout)';
+
+// hc の形は、区切りのコマンドの語が hc のときだけ当てる。ほかの道具の引数に hc run が混ざっても (`--text cmd -- hc run foo`・`--label fix-hc run`)、hc と読まないため。
+function paneCommand(segment, quotes, tool) {
+  const toHc =
+    tool === 'hc' &&
+    (segment.match(new RegExp(`^(.*?\\bhc\\s+run\\s+(?:(?:${HC_RUN_VALUE_OPTIONS}(?:\\s+|=)\\S+|--[\\w-]+)\\s+)*(?:--\\s+)?)(\\S.*)$`, 's')) ??
+      segment.match(/^(.*?\bhc\s+send\s+(?:(?:--(?:if|timeout)(?:\s+|=)\S+|--[\w-]+)\s+)*(?:--\s+)?\S+\s+)(\S+)/s));
+  if (toHc) {
+    let next = (toHc[1].match(/''|""/g) ?? []).length;
+    return toHc[2].replace(/''|""/g, () => quotes[next++] ?? '');
+  }
   const toOrca = segment.match(/^(.*?\borca\s+terminal\s+(?:create|send|split)\s+(?:.*?\s)?--(?:command|text)(?:\s+|=))(\S+)/s);
   if (toOrca) {
     let next = (toOrca[1].match(/''|""/g) ?? []).length;
@@ -121,8 +135,10 @@ function commandSegments(command, nested = false) {
     if (words.length === 0) continue;
     segments.push(words);
     // ペインへ送るコマンドの中の `herdr pane run` までは追わない。
-    const sendsToPane = words[0] === 'herdr' || words[0] === 'orca' || (words[0] === 'node' && /(^|[\\/])run-in-tab\.mjs$/.test(words[1] ?? ''));
-    const sent = !nested && sendsToPane ? paneCommand(segment, quotes) : null;
+    // hc はパスで書いても (`/usr/local/bin/hc run …`) 拾う。herdr・orca は語そのものだけを見る (前からの読み方のまま)。
+    const tool = /(^|[\\/])hc(\.exe)?$/.test(words[0]) ? 'hc' : words[0];
+    const sendsToPane = words[0] === 'herdr' || words[0] === 'orca' || tool === 'hc' || (words[0] === 'node' && /(^|[\\/])run-in-tab\.mjs$/.test(words[1] ?? ''));
+    const sent = !nested && sendsToPane ? paneCommand(segment, quotes, tool) : null;
     if (sent === null) continue;
     for (const inner of commandSegments(sent, true)) segments.push(Object.assign(inner, { inPane: true }));
   }
@@ -244,16 +260,18 @@ function output(hookSpecificOutput) {
   process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', ...hookSpecificOutput } }));
 }
 
-// 重い処理をタブへ回す道具の名前。Herdr の中か Orca の端末でなければ null (タブへ回させない)。
-// 両方の中にいれば Herdr を先にする (restart-sessions の scripts/lib/mux.mjs と同じ見分け方)。
+// 重い処理をタブへ回す道具の名前。hc・Orca の端末か Herdr の中でなければ null (タブへ回させない)。
+// hc を一番先に見る (hc の端末は core を起動した環境の HERDR_ENV=1 を引き継ぐことがある)。Herdr と Orca の両方の中にいれば Herdr を先にする
+// (restart-sessions の scripts/lib/mux.mjs と同じ見分け方)。
 function tabTool() {
+  if (process.env.HC_TERMINAL_ID) return 'hc';
   if (process.env.HERDR_ENV === '1') return 'Herdr';
   return process.env.ORCA_TERMINAL_HANDLE ? 'Orca' : null;
 }
 
 function outsideTabReason(tool) {
   return [
-    `重い処理は、${tool} の別のタブで流してください。ログと終了コードが残り、途中で打ち切られても理由が分かります。`,
+    `重い処理は、${tool} の別の${tool === 'hc' ? '端末' : 'タブ'}で流してください。ログと終了コードが残り、途中で打ち切られても理由が分かります。`,
     `node ${path.join(__dirname, 'run-in-tab.mjs')} --label <用途> -- '<コマンド>'`,
     `タブで流せない事情があるときだけ、コマンドの頭に ${FORCE_MARK} を付けます。`,
   ].join('\n');

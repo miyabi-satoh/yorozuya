@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// コマンドを Herdr か Orca の別のタブで流し、出力・終了コード・止まった理由をファイルに残す。
-// Herdr の中（HERDR_ENV=1）なら Herdr のタブ、Orca の端末（ORCA_TERMINAL_HANDLE がある）なら、同じ作業フォルダーに作る Orca の端末のタブ。
+// コマンドを hc・Herdr・Orca の別の端末（タブ）で流し、出力・終了コード・止まった理由をファイルに残す。
+// hc の端末（HC_TERMINAL_ID がある）なら hc の新しい端末、Herdr の中（HERDR_ENV=1）なら Herdr のタブ、
+// Orca の端末（ORCA_TERMINAL_HANDLE がある）なら、同じ作業フォルダーに作る Orca の端末のタブ。
 //
 //   node run-in-tab.mjs [--label <用途>] [--cwd <場所>] [--dir <置き場>] [--tail <行数>] [--expect <分>] -- '<コマンド>'
 //   node run-in-tab.mjs --attach <置き場> [--expect <分>]    待つ側だけが終わったときに、待ち直す
@@ -52,9 +53,37 @@ function orca(...args) {
   if (data.ok !== true) throw Object.assign(new Error(`orca ${args.slice(0, 2).join(' ')}: ${data.error?.message ?? out.trim()}`), { code: data.error?.code });
   return data.result;
 }
-// 両方の中にいれば Herdr を先にする（restart-sessions の scripts/lib/mux.mjs と同じ見分け方）。
-const inHerdr = () => process.env.HERDR_ENV === '1';
-const inOrca = () => !inHerdr() && Boolean(process.env.ORCA_TERMINAL_HANDLE);
+// hc の失敗は stderr に {"error":{"kind"}} で出る。kind を載せて投げる（restart-sessions の scripts/lib/hc.mjs と同じ読み方。変えるときは両方を直す）。
+// core が応えないときに待つ側が止まり続けないよう、15秒で打ち切る（ふだんは1回が数十ミリ秒）。
+// 中身の要らない kill・rm・send・keys・label は、終了コードが 0 なら出力が JSON でなくても成功とみなす。中身の要る run・get・read は、読めなければ投げる。
+// CLAUDE*・HERDR_* は外して呼ぶ。core が動いていなければ hc がその場で core を起動し、core はその環境をどの端末にも引き継ぐため
+// （claude の中から起動すると、そこで起動した claude が会話の記録を書かない。restart-sessions の scripts/lib/hc.mjs の hcEnv と同じ）。
+const hcEnv = () => Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(CLAUDE|HERDR_)/.test(key)));
+function hc(...args) {
+  let out;
+  try {
+    out = execFileSync('hc', [args[0], '--json', ...args.slice(1)], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 15_000, env: hcEnv() });
+  } catch (error) {
+    let kind;
+    try {
+      kind = JSON.parse(String(error.stderr ?? '')).error?.kind;
+    } catch {
+      // JSON でなければ kind は無い。
+    }
+    throw Object.assign(new Error(`hc ${args[0]}: ${String(error.stderr || error.message).trim()}`), { kind });
+  }
+  try {
+    return JSON.parse(out) ?? {};
+  } catch {
+    if (['kill', 'rm', 'send', 'keys', 'label'].includes(args[0])) return {};
+    throw new Error(`hc ${args[0]}: 出力を JSON として読めない: ${String(out).trim().slice(0, 200)}`);
+  }
+}
+// hc を一番先に見る。hc の端末は core を起動した環境の HERDR_ENV=1 を引き継ぐことがある。Herdr と Orca の両方の中にいれば Herdr を先にする
+// （restart-sessions の scripts/lib/mux.mjs と同じ見分け方）。
+const inHc = () => Boolean(process.env.HC_TERMINAL_ID);
+const inHerdr = () => !inHc() && process.env.HERDR_ENV === '1';
+const inOrca = () => !inHc() && !inHerdr() && Boolean(process.env.ORCA_TERMINAL_HANDLE);
 const jobFile = (dir) => path.join(dir, 'job.json');
 const logFile = (dir) => path.join(dir, 'output.log');
 const exitFile = (dir) => path.join(dir, 'exit.json');
@@ -184,8 +213,17 @@ function tailOf(file, lines) {
   return buffer.toString('utf8').trimEnd().split('\n').slice(-lines).join('\n');
 }
 
-// job.terminal があれば Orca の端末、無ければ Herdr のペインとタブ。待ち直し（--attach）でも、始めた側の道具で見る。
+// job.hc があれば hc の端末、job.terminal があれば Orca の端末、どちらも無ければ Herdr のペインとタブ。待ち直し（--attach）でも、始めた側の道具で見る。
 function paneIsGone(job) {
+  if (job.hc) {
+    try {
+      // hc の端末のプログラムは runner そのものなので、終わった（finished）なら、もう exit.json は書かれない。
+      return hc('get', job.hc).state !== 'live';
+    } catch (error) {
+      // core に一時的につながらないだけなら、消えたとみなさない。
+      return error.kind === 'not_found';
+    }
+  }
   if (job.terminal) {
     try {
       // 閉じた端末は、しばらく show が通り続け、connected が false になる（実測）。
@@ -207,7 +245,24 @@ function paneIsGone(job) {
 
 function closeTab(job) {
   try {
-    if (job.terminal) orca('terminal', 'close', '--terminal', job.terminal, '--tab');
+    if (job.hc) {
+      // rm は終わった端末しか外せない（生きていれば kind live で断る）ので、先に kill する。kill は終わるまで待って返す（実測）が、
+      // kill が失敗しても（既に外された・一時的につながらない）rm は試し、まだ生きていれば少し待つ。
+      try {
+        hc('kill', job.hc);
+      } catch {
+        // 下の rm で片付く場合がある。
+      }
+      for (let i = 0; i < 10; i += 1) {
+        try {
+          if (hc('get', job.hc).state !== 'live') break;
+        } catch {
+          break;
+        }
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
+      }
+      hc('rm', job.hc);
+    } else if (job.terminal) orca('terminal', 'close', '--terminal', job.terminal, '--tab');
     else herdr('tab', 'close', job.tab);
   } catch {
     // 既に閉じられていてもよい。
@@ -215,11 +270,13 @@ function closeTab(job) {
 }
 
 function readTabScreen(job) {
+  if (job.hc) return hc('read', job.hc).text.split('\n').slice(-20).join('\n');
   if (!job.terminal) return herdr('pane', 'read', job.pane, '--lines', '20');
   return (orca('terminal', 'read', '--terminal', job.terminal, '--screen').terminal?.tail ?? []).slice(-20).join('\n');
 }
 
-const screenCommand = (job) => (job.terminal ? `orca terminal read --terminal ${job.terminal} --screen` : `herdr pane read ${job.pane} --lines 20`);
+const screenCommand = (job) =>
+  job.hc ? `hc read ${job.hc}` : job.terminal ? `orca terminal read --terminal ${job.terminal} --screen` : `herdr pane read ${job.pane} --lines 20`;
 
 function overrunReport(dir, job, minutes, tailLines) {
   let grown = '';
@@ -231,7 +288,7 @@ function overrunReport(dir, job, minutes, tailLines) {
   }
   console.log(`--- ログの末尾 ${tailLines} 行 ---\n${tailOf(logFile(dir), tailLines)}\n---`);
   console.log(
-    `見込みの ${minutes} 分を過ぎても終わっていません。タブは動いたままです（${job.label}、${job.terminal ?? job.tab}）。\n${grown}` +
+    `見込みの ${minutes} 分を過ぎても終わっていません。タブは動いたままです（${job.label}、${job.hc ?? job.terminal ?? job.tab}）。\n${grown}` +
       `ログ: ${logFile(dir)}\n画面: ${screenCommand(job)}\n進んでいるかを確かめ、待ち直すなら --attach ${dir} --expect <分>、止めるならタブを閉じる。`,
   );
   return EXIT_OVERRUN;
@@ -273,7 +330,7 @@ async function waitFor(dir, tailLines, expectMinutes) {
       } catch {
         // 画面を読めなくても、始まらなかったことは伝える。
       }
-      console.log(`タブの中で処理が始まりませんでした。タブは残しています（${job.terminal ?? job.tab}）。\n${screen}`);
+      console.log(`タブの中で処理が始まりませんでした。タブは残しています（${job.hc ?? job.terminal ?? job.tab}）。\n${screen}`);
       return EXIT_NO_RECORD;
     }
     if (overdue) return overrunReport(dir, job, expectMinutes, tailLines);
@@ -330,6 +387,7 @@ function start({ command, label, cwd, dir }) {
   const jobCwd = path.resolve(cwd ?? process.cwd());
   const tabName = `${ownerName(jobCwd)}: ${name}`;
   const runCommand = `node "${fileURLToPath(import.meta.url)}" --runner "${jobDir}"`;
+  if (inHc()) return startInHc(jobDir, { command, cwd: jobCwd, label: tabName });
   if (inOrca()) return startInOrca(jobDir, { command, cwd: jobCwd, label: tabName }, runCommand);
   const workspace = process.env.HERDR_WORKSPACE_ID ? ['--workspace', process.env.HERDR_WORKSPACE_ID] : [];
   const created = JSON.parse(herdr('tab', 'create', ...workspace, '--cwd', jobCwd, '--label', tabName, '--no-focus')).result;
@@ -371,6 +429,42 @@ function startInOrca(jobDir, base, runCommand) {
   return jobDir;
 }
 
+// hc の新しい端末で、runner を端末のプログラムとして流す（シェルを挟まないので、引用もシェルの履歴も絡まない）。
+// - 名前は hc の規則（a-z 0-9 - _ を32字まで）に合わせたタブ名。生きた端末の間で一意なので、使われていれば -2, -3 … を付ける。
+// - --outlive-parent: 呼び出し元の端末の子にはなるが、呼び出し元（claude）が終わっても止めない。Herdr のタブと同じく、立て直しの間も処理を続けるため。
+// - --no-notify: 終わりの知らせを呼び出し元の入力に打ち込ませない。終わりは待つ側（waitFor）が読んで返す。
+// タブ名そのものはラベル run_in_tab に残す（名前にすると日本語などが落ちるため）。
+const HC_NAME_TRIES = 20;
+
+function hcName(label) {
+  const slug =
+    label
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, '-')
+      .replace(/-{2,}/g, '-')
+      .replace(/^-+|-+$/g, '') || 'run-in-tab';
+  return (n) => (n === 1 ? slug.slice(0, 32) : `${slug.slice(0, 32 - String(n).length - 1).replace(/-+$/, '')}-${n}`).replace(/-+$/, '');
+}
+
+function startInHc(jobDir, base) {
+  const nameOf = hcName(base.label);
+  const argv = [process.execPath, fileURLToPath(import.meta.url), '--runner', jobDir];
+  let created;
+  for (let n = 1; !created; n += 1) {
+    try {
+      created = hc('run', '--bg', '--outlive-parent', '--no-notify', '--cwd', base.cwd, '--name', nameOf(n), '--label', `run_in_tab=${base.label}`, '--', ...argv);
+    } catch (error) {
+      if (error.kind !== 'name_taken' || n >= HC_NAME_TRIES) throw error;
+    }
+  }
+  // address が無いまま進むと、後の処理が Herdr の側に倒れ、作った端末が閉じられずに残る。
+  if (!created?.address) throw new Error(`hc run の出力に address が無い（hc の出力の形が変わった可能性）。「${nameOf(1)}」の端末が残っていれば閉じること`);
+  const job = { ...base, hc: created.address, name: created.name ?? '' };
+  fs.writeFileSync(jobFile(jobDir), JSON.stringify(job, null, 2));
+  console.log(`タブ: ${base.label}（hc の端末 ${job.hc}${job.name ? `、${job.name}` : ''}）\n置き場: ${jobDir}`);
+  return jobDir;
+}
+
 async function main() {
   let options;
   try {
@@ -383,8 +477,8 @@ async function main() {
     runner(options.runner);
     return null;
   }
-  if (!inHerdr() && !inOrca()) {
-    console.error('Herdr の中でも Orca の端末でもないので、タブで流せません（HERDR_ENV=1 でも ORCA_TERMINAL_HANDLE でもない）。');
+  if (!inHc() && !inHerdr() && !inOrca()) {
+    console.error('hc の端末でも、Herdr の中でも Orca の端末でもないので、タブで流せません（HC_TERMINAL_ID が無く、HERDR_ENV=1 でも ORCA_TERMINAL_HANDLE でもない）。');
     return 2;
   }
   if (options.attach) return waitFor(options.attach, options.tail, options.expect);
