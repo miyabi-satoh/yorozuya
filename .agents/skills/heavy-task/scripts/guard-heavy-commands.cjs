@@ -135,8 +135,10 @@ function commandSegments(command, nested = false) {
     if (words.length === 0) continue;
     segments.push(words);
     // ペインへ送るコマンドの中の `herdr pane run` までは追わない。
-    const sendsToPane = words[0] === 'herdr' || words[0] === 'orca' || words[0] === 'hc' || (words[0] === 'node' && /(^|[\\/])run-in-tab\.mjs$/.test(words[1] ?? ''));
-    const sent = !nested && sendsToPane ? paneCommand(segment, quotes, words[0]) : null;
+    // hc はパスで書いても (`/usr/local/bin/hc run …`) 拾う。herdr・orca は語そのものだけを見る (前からの読み方のまま)。
+    const tool = /(^|[\\/])hc(\.exe)?$/.test(words[0]) ? 'hc' : words[0];
+    const sendsToPane = words[0] === 'herdr' || words[0] === 'orca' || tool === 'hc' || (words[0] === 'node' && /(^|[\\/])run-in-tab\.mjs$/.test(words[1] ?? ''));
+    const sent = !nested && sendsToPane ? paneCommand(segment, quotes, tool) : null;
     if (sent === null) continue;
     for (const inner of commandSegments(sent, true)) segments.push(Object.assign(inner, { inPane: true }));
   }

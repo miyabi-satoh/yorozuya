@@ -33,6 +33,7 @@ export function parseHcError(stderr) {
 // core が応えないときに、見張りや再起動が止まり続けないよう打ち切る。ふだんは1回が数十ミリ秒（実測）。
 // send は人の書きかけがあると最後のキーから60秒まで待つ（hc send --help）ので、その分を足す。
 const TIMEOUT_MS = 15_000;
+const NO_PAYLOAD = new Set(['kill', 'rm', 'send', 'keys', 'label']);
 const SEND_TIMEOUT_MS = 90_000;
 
 // hc に渡す環境。core が動いていなければ hc は呼ばれたその場で core を起動し、core はその環境を、以後に作るどの端末にも引き継ぐ。
@@ -42,8 +43,8 @@ export function hcEnv(env = process.env) {
 }
 
 // 成功なら出力の JSON、失敗なら null。--json はサブコマンドの直後に置く（引数の後ろに置くと、`--` の後の文として渡ってしまう）。
-// 終了コードが 0 なら成功とみなす。0.1.21 では kill・rm・send・keys・label も JSON を出す（実測）が、出力が空や JSON でなくても、
-// 操作は通っているので失敗にしない（中身の要る呼び出し側は、欲しい欄が無いことで気づく）。
+// 0.1.21 ではどのサブコマンドも JSON を出す（実測）。中身の要らないもの（NO_PAYLOAD）は、終了コードが 0 なら出力が空や JSON でなくても
+// 操作は通っているので成功にする。中身の要るもの（run・get・ls・read など）は、読めなければ失敗にする（空の結果を「無い」と読み違えないため）。
 export function hc(args, { env, timeout } = {}) {
   const run = spawnSync('hc', [args[0], '--json', ...args.slice(1)], {
     encoding: 'utf8',
@@ -57,11 +58,17 @@ export function hc(args, { env, timeout } = {}) {
     return null;
   }
   if (run.status === 0) {
-    lastError = '';
     try {
-      return JSON.parse(run.stdout) ?? {};
+      const data = JSON.parse(run.stdout) ?? {};
+      lastError = '';
+      return data;
     } catch {
-      return {};
+      if (NO_PAYLOAD.has(args[0])) {
+        lastError = '';
+        return {};
+      }
+      lastError = `hc の出力を JSON として読めない: ${String(run.stdout).trim().slice(0, 200)}`;
+      return null;
     }
   }
   const error = parseHcError(run.stderr ?? '');

@@ -92,9 +92,11 @@ if (guideProblem) skip(guideProblem);
 
 // --- ここから後戻りできない ---
 
+// 案内に載せるコマンドの引数。シェルに貼っても $ や ` が展開されないよう、POSIX のシングルクォートで包む（中の ' は '\'' にする）。
+const shellQuote = (value) => `'${String(value).replace(/'/g, `'\\''`)}'`;
 const request = `@${sent} 前セッションの引き継ぎ資料です。${HOW_TO_PROCEED}`;
 const recovery =
-  `新しいセッションで続けるなら、'hc run --bg --no-parent --cwd ${JSON.stringify(cwd)} claude' で起動し、上がったら '@${sent}' を打つ。` +
+  `新しいセッションで続けるなら、「hc run --bg --no-parent --cwd ${shellQuote(cwd)} claude」で起動し、上がったら '@${sent}' を打つ。` +
   `元の会話に戻るなら 'claude --resume ${sid}'`;
 
 // 入力欄に書きかけがあれば送らない。/exit が書きかけの末尾につながり、書きかけごと送信される（Herdr 版と同じ）。

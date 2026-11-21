@@ -72,10 +72,11 @@ export function orcaScreenOf(stdout: string): string | null {
 // hc は CLAUDE*・HERDR_* を外した環境で呼ぶ。core が動いていなければ hc がその場で core を起動し、core はその環境を以後のどの端末にも
 // 引き継ぐため（claude の中から起動すると、そこで起動した claude が会話の記録を書かない）。$.process.run の env は上書きしかできず
 // 変数を外せないので、node を挟んで外してから hc を起動する（scripts/lib/hc.mjs の hcEnv と同じ外し方）。
+// core が応えないときにターンの終わりの見張りが止まり続けないよう、hc は 15 秒で打ち切る（scripts/lib/hc.mjs と同じ。ふだんは数十ミリ秒）。
 export const HC_LAUNCHER =
   "const{spawnSync}=require('node:child_process');" +
   "const env=Object.fromEntries(Object.entries(process.env).filter(([k])=>!/^(CLAUDE|HERDR_)/.test(k)));" +
-  "const r=spawnSync('hc',process.argv.slice(1),{env,stdio:'inherit'});process.exit(r.status??1)"
+  "const r=spawnSync('hc',process.argv.slice(1),{env,stdio:'inherit',timeout:15000});process.exit(r.status??1)"
 export const hcArgv = (...args: string[]) => ['node', '-e', HC_LAUNCHER, ...args]
 
 // hc の read --json の結果から画面の文字を取る。読めなければ null（scripts/lib/hc.mjs の readScreen と同じ読み方）。

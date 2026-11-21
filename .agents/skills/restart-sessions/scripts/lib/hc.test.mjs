@@ -152,6 +152,8 @@ case "$1" in
   kill) touch '${bin}/killed'; echo '{"address":"t9","state":"finished"}' ;;
   rm) echo '{"removed":"t9"}' ;;
   ls) echo '{"terminals":[],"hidden_finished":0,"machines":[]}' ;;
+  keys) ;;
+  read) echo 'not json' ;;
   *) echo '{"error":{"kind":"not_found","message":"no terminal"}}' >&2; exit 3 ;;
 esac
 `,
@@ -186,7 +188,13 @@ test('閉じるときは kill してから、終わったのを見て rm する�
   const { call, seen } = fakeHc(t);
   assert.equal(call(`console.log(hc.closeTerminal('t9'));`).stdout.trim(), 'true');
   assert.deepEqual(seen(), ['t3|unsetunset|kill --json t9', 't3|unsetunset|get --json t9', 't3|unsetunset|rm --json t9']);
-  assert.equal(call(`console.log(hc.hc(['read', 't1']), hc.hcErrorKind());`).stdout.trim(), 'null not_found');
+  assert.equal(call(`console.log(hc.hc(['label', 't1']), hc.hcErrorKind());`).stdout.trim(), 'null not_found');
+});
+
+test('中身の要らない keys は出力が空でも成功、中身の要る read は JSON でなければ失敗', { skip: process.platform === 'win32' }, (t) => {
+  const { call } = fakeHc(t);
+  assert.equal(call(`console.log(JSON.stringify(hc.hc(['keys', 't9', 'enter'])));`).stdout.trim(), '{}');
+  assert.match(call(`console.log(hc.hc(['read', 't9']), hc.hcError());`).stdout.trim(), /^null hc の出力を JSON として読めない: not json$/);
 });
 
 test('道具は HC_TERMINAL_ID を一番先に見る（hc の端末は core を起動した環境の HERDR_ENV=1 を引き継ぐ）', () => {

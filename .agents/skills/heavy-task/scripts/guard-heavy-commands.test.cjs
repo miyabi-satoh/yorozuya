@@ -178,6 +178,9 @@ test('ほかの道具の引数に hc run が混ざっても、hc の形では読
   assert.deepEqual(sent('orca terminal send --terminal x --text cmd -- hc run foo'), ['cmd']);
   assert.deepEqual(sent("node run-in-tab.mjs --label fix-hc run -- 'npm test'"), ['npm test']);
   assert.deepEqual(sent('herdr pane run w1:p1 "hc run cargo test"'), ['hc run cargo test']);
+  // hc はパスで書いても拾う。
+  assert.deepEqual(sent('/usr/local/bin/hc run -- just ci'), ['just ci']);
+  assert.deepEqual(sent('~/.local/bin/hc send t3 "cargo test"'), ['cargo test']);
 });
 
 test('強行の印があれば通す', () => {
