@@ -14,6 +14,8 @@ import {
   sendStarted,
   sessionForTitle,
   sessionsForTitle,
+  mayCloseOldTerminal,
+  cursorOf,
   claudePidsFromPs,
   sameDir,
   stripTitle,
@@ -161,4 +163,24 @@ test('タイトルに当たる登録を全部返す。当たらなければ空�
   assert.equal(sessionsForTitle(twins, 'x-1/mac').length, 2);
   assert.deepEqual(sessionsForTitle(twins, 'clipkeep'), []);
   assert.deepEqual(sessionsForTitle(twins, null), []);
+});
+
+test('元の端末を閉じるのは、後から文のある出力が無く、当たる claude が新しいセッションだけか無いとき', () => {
+  const quiet = { tail: ['', '  '] };
+  const started = { pid: 10, sessionId: 'new' };
+  assert.equal(mayCloseOldTerminal(quiet, [], started), true);
+  assert.equal(mayCloseOldTerminal(quiet, [{ pid: 10, sessionId: 'new' }], started), true);
+  assert.equal(mayCloseOldTerminal(quiet, [{ pid: 11, sessionId: 'new' }], started), true);
+  assert.equal(mayCloseOldTerminal(quiet, [{ pid: 10, sessionId: 'new' }, { pid: 12, sessionId: 'other' }], started), false);
+  assert.equal(mayCloseOldTerminal(quiet, null, started), false);
+  assert.equal(mayCloseOldTerminal({ tail: ['…/repo ❯ echo x', 'x', ''] }, [], started), false);
+  assert.equal(mayCloseOldTerminal(null, [], started), false);
+});
+
+test('流れた出力の位置は数の形のときだけ使う', () => {
+  assert.equal(cursorOf({ terminal: { nextCursor: '4' } }), '4');
+  assert.equal(cursorOf({ terminal: { nextCursor: 7 } }), '7');
+  assert.equal(cursorOf({ terminal: { nextCursor: null } }), null);
+  assert.equal(cursorOf({ terminal: { nextCursor: 'abc' } }), null);
+  assert.equal(cursorOf(null), null);
 });

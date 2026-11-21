@@ -30,6 +30,8 @@ import {
   SEND_REFUSED,
   sessionForTitle,
   sessionsForTitle,
+  cursorOf,
+  mayCloseOldTerminal,
   sleep,
   stripTitle,
   submitAndConfirm,
@@ -152,7 +154,7 @@ if (!back) fail(`60秒たっても claude のプロセスが消えない。何�
 // 元の端末に後から出たものを見分ける目印。claude の終わりの表示とプロンプトが出きるのを少し待ってから、流れた出力の位置を控える。
 // 控えられなければ、元の端末は閉じない（後で何かが始まっていても見分けられないため）。
 sleep(2);
-const mark = orca(['terminal', 'read', '--terminal', handle])?.terminal?.nextCursor ?? null;
+const mark = cursorOf(orca(['terminal', 'read', '--terminal', handle]));
 
 log('起動');
 const tabTitle = newTitle || stripTitle(terminalInfo(handle)?.title);
@@ -175,13 +177,12 @@ if (submitted.result === 'resent') log('依頼が入力欄に残っていたの�
 
 // 新しいセッションが資料を受け取ってから、claude が終わって空いた元の端末を閉じる。先に閉じると、新しい側が上がらなかったときに、
 // 元の端末に残っていたもの（シェルの処理や、/exit の後に打たれた文）まで失う。
-// 待っている間に元の端末で何かが始まっていれば（ユーザーかほかのエージェントが打った）閉じない。控えた位置より後に文のある出力が無く、
-// タイトルに当たる生きた claude も1つも無いときだけ閉じる。読めない・見分けられないときも閉じない。閉じなくても、新しい端末で続けられる。
-const since = mark === null ? null : orca(['terminal', 'read', '--terminal', handle, '--cursor', String(mark)])?.terminal;
-const quiet = Array.isArray(since?.tail) && since.tail.every((line) => line.trim() === '');
+// 待っている間に元の端末で何かが始まっていれば（ユーザーかほかのエージェントが打った）閉じない（決め方は lib/orca.mjs の mayCloseOldTerminal）。
+// 読めない・見分けられないときも閉じない。閉じなくても、新しい端末で続けられる。
+const since = mark === null ? null : orca(['terminal', 'read', '--terminal', handle, '--cursor', mark])?.terminal ?? null;
 const now = terminalInfo(handle);
 const claudesThere = now ? sessionsForTitle(liveSessions(), now.title) : null;
-if (!quiet || claudesThere === null || claudesThere.length > 0) {
+if (!mayCloseOldTerminal(since, claudesThere, started)) {
   log(`元の端末 ${handle} は、後から何かが動いたか確かめられないので閉じない。用が済んでいれば 'orca terminal close --terminal ${handle}' で閉じること`);
 } else if (orca(['terminal', 'close', '--terminal', handle]) === null) {
   log(`元の端末 ${handle} を閉じられなかった（${orcaError()}）。'orca terminal close --terminal ${handle}' で閉じること`);

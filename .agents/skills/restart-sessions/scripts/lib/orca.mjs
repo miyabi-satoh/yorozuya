@@ -294,6 +294,21 @@ export function sameDir(a, b) {
   return left !== '' && left === (b ? real(b) : '');
 }
 
+// restart-orca が元の端末を閉じてよいか。since は控えた位置から読み直した terminal（読めなければ null）、
+// matches は元の端末の今のタイトルに当たる生きた登録（引けなければ null）、started は新しいセッションの登録。
+// 控えた位置より後に文のある出力が無く、新しいセッションのほかに当たる claude が1つも無いときだけ閉じる。
+export function mayCloseOldTerminal(since, matches, started) {
+  if (!Array.isArray(since?.tail) || !since.tail.every((line) => line.trim() === '')) return false;
+  if (!Array.isArray(matches)) return false;
+  return matches.every((entry) => entry.pid === started?.pid || entry.sessionId === started?.sessionId);
+}
+
+// 流れた出力の位置。数の形でなければ null（位置が分からないので、後から出たものを見分けられない）。
+export function cursorOf(read) {
+  const cursor = read?.terminal?.nextCursor;
+  return (typeof cursor === 'string' || typeof cursor === 'number') && /^\d+$/.test(String(cursor)) ? String(cursor) : null;
+}
+
 // --- 入力 ---
 
 // 入力欄に打ち込んで送る。claude と見分けた端末には、Orca が貼り付けとして入れてから Enter を送る。
