@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { test } = require('node:test');
-const { isHeavy, loadConfig, runsOutsideTab } = require('./guard-heavy-commands.cjs');
+const { commandSegments, isHeavy, loadConfig, runsOutsideTab } = require('./guard-heavy-commands.cjs');
 
 function projectWith(config) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'guard-heavy-'));
@@ -171,6 +171,13 @@ test('hc run・hc send で端末へ送るコマンドも、重いがタブの外
   for (const command of ['hc send t3 "just fmt"', 'hc read t3 --lines 40', 'hc ls', 'git commit -m "hc run cargo test を足す"', 'hc exec cargo build']) {
     assert.equal(heavy(bash(command)), false, command);
   }
+});
+
+test('ほかの道具の引数に hc run が混ざっても、hc の形では読まない（Herdr・Orca・run-in-tab の読み方のまま）', () => {
+  const sent = (command) => commandSegments(command).filter((words) => words.inPane).map((words) => words.join(' '));
+  assert.deepEqual(sent('orca terminal send --terminal x --text cmd -- hc run foo'), ['cmd']);
+  assert.deepEqual(sent("node run-in-tab.mjs --label fix-hc run -- 'npm test'"), ['npm test']);
+  assert.deepEqual(sent('herdr pane run w1:p1 "hc run cargo test"'), ['hc run cargo test']);
 });
 
 test('強行の印があれば通す', () => {

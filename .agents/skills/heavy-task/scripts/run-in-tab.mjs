@@ -54,9 +54,14 @@ function orca(...args) {
   return data.result;
 }
 // hc の失敗は stderr に {"error":{"kind"}} で出る。kind を載せて投げる（restart-sessions の scripts/lib/hc.mjs と同じ読み方。変えるときは両方を直す）。
+// core が応えないときに待つ側が止まり続けないよう、15秒で打ち切る（ふだんは1回が数十ミリ秒）。終了コードが 0 なら、出力が JSON でなくても成功とみなす。
+// CLAUDE*・HERDR_* は外して呼ぶ。core が動いていなければ hc がその場で core を起動し、core はその環境をどの端末にも引き継ぐため
+// （claude の中から起動すると、そこで起動した claude が会話の記録を書かない。restart-sessions の scripts/lib/hc.mjs の hcEnv と同じ）。
+const hcEnv = () => Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(CLAUDE|HERDR_)/.test(key)));
 function hc(...args) {
+  let out;
   try {
-    return JSON.parse(execFileSync('hc', [args[0], '--json', ...args.slice(1)], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
+    out = execFileSync('hc', [args[0], '--json', ...args.slice(1)], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 15_000, env: hcEnv() });
   } catch (error) {
     let kind;
     try {
@@ -64,7 +69,12 @@ function hc(...args) {
     } catch {
       // JSON でなければ kind は無い。
     }
-    throw Object.assign(new Error(`hc ${args[0]}: ${String(error.stderr ?? error.message).trim()}`), { kind });
+    throw Object.assign(new Error(`hc ${args[0]}: ${String(error.stderr || error.message).trim()}`), { kind });
+  }
+  try {
+    return JSON.parse(out) ?? {};
+  } catch {
+    return {};
   }
 }
 // hc を一番先に見る。hc の端末は core を起動した環境の HERDR_ENV=1 を引き継ぐことがある。Herdr と Orca の両方の中にいれば Herdr を先にする
@@ -234,8 +244,21 @@ function paneIsGone(job) {
 function closeTab(job) {
   try {
     if (job.hc) {
-      // 終わっていれば kill は何もしない。rm は終わった端末しか外せないので、先に kill する。
-      hc('kill', job.hc);
+      // rm は終わった端末しか外せない（生きていれば kind live で断る）ので、先に kill する。kill は終わるまで待って返す（実測）が、
+      // kill が失敗しても（既に外された・一時的につながらない）rm は試し、まだ生きていれば少し待つ。
+      try {
+        hc('kill', job.hc);
+      } catch {
+        // 下の rm で片付く場合がある。
+      }
+      for (let i = 0; i < 10; i += 1) {
+        try {
+          if (hc('get', job.hc).state !== 'live') break;
+        } catch {
+          break;
+        }
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
+      }
       hc('rm', job.hc);
     } else if (job.terminal) orca('terminal', 'close', '--terminal', job.terminal, '--tab');
     else herdr('tab', 'close', job.tab);

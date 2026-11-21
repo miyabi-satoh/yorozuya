@@ -94,7 +94,7 @@ if (guideProblem) skip(guideProblem);
 
 const request = `@${sent} 前セッションの引き継ぎ資料です。${HOW_TO_PROCEED}`;
 const recovery =
-  `新しいセッションで続けるなら、'hc run --bg --no-parent --cwd ${cwd} claude' で起動し、上がったら '@${sent}' を打つ。` +
+  `新しいセッションで続けるなら、'hc run --bg --no-parent --cwd ${JSON.stringify(cwd)} claude' で起動し、上がったら '@${sent}' を打つ。` +
   `元の会話に戻るなら 'claude --resume ${sid}'`;
 
 // 入力欄に書きかけがあれば送らない。/exit が書きかけの末尾につながり、書きかけごと送信される（Herdr 版と同じ）。
@@ -135,8 +135,9 @@ if (after.state === 'finished') {
   log(`元の端末 ${target} はシェルに戻ったので残す。用が済んでいれば 'hc kill ${target}' と 'hc rm ${target}' で閉じること`);
 }
 const taken = liveNames();
+const wanted = newName;
 if (newName && taken !== null) newName = successorName(newName, taken);
-if (newName && taken?.has(newName)) newName = '';
+if (wanted && !newName) log(`名前 ${wanted} とその代わりの名前がどれも使われているので、名前を付けずに起動する`);
 
 log('起動');
 const created = startClaude({ cwd, name: newName, request });

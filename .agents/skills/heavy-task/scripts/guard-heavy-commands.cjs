@@ -103,10 +103,12 @@ function commandWords(segment) {
 // 値を取る hc run のオプションは hc run --help のもの。hc exec は端末を作らずに流すので、ここに入れない (タブの外とみなす)。
 const HC_RUN_VALUE_OPTIONS = '--(?:name|cwd|on|label|parent|timeout)';
 
-function paneCommand(segment, quotes) {
+// hc の形は、区切りのコマンドの語が hc のときだけ当てる。ほかの道具の引数に hc run が混ざっても (`--text cmd -- hc run foo`・`--label fix-hc run`)、hc と読まないため。
+function paneCommand(segment, quotes, tool) {
   const toHc =
-    segment.match(new RegExp(`^(.*?\\bhc\\s+run\\s+(?:(?:${HC_RUN_VALUE_OPTIONS}(?:\\s+|=)\\S+|--[\\w-]+)\\s+)*(?:--\\s+)?)(\\S.*)$`, 's')) ??
-    segment.match(/^(.*?\bhc\s+send\s+(?:(?:--(?:if|timeout)(?:\s+|=)\S+|--[\w-]+)\s+)*(?:--\s+)?\S+\s+)(\S+)/s);
+    tool === 'hc' &&
+    (segment.match(new RegExp(`^(.*?\\bhc\\s+run\\s+(?:(?:${HC_RUN_VALUE_OPTIONS}(?:\\s+|=)\\S+|--[\\w-]+)\\s+)*(?:--\\s+)?)(\\S.*)$`, 's')) ??
+      segment.match(/^(.*?\bhc\s+send\s+(?:(?:--(?:if|timeout)(?:\s+|=)\S+|--[\w-]+)\s+)*(?:--\s+)?\S+\s+)(\S+)/s));
   if (toHc) {
     let next = (toHc[1].match(/''|""/g) ?? []).length;
     return toHc[2].replace(/''|""/g, () => quotes[next++] ?? '');
@@ -134,7 +136,7 @@ function commandSegments(command, nested = false) {
     segments.push(words);
     // ペインへ送るコマンドの中の `herdr pane run` までは追わない。
     const sendsToPane = words[0] === 'herdr' || words[0] === 'orca' || words[0] === 'hc' || (words[0] === 'node' && /(^|[\\/])run-in-tab\.mjs$/.test(words[1] ?? ''));
-    const sent = !nested && sendsToPane ? paneCommand(segment, quotes) : null;
+    const sent = !nested && sendsToPane ? paneCommand(segment, quotes, words[0]) : null;
     if (sent === null) continue;
     for (const inner of commandSegments(sent, true)) segments.push(Object.assign(inner, { inPane: true }));
   }

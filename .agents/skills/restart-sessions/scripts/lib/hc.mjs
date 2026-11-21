@@ -30,22 +30,38 @@ export function parseHcError(stderr) {
   }
 }
 
+// core が応えないときに、見張りや再起動が止まり続けないよう打ち切る。ふだんは1回が数十ミリ秒（実測）。
+// send は人の書きかけがあると最後のキーから60秒まで待つ（hc send --help）ので、その分を足す。
+const TIMEOUT_MS = 15_000;
+const SEND_TIMEOUT_MS = 90_000;
+
+// hc に渡す環境。core が動いていなければ hc は呼ばれたその場で core を起動し、core はその環境を、以後に作るどの端末にも引き継ぐ。
+// claude や Herdr の中から起動すると CLAUDE*・HERDR_* が全部の端末に入り、そこで起動した claude は会話の記録を書かない（実測）ので外す。
+export function hcEnv(env = process.env) {
+  return Object.fromEntries(Object.entries(env).filter(([key]) => !/^(CLAUDE|HERDR_)/.test(key)));
+}
+
 // 成功なら出力の JSON、失敗なら null。--json はサブコマンドの直後に置く（引数の後ろに置くと、`--` の後の文として渡ってしまう）。
-export function hc(args, { env } = {}) {
-  const run = spawnSync('hc', [args[0], '--json', ...args.slice(1)], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, env: env ?? process.env });
+// 終了コードが 0 なら成功とみなす。0.1.21 では kill・rm・send・keys・label も JSON を出す（実測）が、出力が空や JSON でなくても、
+// 操作は通っているので失敗にしない（中身の要る呼び出し側は、欲しい欄が無いことで気づく）。
+export function hc(args, { env, timeout } = {}) {
+  const run = spawnSync('hc', [args[0], '--json', ...args.slice(1)], {
+    encoding: 'utf8',
+    maxBuffer: 16 * 1024 * 1024,
+    env: env ?? hcEnv(),
+    timeout: timeout ?? (args[0] === 'send' ? SEND_TIMEOUT_MS : TIMEOUT_MS),
+  });
   lastKind = '';
   if (run.error) {
     lastError = String(run.error.message ?? run.error);
     return null;
   }
   if (run.status === 0) {
+    lastError = '';
     try {
-      const data = JSON.parse(run.stdout);
-      lastError = '';
-      return data ?? {};
+      return JSON.parse(run.stdout) ?? {};
     } catch {
-      lastError = `hc の出力を JSON として読めない: ${String(run.stdout).trim().slice(0, 200)}`;
-      return null;
+      return {};
     }
   }
   const error = parseHcError(run.stderr ?? '');
@@ -124,7 +140,7 @@ export function backgroundWorkHint(t) {
 // 呼び出し元の端末（HC_TERMINAL_ID）を外して送ると包まない（どちらも 0.1.21 で実測）。
 // 包まれると `/exit`・`/clear`・`@<資料>` が効かないので、外して、人が打ったのと同じ形で送る。
 export function rawEnv(env = process.env) {
-  const copy = { ...env };
+  const copy = hcEnv(env);
   delete copy.HC_TERMINAL_ID;
   return copy;
 }
@@ -190,10 +206,14 @@ export function liveNames() {
 
 // 立て直す先の名前。hc は名前を付け替えられず、名前は生きた端末の間で一意なので、旧の端末が生きている間は同じ名前を使えない。
 // 空いていればそのまま、旧が握っていれば `-2` を付ける（`-2` で終わる名前なら外す）。立て直すたびに2つの名前を行き来し、どちらも読める。
+// 行き来する先もほかの端末が握っていれば、-3 から -9 までの空いたものにする。どれも空いていなければ ''（名前を付けずに起動する）。
+// 外す後ろの数は自分で付ける -2〜-9 だけ（もとの名前の `-4b` などは外さない）。
 export function successorName(name, taken) {
   if (!name || !taken.has(name)) return name;
-  if (/-2$/.test(name)) return name.slice(0, -2);
-  return `${name.slice(0, 30).replace(/-+$/, '')}-2`;
+  const base = name.replace(/-[2-9]$/, '');
+  const suffixed = (n) => `${base.slice(0, 30).replace(/-+$/, '')}-${n}`;
+  const candidates = base === name ? [2, 3, 4, 5, 6, 7, 8, 9].map(suffixed) : [base, ...[2, 3, 4, 5, 6, 7, 8, 9].map(suffixed)];
+  return candidates.find((candidate) => candidate !== name && !taken.has(candidate)) ?? '';
 }
 
 // --- claude の起動 ---
@@ -213,15 +233,17 @@ export function sleep(seconds) {
 }
 
 // 起動した claude が依頼を受け取って動き出したか（startedOf は1回分の見方、waitForStart が待つ）。返すのは次のどれか。
-// - { result: 'started' }: working か done になった、またはターンが進んだ（短いターンは見る前に終わる）。
+// - { result: 'started' }: working になった、またはターンが進んだ（短いターンは見る前に終わる）。
 // - { result: 'blocked' }: 起動の時のダイアログ（フォルダーの信頼など）で止まっている。答えれば依頼の文を読み始める。
 // - { result: 'exited', info }: claude が終わって端末が閉じた。
 // - { result: 'unknown' }: 時間内にどれにもならなかった。
+// done だけでは数えない。起動したばかりの claude が、依頼を受け取る前に idle や done を知らせることがありうるため。
+// 短いターンを見落としても、ターンは working を抜けるたびに進む（hc schema の turn）ので、turn で拾える。
 export function startedOf(info) {
   if (!info) return null;
   if (info.state === 'finished') return 'exited';
   const status = statusOf(info);
-  if (status === 'working' || status === 'done' || (Number.isInteger(info.turn) && info.turn > 0)) return 'started';
+  if (status === 'working' || (Number.isInteger(info.turn) && info.turn > 0)) return 'started';
   if (status === 'blocked') return 'blocked';
   return null;
 }
@@ -237,9 +259,10 @@ export function waitForStart(t, seconds = 60) {
   return { result: 'unknown' };
 }
 
-// 端末を閉じる。終わっていなければ止めてから、一覧から外す。
+// 端末を閉じる。kill は終わるまで待って結果を返す（実測）が、kill が失敗しても rm は試す（既に終わっていれば rm だけで済む）。
+// rm は生きた端末を断る（kind live）ので、まだ生きていれば数秒待ってから外す。
 export function closeTerminal(t) {
-  const info = terminalInfo(t);
-  if (info?.state === 'live' && hc(['kill', t]) === null) return false;
+  hc(['kill', t]);
+  for (let i = 0; i < 10 && terminalInfo(t)?.state === 'live'; i += 1) sleep(1);
   return hc(['rm', t]) !== null;
 }

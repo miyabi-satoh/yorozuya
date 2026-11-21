@@ -75,6 +75,7 @@ if (!isAbsolute(cwd)) skip('端末の cwd を hc から取れない。新しい�
 const taken = liveNames();
 if (taken === null) skip(`hc の端末の一覧を取得できない（${hcError()}）`);
 const base = info.name || slugName(basename(cwd));
+// 代わりの名前がどれも使われていれば ''（名前を付けずに起動する）。
 const name = nameArg ?? successorName(base, taken);
 if (name && !NAME_PATTERN.test(name)) skip(`hc の名前の規則（英小文字・数字と _ - のみ・32字以内）に合わない: ${name}。2つ目の引数で名前を渡すこと`);
 if (name && taken.has(name)) skip(`名前 ${name} はほかの端末が使用中。別の名前を2つ目の引数で渡すこと`);

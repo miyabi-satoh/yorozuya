@@ -70,8 +70,8 @@ function setUp(
   on('process.run', (_$: any, e: any) => {
     runs.push(e.argv)
     if (e.argv[0] === 'claude') return { value: { exitCode: 0, stdout: `${s.installed ?? '2.1.289'} (Claude Code)\n`, stderr: '' } }
-    if (e.argv[0] === 'hc') {
-      if (e.argv[1] === 'get') return { value: { exitCode: 0, stdout: JSON.stringify(s.cwd === null ? {} : { cwd: s.cwd ?? '/w' }), stderr: '' } }
+    if (e.argv[0] === 'node' && e.argv[1] === '-e') {
+      if (e.argv[3] === 'get') return { value: { exitCode: 0, stdout: JSON.stringify(s.cwd === null ? {} : { cwd: s.cwd ?? '/w' }), stderr: '' } }
       return { value: { exitCode: 0, stdout: JSON.stringify({ text: s.screen ?? '', complete: true, how: 'screen' }), stderr: '' } }
     }
     if (e.argv[0] === 'orca') {
@@ -224,7 +224,7 @@ describe('hc の端末での見張り', () => {
     const sent = setUp(on, { percent: 80, hc: true, screen: '… /goal active (5m) …' })
     await $.turn.complete(turn)
     expect(sent).toEqual([])
-    expect(sent.runs.some(argv => argv[0] === 'hc' && argv[1] === 'read' && argv.includes('t3'))).toBe(true)
+    expect(sent.runs.some(argv => argv[0] === 'node' && argv[3] === 'read' && argv.includes('t3'))).toBe(true)
     expect(sent.runs.some(argv => argv[0] === 'herdr')).toBe(false)
   })
 

@@ -9,6 +9,7 @@
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { currentPane } from './herdr.mjs';
+import { hcEnv } from './hc.mjs';
 import { isHc, isOrca } from './mux.mjs';
 import { screenFromRead, selfSession } from './orca.mjs';
 
@@ -36,10 +37,9 @@ function claudePace(pane) {
   const fromApi = pace('pace.mjs', '', 10000);
   if (fromApi || !pane) return fromApi;
   let screen;
-  const read = (command, args) => execFileSync(command, args, { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] });
   try {
     screen = isHc()
-      ? (JSON.parse(read('hc', ['read', '--json', pane])).text ?? null)
+      ? (JSON.parse(execFileSync('hc', ['read', '--json', pane], { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'], env: hcEnv() })).text ?? null)
       : isOrca()
       ? screenFromRead(
           JSON.parse(

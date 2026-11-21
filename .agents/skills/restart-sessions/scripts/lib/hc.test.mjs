@@ -12,6 +12,7 @@ import {
   claudeTerminalsFrom,
   cwdOf,
   draftFromHcScreen,
+  hcEnv,
   isClaude,
   isLocal,
   parseHcError,
@@ -112,10 +113,17 @@ test('立て直す先の名前は、空いていればそのまま、旧が握�
   assert.equal(successorName('knowledge-4b-2', new Set(['knowledge-4b-2'])), 'knowledge-4b');
   assert.equal(successorName('', new Set()), '');
   assert.equal(successorName('a'.repeat(32), new Set(['a'.repeat(32)])).length, 32);
+  // 行き来する先もほかの端末が握っていれば、空いた番号にする。もとの名前の後ろの数（-4b など）は外さない。
+  assert.equal(successorName('knowledge-4b-2', new Set(['knowledge-4b-2', 'knowledge-4b'])), 'knowledge-4b-3');
+  assert.equal(successorName('knowledge-4b', new Set(['knowledge-4b', 'knowledge-4b-2'])), 'knowledge-4b-3');
+  const all = new Set(['x', ...[2, 3, 4, 5, 6, 7, 8, 9].map((n) => `x-${n}`)]);
+  assert.equal(successorName('x', all), '');
 });
 
 test('動き出したかは、working・done・ターンが進んだかで見る。終わった端末・ダイアログはそれぞれ分ける', () => {
   assert.equal(startedOf(claudeInfo({ status: { state: 'working' } })), 'started');
+  // 起動したばかりの done は、依頼を受け取ったしるしにしない。
+  assert.equal(startedOf(claudeInfo({ status: { state: 'done' }, turn: 0 })), null);
   assert.equal(startedOf(claudeInfo({ status: { state: 'idle' }, turn: 1 })), 'started');
   assert.equal(startedOf(claudeInfo({ status: { state: 'blocked' } })), 'blocked');
   assert.equal(startedOf(claudeInfo({ state: 'finished' })), 'exited');
@@ -123,8 +131,10 @@ test('動き出したかは、working・done・ターンが進んだかで見る
   assert.equal(startedOf(null), null);
 });
 
-test('送るときは呼び出し元の端末（HC_TERMINAL_ID）を外す。ほかの環境はそのまま', () => {
-  assert.deepEqual(rawEnv({ HC_TERMINAL_ID: 't3', HC_SCOPE: 's', PATH: '/bin' }), { HC_SCOPE: 's', PATH: '/bin' });
+test('hc に渡す環境から CLAUDE*・HERDR_* を外す（core を起動すると全部の端末に引き継がれるため）。送るときは HC_TERMINAL_ID も外す', () => {
+  const env = { HC_TERMINAL_ID: 't3', HC_SCOPE: 's', PATH: '/bin', CLAUDE_CODE_CHILD_SESSION: '1', CLAUDECODE: '1', HERDR_ENV: '1', HERDR_PANE_ID: 'w1:p2' };
+  assert.deepEqual(hcEnv(env), { HC_TERMINAL_ID: 't3', HC_SCOPE: 's', PATH: '/bin' });
+  assert.deepEqual(rawEnv(env), { HC_SCOPE: 's', PATH: '/bin' });
 });
 
 // 偽物の hc。引数と HC_TERMINAL_ID を1行ずつ書き残し、サブコマンドごとに決まった出力を返す。
@@ -134,12 +144,12 @@ function fakeHc(t) {
   fs.writeFileSync(
     path.join(bin, 'hc'),
     `#!/bin/sh
-printf '%s|%s\\n' "\${HC_TERMINAL_ID-unset}" "$*" >> '${calls}'
+printf '%s|%s|%s\\n' "\${HC_TERMINAL_ID-unset}" "\${CLAUDE_CODE_CHILD_SESSION-unset}\${HERDR_ENV-unset}" "$*" >> '${calls}'
 case "$1" in
   send) echo '{"started":true,"status":"idle","turn":0}' ;;
   run) echo '{"address":"t9","agent":"claude","cwd":"/w","name":"x","state":"live","turn":0}' ;;
-  get) echo '{"address":"t9","state":"live"}' ;;
-  kill) echo '{"address":"t9","state":"finished"}' ;;
+  get) if [ -e '${bin}/killed' ]; then echo '{"address":"t9","state":"finished"}'; else echo '{"address":"t9","state":"live"}'; fi ;;
+  kill) touch '${bin}/killed'; echo '{"address":"t9","state":"finished"}' ;;
   rm) echo '{"removed":"t9"}' ;;
   ls) echo '{"terminals":[],"hidden_finished":0,"machines":[]}' ;;
   *) echo '{"error":{"kind":"not_found","message":"no terminal"}}' >&2; exit 3 ;;
@@ -152,7 +162,7 @@ esac
   const call = (code) =>
     spawnSync(process.execPath, ['--input-type=module', '-e', `import * as hc from ${JSON.stringify(lib)}; ${code}`], {
       encoding: 'utf8',
-      env: { PATH: `${bin}${path.delimiter}${process.env.PATH}`, HC_TERMINAL_ID: 't3' },
+      env: { PATH: `${bin}${path.delimiter}${process.env.PATH}`, HC_TERMINAL_ID: 't3', CLAUDE_CODE_CHILD_SESSION: '1', HERDR_ENV: '1' },
     });
   const seen = () => fs.readFileSync(calls, 'utf8').trim().split('\n');
   return { call, seen };
@@ -162,20 +172,20 @@ test('送る文は -- の後に置き、呼び出し元の端末を外して hc 
   const { call, seen } = fakeHc(t);
   const result = call(`console.log(hc.prompt('t5', '/exit'));`);
   assert.equal(result.stdout.trim(), 'true');
-  assert.deepEqual(seen(), ['unset|send --json -- t5 /exit']);
+  assert.deepEqual(seen(), ['unset|unsetunset|send --json -- t5 /exit']);
 });
 
 test('claude は呼び出し元の子にせず、依頼を引数で渡して起動する', { skip: process.platform === 'win32' }, (t) => {
   const { call, seen } = fakeHc(t);
   const result = call(`console.log(hc.startClaude({ cwd: '/w', name: 'knowledge-4b-2', request: '@/tmp/a.md 読むこと' }));`);
   assert.equal(result.stdout.trim(), 't9');
-  assert.deepEqual(seen(), ['t3|run --json --bg --no-parent --cwd /w --name knowledge-4b-2 -- claude @/tmp/a.md 読むこと']);
+  assert.deepEqual(seen(), ['t3|unsetunset|run --json --bg --no-parent --cwd /w --name knowledge-4b-2 -- claude @/tmp/a.md 読むこと']);
 });
 
-test('閉じるときは、生きていれば kill してから rm する。失敗は kind で読める', { skip: process.platform === 'win32' }, (t) => {
+test('閉じるときは kill してから、終わったのを見て rm する。失敗は kind で読める', { skip: process.platform === 'win32' }, (t) => {
   const { call, seen } = fakeHc(t);
   assert.equal(call(`console.log(hc.closeTerminal('t9'));`).stdout.trim(), 'true');
-  assert.deepEqual(seen(), ['t3|get --json t9', 't3|kill --json t9', 't3|rm --json t9']);
+  assert.deepEqual(seen(), ['t3|unsetunset|kill --json t9', 't3|unsetunset|get --json t9', 't3|unsetunset|rm --json t9']);
   assert.equal(call(`console.log(hc.hc(['read', 't1']), hc.hcErrorKind());`).stdout.trim(), 'null not_found');
 });
 
