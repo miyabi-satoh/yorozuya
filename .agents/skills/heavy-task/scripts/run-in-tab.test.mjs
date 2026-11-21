@@ -1,5 +1,6 @@
 // node --test scripts/run-in-tab.test.mjs
-// herdr と orca は、タブの動きだけを真似た偽物を PATH の先頭に置いて試す。
+// hc・herdr・orca は、タブの動きだけを真似た偽物を PATH の先頭に置いて試す。
+// どの偽物でも HC_TERMINAL_ID を外す（hc の端末の中で試しても、hc を一番先に見る判定に入らないため）。
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -29,7 +30,7 @@ esac
 `,
     { mode: 0o755 },
   );
-  const env = { ...process.env, HERDR_ENV: '1', PATH: `${bin}${path.delimiter}${process.env.PATH}`, SHELL: '/bin/sh' };
+  const env = { ...process.env, HC_TERMINAL_ID: '', HERDR_ENV: '1', PATH: `${bin}${path.delimiter}${process.env.PATH}`, SHELL: '/bin/sh' };
   return { env, state };
 }
 
@@ -59,8 +60,47 @@ esac
     { mode: 0o755 },
   );
   // HERDR_ENV を外すのは、Herdr の中で試しても Orca の側を通すため。
-  const env = { ...process.env, HERDR_ENV: '', ORCA_TERMINAL_HANDLE: 'term_self', ORCA_WORKTREE_ID: 'r1::/w', PATH: `${bin}${path.delimiter}${process.env.PATH}`, SHELL: '/bin/sh' };
+  const env = { ...process.env, HC_TERMINAL_ID: '', HERDR_ENV: '', ORCA_TERMINAL_HANDLE: 'term_self', ORCA_WORKTREE_ID: 'r1::/w', PATH: `${bin}${path.delimiter}${process.env.PATH}`, SHELL: '/bin/sh' };
   return { env, state };
+}
+
+// hc の偽物。出力の形は hc 0.1.21 の --json に合わせる（成功は stdout、失敗は stderr の {"error":{"kind"}}）。
+// run は -- の後の argv を後ろで流し、終わったら finished にする。名前の taken-<名前> があれば name_taken で断る。
+function fakeHc() {
+  const bin = tmp();
+  const state = tmp();
+  fs.writeFileSync(
+    path.join(bin, 'hc'),
+    `#!/bin/sh
+state='${state}'
+sub="$1"
+shift
+printf '%s\\n' "$sub $*" >> "$state/calls"
+case "$sub" in
+  run)
+    name=''
+    while [ $# -gt 0 ] && [ "$1" != '--' ]; do
+      case "$1" in --name) name="$2"; shift ;; esac
+      shift
+    done
+    shift
+    if [ -e "$state/taken-$name" ]; then echo '{"error":{"kind":"name_taken","message":"taken"}}' >&2; exit 1; fi
+    { [ -e "$state/no-run" ] || "$@"; touch "$state/finished"; } >/dev/null 2>&1 &
+    echo "{\\"address\\":\\"t9\\",\\"name\\":\\"$name\\",\\"state\\":\\"live\\"}" ;;
+  get)
+    if [ -e "$state/gone" ]; then echo '{"error":{"kind":"not_found","message":"no terminal"}}' >&2; exit 3; fi
+    if [ -e "$state/finished" ]; then echo '{"address":"t9","state":"finished"}'; else echo '{"address":"t9","state":"live"}'; fi ;;
+  read) echo '{"text":"screen","complete":true,"how":"screen"}' ;;
+  kill) touch "$state/killed"; echo '{"address":"t9","state":"finished"}' ;;
+  rm) touch "$state/closed"; echo '{"removed":"t9"}' ;;
+esac
+`,
+    { mode: 0o755 },
+  );
+  // HERDR_ENV=1 も入れておく。hc の端末は core を起動した環境の HERDR_ENV を引き継ぐことがあり、それでも hc を先にする。
+  const env = { ...process.env, HC_TERMINAL_ID: 't3', HERDR_ENV: '1', ORCA_TERMINAL_HANDLE: '', PATH: `${bin}${path.delimiter}${process.env.PATH}`, SHELL: '/bin/sh' };
+  const calls = () => fs.readFileSync(path.join(state, 'calls'), 'utf8').trim().split('\n');
+  return { env, state, calls };
 }
 
 function run(env, ...args) {
@@ -198,7 +238,7 @@ test('引用でまとめないコマンドは断る', () => {
 
 test('Herdr の中でも Orca の端末でもなければ流さない', () => {
   const { env } = fakeHerdr();
-  const result = run({ ...env, HERDR_ENV: '', ORCA_TERMINAL_HANDLE: '' }, '--', 'echo x');
+  const result = run({ ...env, HC_TERMINAL_ID: '', HERDR_ENV: '', ORCA_TERMINAL_HANDLE: '' }, '--', 'echo x');
   assert.equal(result.status, 2);
   assert.match(result.stderr, /Herdr の中でも Orca の端末でもない/);
 });
@@ -254,3 +294,53 @@ test('Orca の端末を作った出力にハンドルが無ければ、流さず
   assert.equal(fs.existsSync(path.join(state, 'sent')), false);
 });
 
+
+test('hc の端末では、HERDR_ENV=1 があっても hc の新しい端末で runner を流し、出力と終了コードを残して閉じる', () => {
+  const { env, state, calls } = fakeHc();
+  const dir = tmp();
+  const result = run({ ...env, CLAUDE_PID: '' }, '--dir', dir, '--label', 'dev-server', '--cwd', dir, '--', 'echo out; exit 4');
+  assert.equal(result.status, 4);
+  assert.match(fs.readFileSync(path.join(dir, 'output.log'), 'utf8'), /^out$/m);
+  const job = JSON.parse(fs.readFileSync(path.join(dir, 'job.json'), 'utf8'));
+  assert.equal(job.hc, 't9');
+  const [started] = calls();
+  // runner はシェルを挟まず端末のプログラムにする。呼び出し元が終わっても止めず、終わりの知らせは打ち込ませない。
+  assert.match(started, /^run --json --bg --outlive-parent --no-notify --cwd \S+ --name [a-z0-9_-]{1,32} --label run_in_tab=.*: dev-server -- \S+node\S* \S+run-in-tab\.mjs --runner /);
+  assert.equal(fs.existsSync(path.join(state, 'closed')), true);
+});
+
+test('hc の名前が使われていれば、-2 を付けて作り直す', () => {
+  const { env, state, calls } = fakeHc();
+  const home = tmp();
+  fs.mkdirSync(path.join(home, '.claude', 'sessions'), { recursive: true });
+  fs.writeFileSync(path.join(home, '.claude', 'sessions', '999.json'), JSON.stringify({ name: 'repo-ab' }));
+  // タブ名「repo-ab: 検査」は、日本語が落ちて repo-ab になる。
+  fs.writeFileSync(path.join(state, 'taken-repo-ab'), '');
+  const result = run({ ...env, HOME: home, CLAUDE_PID: '999' }, '--label', '検査', '--', 'exit 0');
+  assert.equal(result.status, 0);
+  const names = calls()
+    .filter((line) => line.startsWith('run '))
+    .map((line) => line.match(/--name (\S+)/)[1]);
+  assert.deepEqual(names, ['repo-ab', 'repo-ab-2']);
+});
+
+test('見込みを過ぎたら、hc の端末を閉じずに待つのをやめ、hc read を案内する', () => {
+  const { env, state } = fakeHc();
+  const dir = tmp();
+  const result = run(env, '--dir', dir, '--expect', '0.03', '--', 'echo started; sleep 4');
+  assert.equal(result.status, 124);
+  assert.match(result.stdout, /hc read t9/);
+  assert.equal(fs.existsSync(path.join(state, 'closed')), false);
+});
+
+test('hc の端末が終わりを記録しないまま終わった・消えたら、そう報告する', () => {
+  for (const mark of ['finished', 'gone']) {
+    const { env, state } = fakeHc();
+    fs.writeFileSync(path.join(state, mark), '');
+    const dir = tmp();
+    fs.writeFileSync(path.join(dir, 'job.json'), JSON.stringify({ hc: 't9' }));
+    const result = run(env, '--attach', dir);
+    assert.equal(result.status, 125);
+    assert.match(result.stdout, /タブが閉じられました/);
+  }
+});
