@@ -55,7 +55,7 @@ function orca(...args) {
 }
 // hc の失敗は stderr に {"error":{"kind"}} で出る。kind を載せて投げる（restart-sessions の scripts/lib/hc.mjs と同じ読み方。変えるときは両方を直す）。
 // core が応えないときに待つ側が止まり続けないよう、15秒で打ち切る（ふだんは1回が数十ミリ秒）。
-// 中身の要らない kill・rm は、終了コードが 0 なら出力が JSON でなくても成功とみなす。中身の要る run・get・read は、読めなければ投げる。
+// 中身の要らない kill・rm・send・keys・label は、終了コードが 0 なら出力が JSON でなくても成功とみなす。中身の要る run・get・read は、読めなければ投げる。
 // CLAUDE*・HERDR_* は外して呼ぶ。core が動いていなければ hc がその場で core を起動し、core はその環境をどの端末にも引き継ぐため
 // （claude の中から起動すると、そこで起動した claude が会話の記録を書かない。restart-sessions の scripts/lib/hc.mjs の hcEnv と同じ）。
 const hcEnv = () => Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(CLAUDE|HERDR_)/.test(key)));
@@ -75,7 +75,7 @@ function hc(...args) {
   try {
     return JSON.parse(out) ?? {};
   } catch {
-    if (['kill', 'rm'].includes(args[0])) return {};
+    if (['kill', 'rm', 'send', 'keys', 'label'].includes(args[0])) return {};
     throw new Error(`hc ${args[0]}: 出力を JSON として読めない: ${String(out).trim().slice(0, 200)}`);
   }
 }
