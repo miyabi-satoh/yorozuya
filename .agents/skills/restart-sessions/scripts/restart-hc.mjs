@@ -21,6 +21,7 @@ import {
   inputDraft,
   isClaude,
   liveNames,
+  markRestarting,
   prompt,
   selfId,
   SEND_REFUSED,
@@ -108,9 +109,13 @@ if (draft) {
 
 log(`旧セッション ${sid}（止まったまま残ったら、claude --resume ${sid} で元の会話に戻れる）`);
 log('終了');
+if (!markRestarting(target)) log(`端末 ${target} にラベル restarting を付けられなかった（${hcError()}）。rencon のタイルは移らずに閉じる`);
 if (!prompt(target, '/exit')) {
   const error = hcError();
-  if (SEND_REFUSED.has(hcErrorKind())) skip(`/exit を送れなかった（${error}）。対象はそのまま動いている`);
+  if (SEND_REFUSED.has(hcErrorKind())) {
+    markRestarting(target, false);
+    skip(`/exit を送れなかった（${error}）。対象はそのまま動いている`);
+  }
   fail(`/exit の送信が失敗した（${error || '理由不明'}）。対象が終了したまま起動されていないかもしれない。'hc read ${target}' で見ること。claude が動いていれば、入力欄に /exit が残っていないか確かめて消す。終わっていれば、${recovery}`);
 }
 
@@ -124,16 +129,21 @@ for (let i = 0; i < 60; i += 1) {
     break;
   }
   if (now && statusOf(now) === 'blocked') {
+    markRestarting(target, false);
     fail(`/exit の後に確認画面が出ている。端末で答えてもらうこと。キャンセルして claude が動き続けているなら何も変わっていないので、同じ引数で呼び直せる。終了したら、${recovery}`);
   }
 }
-if (!after) fail(`60秒たっても claude が終わらない。'hc read ${target}' で見ること。終了していたら、${recovery}`);
+if (!after) {
+  markRestarting(target, false);
+  fail(`60秒たっても claude が終わらない。'hc read ${target}' で見ること。終了していたら、${recovery}`);
+}
 
 // 端末ごと終わったなら外して名前を空ける。シェルに戻った端末は残す。
 let newName = info.name ?? '';
 if (after.state === 'finished') {
   if (hc(['rm', target]) === null) log(`終わった端末 ${target} を外せなかった（${hcError()}）。名前が空かなければ別の名前で作る`);
 } else {
+  markRestarting(target, false);
   log(`元の端末 ${target} はシェルに戻ったので残す。用が済んでいれば 'hc kill ${target}' と 'hc rm ${target}' で閉じること`);
 }
 const taken = liveNames();

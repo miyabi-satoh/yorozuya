@@ -237,6 +237,12 @@ export function startClaude({ cwd, name, request, replaces }) {
   return created?.address ?? '';
 }
 
+// 立て直しの間だけ、旧の端末にラベル restarting=1 を付ける（on=false で外す）。rencon は、このラベルのある端末が終わってもタイルを閉じず、replaces=<この端末> の新しい端末を待つ。
+// restart.mjs は旧の端末を外してから新しい端末を作るので、その間にタイルが閉じないようにするため。付けられなくても再起動は進める（タイルが閉じるだけ）。
+export function markRestarting(t, on = true) {
+  return hc(['label', t, `restarting=${on ? '1' : ''}`]) !== null;
+}
+
 const slot = new Int32Array(new SharedArrayBuffer(4));
 export function sleep(seconds) {
   Atomics.wait(slot, 0, 0, seconds * 1000);
