@@ -218,7 +218,7 @@ export function backgroundWorkHint(pane) {
   return backgroundHintFromScreen(readScreen(pane));
 }
 
-// backgroundWorkHint の読み取りの本体。画面の文字を受け取る（orca.mjs も使う）。
+// backgroundWorkHint の読み取りの本体。画面の文字を受け取る（hc.mjs も使う）。
 export function backgroundHintFromScreen(screen) {
   if (screen === null) return null;
   const lines = screen.split('\n');

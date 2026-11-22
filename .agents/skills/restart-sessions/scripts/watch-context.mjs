@@ -9,7 +9,7 @@
 // 画面からの読み取りで後戻りできない操作まで進めない。読み違えても、依頼が早いか遅いかで済むようにする。
 //
 // stdout の1行が1件の知らせ（Monitor で受ける前提）。列と扱いは watch.md にある。
-// START は --start を付けたときだけ、Herdr か Orca の一覧が最初に取れた回に、その回の知らせより先に出す。
+// START は --start を付けたときだけ、Herdr か hc の一覧が最初に取れた回に、その回の知らせより先に出す。
 // 既定で出さないのは、Monitor で張り直すたびに START で起こされないため。`| grep -v '^START'` で落とす手は使わない。
 // Claude Code のシェルでは grep が別物（組み込みの ugrep のシェル関数）に差し替わっていて、走りっぱなしの入力では行が流れず、OVER も UPDATE も届かなくなる（2026-09-20 に実測）。
 // OVER・UPDATE・IDLE と WARN（ペインごと）はセッションごとに1回だけ出す。覚えているのはこのプロセスの中だけ。
@@ -196,7 +196,7 @@ function noticeRow(screen) {
 }
 
 function tick() {
-  // Herdr のペインか Orca の端末の claude（lib/mux.mjs の claudes）。id はペインIDか端末のハンドル。
+  // Herdr のペインか hc の端末の claude（lib/mux.mjs の claudes）。id はペインIDか端末の address。
   const claudes = listClaudes();
   if (!Array.isArray(claudes)) {
     listFailures += 1;

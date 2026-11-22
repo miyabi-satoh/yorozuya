@@ -1,5 +1,5 @@
 // node --test scripts/run-in-tab.test.mjs
-// hc・herdr・orca は、タブの動きだけを真似た偽物を PATH の先頭に置いて試す。
+// hc・herdr は、タブの動きだけを真似た偽物を PATH の先頭に置いて試す。
 // どの偽物でも HC_TERMINAL_ID を外す（hc の端末の中で試しても、hc を一番先に見る判定に入らないため）。
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
@@ -31,36 +31,6 @@ esac
     { mode: 0o755 },
   );
   const env = { ...process.env, HC_TERMINAL_ID: '', HERDR_ENV: '1', PATH: `${bin}${path.delimiter}${process.env.PATH}`, SHELL: '/bin/sh' };
-  return { env, state };
-}
-
-// Orca の偽物。出力の形は Orca 1.4.268 の --json に合わせる。send は --text の文（末尾の CR を外す）を後ろで流す。
-function fakeOrca() {
-  const bin = tmp();
-  const state = tmp();
-  fs.writeFileSync(
-    path.join(bin, 'orca'),
-    `#!/bin/sh
-state='${state}'
-sub="$1 $2"
-shift 2
-text=''
-while [ $# -gt 0 ]; do
-  case "$1" in --text) text="$2"; shift ;; esac
-  shift
-done
-case "$sub" in
-  'terminal create') if [ -e "$state/no-handle" ]; then echo '{"ok":true,"result":{"terminal":{}}}'; else echo '{"ok":true,"result":{"terminal":{"handle":"term_1"}}}'; fi ;;
-  'terminal send') printf '%s' "$text" > "$state/sent"; { [ -e "$state/no-run" ] || sh -c "$(printf '%s' "$text" | tr -d '\\r')"; } >/dev/null 2>&1 & echo '{"ok":true,"result":{"send":{"accepted":true}}}' ;;
-  'terminal show') if [ -e "$state/gone" ]; then echo '{"ok":false,"error":{"code":"terminal_handle_stale"}}'; exit 1; fi; echo '{"ok":true,"result":{"terminal":{"connected":true}}}' ;;
-  'terminal read') echo '{"ok":true,"result":{"terminal":{"tail":["screen"],"source":"screen"}}}' ;;
-  'terminal close') touch "$state/closed"; echo '{"ok":true,"result":{}}' ;;
-esac
-`,
-    { mode: 0o755 },
-  );
-  // HERDR_ENV を外すのは、Herdr の中で試しても Orca の側を通すため。
-  const env = { ...process.env, HC_TERMINAL_ID: '', HERDR_ENV: '', ORCA_TERMINAL_HANDLE: 'term_self', ORCA_WORKTREE_ID: 'r1::/w', PATH: `${bin}${path.delimiter}${process.env.PATH}`, SHELL: '/bin/sh' };
   return { env, state };
 }
 
@@ -98,7 +68,7 @@ esac
     { mode: 0o755 },
   );
   // HERDR_ENV=1 も入れておく。hc の端末は core を起動した環境の HERDR_ENV を引き継ぐことがあり、それでも hc を先にする。
-  const env = { ...process.env, HC_TERMINAL_ID: 't3', HERDR_ENV: '1', ORCA_TERMINAL_HANDLE: '', PATH: `${bin}${path.delimiter}${process.env.PATH}`, SHELL: '/bin/sh' };
+  const env = { ...process.env, HC_TERMINAL_ID: 't3', HERDR_ENV: '1', PATH: `${bin}${path.delimiter}${process.env.PATH}`, SHELL: '/bin/sh' };
   const calls = () => fs.readFileSync(path.join(state, 'calls'), 'utf8').trim().split('\n');
   return { env, state, calls };
 }
@@ -236,46 +206,14 @@ test('引用でまとめないコマンドは断る', () => {
   assert.match(result.stderr, /引用で1つ/);
 });
 
-test('Herdr の中でも Orca の端末でもなければ流さない', () => {
+test('hc の端末でも Herdr の中でもなければ流さない', () => {
   const { env } = fakeHerdr();
-  const result = run({ ...env, HC_TERMINAL_ID: '', HERDR_ENV: '', ORCA_TERMINAL_HANDLE: '' }, '--', 'echo x');
+  const result = run({ ...env, HC_TERMINAL_ID: '', HERDR_ENV: '' }, '--', 'echo x');
   assert.equal(result.status, 2);
-  assert.match(result.stderr, /Herdr の中でも Orca の端末でもない/);
+  assert.match(result.stderr, /hc の端末でも Herdr の中でもない/);
 });
 
-test('Orca の端末では、同じ作業フォルダーにタブを作り、出力と終了コードを残して閉じる', () => {
-  const { env, state } = fakeOrca();
-  const dir = tmp();
-  const result = run(env, '--dir', dir, '--', 'echo out; exit 4');
-  assert.equal(result.status, 4);
-  assert.match(fs.readFileSync(path.join(dir, 'output.log'), 'utf8'), /^out$/m);
-  assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'job.json'), 'utf8')).terminal, 'term_1');
-  // 起動のコマンドにせず、シェルへ打ち込む（末尾は Enter の CR）。
-  assert.match(fs.readFileSync(path.join(state, 'sent'), 'utf8'), /--runner ".*"\r$/);
-  assert.equal(fs.existsSync(path.join(state, 'closed')), true);
-});
-
-test('Orca の端末が終わりを記録しないまま閉じられたら、そう報告する', () => {
-  const { env, state } = fakeOrca();
-  fs.writeFileSync(path.join(state, 'gone'), '');
-  const dir = tmp();
-  fs.writeFileSync(path.join(dir, 'job.json'), JSON.stringify({ terminal: 'term_1' }));
-  const result = run(env, '--attach', dir);
-  assert.equal(result.status, 125);
-  assert.match(result.stdout, /タブが閉じられました/);
-});
-
-test('Orca の端末からは、同じ置き場の処理を2回は流さない', () => {
-  const dir = tmp();
-  fs.writeFileSync(path.join(dir, 'job.json'), JSON.stringify({ command: 'echo again', cwd: dir, terminal: 'term_1' }));
-  fs.writeFileSync(path.join(dir, 'output.log'), 'first\n');
-  const result = spawnSync('node', [script, '--runner', dir], { encoding: 'utf8', env: { ...process.env, SHELL: '/bin/sh' } });
-  assert.equal(result.status, 2);
-  assert.match(result.stderr, /一度流れています/);
-  assert.equal(fs.readFileSync(path.join(dir, 'output.log'), 'utf8'), 'first\n');
-});
-
-test('Herdr のタブでは、置き場にログがあっても分ける前のとおり続けて流す', () => {
+test('Herdr のタブでは、置き場にログがあっても続けて流す', () => {
   const dir = tmp();
   fs.writeFileSync(path.join(dir, 'job.json'), JSON.stringify({ command: 'echo again', cwd: dir, pane: 'w1:p1', tab: 'w1:t1' }));
   fs.writeFileSync(path.join(dir, 'output.log'), 'first\n');
@@ -283,17 +221,6 @@ test('Herdr のタブでは、置き場にログがあっても分ける前の�
   assert.equal(result.status, 0);
   assert.match(fs.readFileSync(path.join(dir, 'output.log'), 'utf8'), /^again$/m);
 });
-
-test('Orca の端末を作った出力にハンドルが無ければ、流さずに止まる', () => {
-  const { env, state } = fakeOrca();
-  fs.writeFileSync(path.join(state, 'no-handle'), '');
-  const dir = tmp();
-  const result = run(env, '--dir', dir, '--', 'echo x');
-  assert.equal(result.status, 1);
-  assert.match(result.stderr, /ハンドルが無い/);
-  assert.equal(fs.existsSync(path.join(state, 'sent')), false);
-});
-
 
 test('hc の端末では、HERDR_ENV=1 があっても hc の新しい端末で runner を流し、出力と終了コードを残して閉じる', () => {
   const { env, state, calls } = fakeHc();
