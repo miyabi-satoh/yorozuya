@@ -6,7 +6,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { fileURLToPath } from 'node:url';
 
 import {
   claudeTerminalsFrom,
@@ -160,7 +159,7 @@ esac
     { mode: 0o755 },
   );
   t.after(() => fs.rmSync(bin, { recursive: true, force: true }));
-  const lib = fileURLToPath(new URL('./hc.mjs', import.meta.url));
+  const lib = new URL('./hc.mjs', import.meta.url).href;
   const call = (code) =>
     spawnSync(process.execPath, ['--input-type=module', '-e', `import * as hc from ${JSON.stringify(lib)}; ${code}`], {
       encoding: 'utf8',
@@ -198,7 +197,7 @@ test('中身の要らない keys は出力が空でも成功、中身の要る r
 });
 
 test('道具は HC_TERMINAL_ID を一番先に見る（hc の端末は core を起動した環境の HERDR_ENV=1 を引き継ぐ）', () => {
-  const mux = fileURLToPath(new URL('./mux.mjs', import.meta.url));
+  const mux = new URL('./mux.mjs', import.meta.url).href;
   const which = (env) =>
     spawnSync(process.execPath, ['--input-type=module', '-e', `import { backend, label } from ${JSON.stringify(mux)}; console.log(String(backend()), label());`], {
       encoding: 'utf8',
