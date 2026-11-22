@@ -13,12 +13,13 @@ if ((tool === 'hc' || tool === 'herdr') && state) {
   const args = [path.basename(process.argv[1]), ...process.argv.slice(2)];
   const mark = (name) => path.join(state, name);
   // 後ろで流すものは、偽物が返った後も動き続けるよう切り離す。本物も送ったらすぐ返る。
-  const background = (command, argv, touchWhenDone) => {
+  // herdr pane run が受けるのはシェルに渡す1つの文字列、hc run が -- の後に受けるのはシェルを挟まない argv。
+  const background = ({ shell, command, argv = [], touchWhenDone = '' }) => {
     const waiter = `const { spawnSync } = require('node:child_process'); const fs = require('node:fs');` +
-      `const [cmd, done, ...argv] = JSON.parse(process.argv[1]);` +
-      `spawnSync(cmd, argv, { stdio: 'ignore', shell: argv.length === 0, windowsHide: true });` +
+      `const [shell, cmd, done, ...argv] = JSON.parse(process.argv[1]);` +
+      `spawnSync(cmd, argv, { stdio: 'ignore', shell, windowsHide: true });` +
       `if (done) fs.writeFileSync(done, '');`;
-    spawn(process.env.FAKE_TOOLS_NODE, ['-e', waiter, JSON.stringify([command, touchWhenDone ?? '', ...argv])], {
+    spawn(process.env.FAKE_TOOLS_NODE, ['-e', waiter, JSON.stringify([shell, command, touchWhenDone, ...argv])], {
       detached: true,
       stdio: 'ignore',
       windowsHide: true,
@@ -30,7 +31,7 @@ if ((tool === 'hc' || tool === 'herdr') && state) {
       fs.writeFileSync(mark('create-args'), `${args.join('\n')}\n`);
       console.log('{"result":{"root_pane":{"pane_id":"w1:p1"},"tab":{"tab_id":"w1:t1"}}}');
     } else if (a === 'pane' && b === 'run') {
-      if (!fs.existsSync(mark('no-run'))) background(args[3], []);
+      if (!fs.existsSync(mark('no-run'))) background({ shell: true, command: args[3] });
     } else if (a === 'pane' && b === 'get') {
       if (fs.existsSync(mark('gone'))) {
         console.log('{"error":{"code":"pane_not_found"}}');
@@ -56,7 +57,7 @@ if ((tool === 'hc' || tool === 'herdr') && state) {
     const name = options.includes('--name') ? options[options.indexOf('--name') + 1] : '';
     if (fs.existsSync(mark(`taken-${name}`))) fail('name_taken', 'taken', 1);
     // run は -- の後の argv を後ろで流し、終わったら finished にする。
-    if (!fs.existsSync(mark('no-run'))) background(rest[dash + 1], rest.slice(dash + 2), mark('finished'));
+    if (!fs.existsSync(mark('no-run'))) background({ shell: false, command: rest[dash + 1], argv: rest.slice(dash + 2), touchWhenDone: mark('finished') });
     else fs.writeFileSync(mark('finished'), '');
     console.log(JSON.stringify({ address: 't9', name, state: 'live' }));
   } else if (sub === 'get') {
