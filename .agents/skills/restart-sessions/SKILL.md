@@ -142,6 +142,7 @@ hc（herdr-core）の端末（`HC_TERMINAL_ID` がある）でも同じ手順で
 - 手順1: 対象は端末の address（`t1b` の形。ほかのマシンのものは `aero/t5`）と名前（`hc ls` の `name`。名前の無い端末なら address）で指す。状態は `hc get <address> --json` の `status.state`（claude が知らせる `idle`・`working`・`done`・`blocked`）。セッションIDは、claude の SessionStart の hook が付けるラベル `claude_transcript`（会話の記録のパス）のファイル名から `.jsonl` を除いたもの。`node scripts/watch-context.mjs --once --start` の知らせの列にも、address・名前・セッションIDが並ぶ（このマシンの端末だけ）。
 - 手順5: `scripts/restart.mjs <address> <名前> <資料の絶対パス>`。`/exit` して claude が終わったら、同じ cwd に新しい端末を作り、claude を起動のコマンドにして依頼を引数で渡す。claude が端末のプログラムなら、終わった端末を外して同じ名前で作る。シェルから起動した claude なら、シェルに戻った端末は残し、名前は `<名前>-2`（`-2` で終わる名前なら外した名前）にする（hc は名前を付け替えられず、生きた端末の間で一意なため）。`OK` の行の2列目は新しい端末の address、3列目はその名前。
 - 手順6: スクリプトが、新しい端末の claude が動き出した（`working`・`done` かターンが進んだ）のを確かめる。`OK` なら手順7へ。ダイアログで止まっていれば FAIL で、端末で答えてもらえば資料を読み始める。
+- 新しい端末には、ラベル `replaces=<旧の端末の address>` を付ける（再起動・自己再起動の両方）。rencon がこれを見て、旧の端末が終わるか外れたらタイルを新しい端末へ移す。シェルに戻った旧の端末は残るので、タイルは移らない。
 - 送るのは `hc send` だが、claude の端末の中から送ると hc が文を `<hc from=…>` で包み、`/exit` や `@<資料>` が効かない。手で送るときは `env -u HC_TERMINAL_ID hc send <address> "<文>"` とする（スクリプトはそうしている）。
 - 入力欄の書きかけは `hc read <address>` の画面から読む。色が無いので、薄字のサジェストでも書きかけとみなして止まる（`Try "…"` の案内だけは空とみなす）。
 - FAIL の後に手で戻すときは、`hc run --bg --no-parent --cwd <cwd> claude` で起動し、上がったら `@<資料>-with-guide.md` を打つ。`--no-parent` を外すと、起動した端末の子になり、親の端末が終わると一緒に終わる。

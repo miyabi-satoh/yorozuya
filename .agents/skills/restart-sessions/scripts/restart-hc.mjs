@@ -142,7 +142,7 @@ if (newName && taken !== null) newName = successorName(newName, taken);
 if (wanted && !newName) log(`名前 ${wanted} とその代わりの名前がどれも使われているので、名前を付けずに起動する`);
 
 log('起動');
-const created = startClaude({ cwd, name: newName, request });
+const created = startClaude({ cwd, name: newName, request, replaces: info.address });
 if (!created) fail(`新しい端末で claude を起動できなかった（${hcError()}）。${recovery}`);
 log(`新しい端末 ${created}${newName ? `（${newName}）` : ''}`);
 const started = waitForStart(created);
