@@ -49,8 +49,9 @@ const log = (message) => process.stderr.write(`[${name}] ${message}\n`);
 let restarting = false;
 const clearRestarting = () => {
   if (!restarting) return;
-  restarting = false;
-  if (!markRestarting(target, false)) log(`端末 ${target} のラベル restarting を外せなかった（${hcError()}）。'hc label ${target} restarting=' で外すこと`);
+  // 外せたときだけ下ろす。外せなければ、この後の SKIP・FAIL でもう一度試す。
+  if (markRestarting(target, false)) restarting = false;
+  else log(`端末 ${target} のラベル restarting を外せなかった（${hcError()}）。'hc label ${target} restarting=' で外すこと`);
 };
 const skip = (message) => {
   clearRestarting();
