@@ -49,6 +49,8 @@ export function hc(args, { env, timeout } = {}) {
   const run = spawnSync('hc', [args[0], '--json', ...args.slice(1)], {
     encoding: 'utf8',
     maxBuffer: 16 * 1024 * 1024,
+    // Windows では、コンソールを持たない親（idle-clear-self.mjs が detached で起こす --send の子）から呼ぶと、hc ごとにコンソールの窓が開くため。
+    windowsHide: true,
     env: env ?? hcEnv(),
     timeout: timeout ?? (args[0] === 'send' ? SEND_TIMEOUT_MS : TIMEOUT_MS),
   });

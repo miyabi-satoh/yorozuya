@@ -9,7 +9,8 @@ export function herdrError() {
 }
 
 export function herdr(args) {
-  const result = spawnSync('herdr', args, { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+  // windowsHide の理由は hc.mjs の hc() と同じ。
+  const result = spawnSync('herdr', args, { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, windowsHide: true });
   if (result.error) {
     lastError = String(result.error.message ?? result.error);
     return null;
