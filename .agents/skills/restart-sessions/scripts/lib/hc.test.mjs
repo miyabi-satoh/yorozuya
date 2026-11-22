@@ -204,7 +204,6 @@ test('道具は HC_TERMINAL_ID を一番先に見る（hc の端末は core を�
       encoding: 'utf8',
       env: { PATH: process.env.PATH, ...env },
     }).stdout.trim();
-  assert.equal(which({ HC_TERMINAL_ID: 't3', HERDR_ENV: '1', HERDR_PANE_ID: 'w1:p284', ORCA_TERMINAL_HANDLE: 'term_1' }), 'hc hc');
+  assert.equal(which({ HC_TERMINAL_ID: 't3', HERDR_ENV: '1', HERDR_PANE_ID: 'w1:p284' }), 'hc hc');
   assert.equal(which({ HC_TERMINAL_ID: '', HERDR_ENV: '1' }), 'herdr Herdr');
-  assert.equal(which({ ORCA_TERMINAL_HANDLE: 'term_1' }), 'orca Orca');
 });

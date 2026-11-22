@@ -1,4 +1,4 @@
-// herdr-core（hc）の CLI を叩く。herdr.mjs・orca.mjs と同じく、失敗は null で返し、判断は呼び出し側に残す。
+// herdr-core（hc）の CLI を叩く。herdr.mjs と同じく、失敗は null で返し、判断は呼び出し側に残す。
 // hc は 0.1.21 で確かめた。--json の出力は、成功なら結果そのものが stdout に、失敗なら {"error":{"kind","message"}} が stderr に出る。
 //
 // 端末は address（`t7`）で指す。名前でも引けるが、終わった端末の名前は外れて別の新しい端末が使えるので（実測）、引いた後は address を使う。
@@ -103,7 +103,7 @@ export function sessionIdOf(info) {
 }
 
 // 今その端末の前に出ているのが claude か。claude が終わってシェルに戻ると、ラベルは残るが前景はシェルになる。
-// 見分け方は orca.mjs の claudePidsFromPs と同じ（名前が claude か、`node …/claude …`）。
+// 名前が claude か、`node …/claude …`（npm で入れた版）なら claude と見る。
 export function isClaude(info) {
   if (info?.state !== 'live') return false;
   const fg = info.foreground;
@@ -125,7 +125,7 @@ export function readScreen(t) {
   return typeof text === 'string' ? text.replace(/\u00a0/g, ' ') : null;
 }
 
-// 入力欄の書きかけ。色が無いので薄字のサジェストを見分けられない。orca.mjs の draftFromRead と同じく、
+// 入力欄の書きかけ。色が無いので薄字のサジェストを見分けられない。
 // 案内の形（`Try "…"`）だけを空とみなし、ほかは書きかけとして止まる側に倒す。
 export function draftFromHcScreen(screen) {
   if (screen === null) return null;

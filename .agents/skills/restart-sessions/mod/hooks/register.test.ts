@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 
-import { hcCwdOf, hcScreenOf, IDLE_AFTER_MS, noticeRowOf, orcaScreenOf, thresholdOf, versionOf } from './register'
+import { hcCwdOf, hcScreenOf, IDLE_AFTER_MS, noticeRowOf, thresholdOf, versionOf } from './register'
 
 test('閾値は config.local.json の watch.threshold、無ければ 50', () => {
   expect(thresholdOf('{"watch":{"threshold":40}}')).toBe(40)
@@ -27,7 +27,6 @@ test('知らせの行は、入力欄の上枠のすぐ上の1行', () => {
 })
 
 // 使用率・入っている版・画面を決め、セッションに届いた知らせを集める。
-// orca を立てると、Herdr でなく Orca の端末として動かす（pane は端末のハンドル、worktree は ORCA_WORKTREE_ID）。
 // hc を立てると hc の端末として動かす（pane は HC_TERMINAL_ID、cwd は hc get の cwd）。hc の端末が引き継ぐ HERDR_ENV も入れておく。
 function setUp(
   on: any,
@@ -37,23 +36,16 @@ function setUp(
     installed?: string
     screen?: string
     herdr?: boolean
-    orca?: boolean
-    orcaFail?: boolean
     hc?: boolean
+    hcFail?: boolean
     cwd?: string | null
     pane?: string
-    worktree?: string | null
   },
 ) {
   const sent: string[] = []
   const runs: string[][] = []
   const env = (): Record<string, string> => {
     if (s.hc) return { HC_TERMINAL_ID: s.pane ?? 't3', HERDR_ENV: '1', HERDR_PANE_ID: 'w1:p1' }
-    if (s.orca) {
-      const env: Record<string, string> = { ORCA_TERMINAL_HANDLE: s.pane ?? 'term_1' }
-      if (s.worktree !== null) env.ORCA_WORKTREE_ID = s.worktree ?? 'r1::/w'
-      return env
-    }
     return s.herdr === false ? {} : { HERDR_ENV: '1', HERDR_PANE_ID: s.pane ?? 'w1:p1' }
   }
   on('env.get', (_$: any, e: any) => ({ value: env()[e.name] }))
@@ -71,13 +63,9 @@ function setUp(
     runs.push(e.argv)
     if (e.argv[0] === 'claude') return { value: { exitCode: 0, stdout: `${s.installed ?? '2.1.289'} (Claude Code)\n`, stderr: '' } }
     if (e.argv[0] === 'node' && e.argv[1] === '-e') {
+      if (s.hcFail) return { value: { exitCode: 1, stdout: '', stderr: '{"error":{"kind":"timeout","message":"core did not answer"}}' } }
       if (e.argv[3] === 'get') return { value: { exitCode: 0, stdout: JSON.stringify(s.cwd === null ? {} : { cwd: s.cwd ?? '/w' }), stderr: '' } }
       return { value: { exitCode: 0, stdout: JSON.stringify({ text: s.screen ?? '', complete: true, how: 'screen' }), stderr: '' } }
-    }
-    if (e.argv[0] === 'orca') {
-      if (s.orcaFail) return { value: { exitCode: 1, stdout: '{"ok":false,"error":{"code":"terminal_handle_stale"}}', stderr: '' } }
-      const tail = (s.screen ?? '').split('\n')
-      return { value: { exitCode: 0, stdout: JSON.stringify({ ok: true, result: { terminal: { tail, source: 'screen' } } }), stderr: '' } }
     }
     if (e.argv[1] === 'agent') {
       const agents = [{ name: 'knowledge-f3', pane_id: s.pane ?? 'w1:p1' }]
@@ -151,62 +139,11 @@ describe('ターンの終わりの見張り', () => {
     expect(sent).toEqual([])
   })
 
-  test('Herdr の中でも Orca の端末でもなければ知らせない', async ($, on) => {
+  test('Herdr の中でも hc の端末でもなければ知らせない', async ($, on) => {
     mock.clock(on, { now: 0 })
     const sent = setUp(on, { percent: 80, herdr: false })
     await $.turn.complete(turn)
     expect(sent).toEqual([])
-  })
-})
-
-test('Orca の画面は terminal read --screen の tail をつなぐ。描けなかったときは読めない扱い', () => {
-  expect(orcaScreenOf(JSON.stringify({ ok: true, result: { terminal: { tail: ['a', 'b'], source: 'screen' } } }))).toBe('a\nb')
-  expect(orcaScreenOf(JSON.stringify({ ok: true, result: { terminal: { tail: ['a'], source: 'screen-unavailable' } } }))).toBeNull()
-  expect(orcaScreenOf('not json')).toBeNull()
-})
-
-describe('Orca の端末での見張り', () => {
-  test('閾値を超えたら、自分を再起動するよう1回だけ知らせる', async ($, on) => {
-    mock.clock(on, { now: 0 })
-    const sent = setUp(on, { percent: 52, orca: true })
-    await $.turn.complete(turn)
-    await $.turn.complete(turn)
-    expect(sent.length).toBe(1)
-    expect(sent[0]).toContain('OVER 52%')
-  })
-
-  test('/goal が動いている間は知らせない。画面は orca で読む', async ($, on) => {
-    mock.clock(on, { now: 0 })
-    const sent = setUp(on, { percent: 80, orca: true, screen: '… /goal active (5m) …' })
-    await $.turn.complete(turn)
-    expect(sent).toEqual([])
-    expect(sent.runs.some(argv => argv[0] === 'orca' && argv.includes('--screen'))).toBe(true)
-  })
-
-  test('画面を読めなければ、/goal が動いているかもしれないので知らせない', async ($, on) => {
-    mock.clock(on, { now: 0 })
-    const sent = setUp(on, { percent: 80, orca: true, orcaFail: true })
-    await $.turn.complete(turn)
-    expect(sent).toEqual([])
-  })
-
-  test('作業フォルダーが分からなければ、自動更新の失敗は知らせない（ほかのセッションと鍵を分けられない）', async ($, on) => {
-    mock.clock(on, { now: 0 })
-    const sent = setUp(on, { percent: 10, orca: true, worktree: null, screen: screenWith('✘ Auto-update failed · Run claude doctor') })
-    await $.turn.complete(turn)
-    expect(sent).toEqual([])
-  })
-
-  test('自動更新の失敗は、作業フォルダーと版の組みごとに1回だけ（再起動で端末と名前が変わっても繰り返さない）', async ($, on) => {
-    mock.clock(on, { now: 0 })
-    const s = { percent: 10, orca: true, screen: screenWith('✘ Auto-update failed · Run claude doctor'), pane: 'term_1' }
-    const sent = setUp(on, s)
-    await $.turn.complete(turn)
-    s.pane = 'term_2'
-    await $.turn.complete(turn)
-    expect(sent.length).toBe(1)
-    expect(sent[0]).toContain('UPDATE FAILED 2.1.289')
-    expect(sent.runs.some(argv => argv[0] === 'herdr')).toBe(false)
   })
 })
 
@@ -248,6 +185,13 @@ describe('hc の端末での見張り', () => {
     expect(sent[0]).toContain('UPDATE FAILED 2.1.289')
   })
 
+  test('画面を読めなければ、/goal が動いているかもしれないので知らせない', async ($, on) => {
+    mock.clock(on, { now: 0 })
+    const sent = setUp(on, { percent: 80, hc: true, hcFail: true })
+    await $.turn.complete(turn)
+    expect(sent).toEqual([])
+  })
+
   test('作業フォルダーが分からなければ、自動更新の失敗は知らせない', async ($, on) => {
     mock.clock(on, { now: 0 })
     const sent = setUp(on, { percent: 10, hc: true, cwd: null, screen: screenWith('✘ Auto-update failed · Run claude doctor') })
@@ -270,8 +214,8 @@ describe('放置の /clear', () => {
     expect(idleRuns(sent.runs).length).toBe(1)
   })
 
-  test('Orca の端末でも流す', async ($, on) => {
-    const sent = setUp(on, { percent: 20, tokens: 200_000, orca: true })
+  test('hc の端末でも流す', async ($, on) => {
+    const sent = setUp(on, { percent: 20, tokens: 200_000, hc: true })
     const clock = mock.clock(on, { now: 0 })
     await ($.session as any).start({ source: 'startup', cwd: '/w' })
     await clock.advance(IDLE_AFTER_MS + 120_000)

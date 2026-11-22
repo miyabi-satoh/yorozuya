@@ -10,8 +10,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { currentPane } from './herdr.mjs';
 import { hcEnv } from './hc.mjs';
-import { isHc, isOrca } from './mux.mjs';
-import { screenFromRead, selfSession } from './orca.mjs';
+import { isHc } from './mux.mjs';
 
 const SCRIPTS = fileURLToPath(new URL('../../../weekly-pace/scripts/', import.meta.url));
 // Codex の5時間枠がここまで埋まっていたら、回しても rate limit で落ちるので添えない
@@ -40,16 +39,6 @@ function claudePace(pane) {
   try {
     screen = isHc()
       ? (JSON.parse(execFileSync('hc', ['read', '--json', pane], { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'], env: hcEnv() })).text ?? null)
-      : isOrca()
-      ? screenFromRead(
-          JSON.parse(
-            execFileSync('orca', ['terminal', 'read', '--terminal', pane, '--screen', '--json'], {
-              encoding: 'utf8',
-              timeout: 3000,
-              stdio: ['ignore', 'pipe', 'ignore'],
-            }),
-          ).result,
-        )
       : execFileSync('herdr', ['pane', 'read', pane, '--source', 'visible'], {
           encoding: 'utf8',
           timeout: 3000,
@@ -62,8 +51,8 @@ function claudePace(pane) {
   return pace('pace.mjs', screen, 3000);
 }
 
-// 既定は呼び出し元自身のペイン（Orca なら端末のハンドル、hc なら端末の address）。
-export function paceNote(pane = isHc() ? process.env.HC_TERMINAL_ID : isOrca() ? selfSession()?.handle : currentPane()?.pane_id) {
+// 既定は呼び出し元自身のペイン（hc なら端末の address）。
+export function paceNote(pane = isHc() ? process.env.HC_TERMINAL_ID : currentPane()?.pane_id) {
   const claude = claudePace(pane);
   if (!claude || claude.projected === null || claude.projected <= 100) return '';
 

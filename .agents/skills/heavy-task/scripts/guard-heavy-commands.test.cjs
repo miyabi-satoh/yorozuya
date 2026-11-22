@@ -139,23 +139,6 @@ test('設定の形が違えば読めないとする', () => {
   }
 });
 
-test('orca terminal で端末へ送るコマンドも、重いがタブの外ではないとみなす', () => {
-  const outside = (command) => runsOutsideTab(bash(command), config, () => true);
-  for (const command of [
-    'orca terminal create --worktree active --title t --command "just ci" --json',
-    "orca terminal send --terminal term_1 --text 'cargo test' --enter",
-    'orca terminal split --terminal term_1 --command "pnpm build"',
-    'orca terminal send --terminal t --text="npm run build" --enter',
-    "orca terminal create --command='cargo test'",
-  ]) {
-    assert.equal(heavy(bash(command)), true, command);
-    assert.equal(outside(command), false, command);
-  }
-  for (const command of ['orca terminal send --terminal term_1 --text "just fmt" --enter', 'orca terminal read --terminal term_1 --screen', 'orca terminal list --json']) {
-    assert.equal(heavy(bash(command)), false, command);
-  }
-});
-
 test('hc run・hc send で端末へ送るコマンドも、重いがタブの外ではないとみなす。hc exec は端末を作らないので見ない', () => {
   const outside = (command) => runsOutsideTab(bash(command), config, () => true);
   for (const command of [
@@ -173,9 +156,8 @@ test('hc run・hc send で端末へ送るコマンドも、重いがタブの外
   }
 });
 
-test('ほかの道具の引数に hc run が混ざっても、hc の形では読まない（Herdr・Orca・run-in-tab の読み方のまま）', () => {
+test('ほかの道具の引数に hc run が混ざっても、hc の形では読まない（Herdr・run-in-tab の読み方のまま）', () => {
   const sent = (command) => commandSegments(command).filter((words) => words.inPane).map((words) => words.join(' '));
-  assert.deepEqual(sent('orca terminal send --terminal x --text cmd -- hc run foo'), ['cmd']);
   assert.deepEqual(sent("node run-in-tab.mjs --label fix-hc run -- 'npm test'"), ['npm test']);
   assert.deepEqual(sent('herdr pane run w1:p1 "hc run cargo test"'), ['hc run cargo test']);
   // hc はパスで書いても拾う。
@@ -203,21 +185,20 @@ test('defaults が false なら、書いたものだけを見る', () => {
   assert.equal(isHeavy({ tool_name: 'Workflow', tool_input: {} }, own, () => true), false);
 });
 
-// 試す側が hc・Orca の端末や Herdr の中でも、タブへ回す判定に入らないよう、既定ではどれも外す。
+// 試す側が hc の端末や Herdr の中でも、タブへ回す判定に入らないよう、既定ではどれも外す。
 function runHook(projectDir, command, env = {}) {
   return spawnSync(process.execPath, [path.join(__dirname, 'guard-heavy-commands.cjs')], {
     input: JSON.stringify({ ...bash(command), cwd: projectDir }),
-    env: { ...process.env, HC_TERMINAL_ID: '', HERDR_ENV: '', ORCA_TERMINAL_HANDLE: '', CLAUDE_PROJECT_DIR: projectDir, ...env },
+    env: { ...process.env, HC_TERMINAL_ID: '', HERDR_ENV: '', CLAUDE_PROJECT_DIR: projectDir, ...env },
     encoding: 'utf8',
   });
 }
 
-test('Herdr の中か Orca の端末では、重い処理をタブの外で流すのを止め、その道具の名前で案内する', () => {
+test('Herdr の中では、重い処理をタブの外で流すのを止め、その道具の名前で案内する', () => {
   const project = projectWith(JSON.stringify({ heavy: ['just ci'] }));
   const reason = (env) => JSON.parse(runHook(project, 'just ci', env).stdout).hookSpecificOutput.permissionDecisionReason;
-  assert.match(reason({ ORCA_TERMINAL_HANDLE: 'term_1' }), /^重い処理は、Orca の別のタブで流してください/);
-  assert.match(reason({ HERDR_ENV: '1', ORCA_TERMINAL_HANDLE: 'term_1' }), /^重い処理は、Herdr の別のタブで流してください/);
-  assert.equal(runHook(project, "node run-in-tab.mjs -- 'just ci'", { ORCA_TERMINAL_HANDLE: 'term_1' }).stdout, '');
+  assert.match(reason({ HERDR_ENV: '1' }), /^重い処理は、Herdr の別のタブで流してください/);
+  assert.equal(runHook(project, "node run-in-tab.mjs -- 'just ci'", { HERDR_ENV: '1' }).stdout, '');
 });
 
 test('hc の端末では、HERDR_ENV=1 を引き継いでいても hc の別の端末で流すよう案内する', () => {

@@ -6,7 +6,7 @@
 //   入力が無ければ claude-usage.mjs（使用量 API）を自分で叩く。ふだんはこれでよい。
 //   stdin に claude-usage.mjs の JSON を渡してもよい。
 //   API で取れないときの予備として、ステータスラインの「Weekly: X% | Weekly Reset: Nd Hhr Mm」を含む画面のテキスト
-//   （--text か stdin。herdr pane read の出力をそのままパイプしてよい。Orca なら orca terminal read --screen --json の result.terminal.tail をつないだもの、hc なら hc read の出力）からも読める。
+//   （--text か stdin。herdr pane read の出力をそのままパイプしてよい。hc なら hc read の出力）からも読める。
 //   --json なら {pct, elapsedHours, remainingHours, activeElapsedHours, activeTotalHours, projected, verdict, primaryPct} を出す
 //   （判定不可のとき projected と verdict は null。primaryPct は5時間枠の使用率で、画面から読んだときは null）。
 //   --active-hours は稼働の時間帯（既定と環境変数は projection.mjs）。

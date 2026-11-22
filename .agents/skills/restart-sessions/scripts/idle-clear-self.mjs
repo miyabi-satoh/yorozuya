@@ -13,7 +13,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { sleep } from './lib/herdr.mjs';
-import { backgroundWorkHint, idleStatus, inputDraft, isHc, isOrca, lastError, prompt, self as selfOf } from './lib/mux.mjs';
+import { backgroundWorkHint, idleStatus, inputDraft, isHc, lastError, prompt, self as selfOf } from './lib/mux.mjs';
 
 const skip = (message) => {
   process.stderr.write(`[idle-clear-self] SKIP: ${message}\n`);
@@ -23,11 +23,11 @@ const skip = (message) => {
 const [, , mode, pane, handoff, shells] = process.argv;
 
 // 切り離した子: /clear を送り、画面が入れ替わるのを待ってから続きを送る。
-// Orca と hc の端末では、/clear を送れなければ続きを送らず、待つ間にユーザーが打ち始めたか何かが動き出していても送らない
+// hc の端末では、/clear を送れなければ続きを送らず、待つ間にユーザーが打ち始めたか何かが動き出していても送らない
 // （続きが打ちかけの末尾につながって送信されるため）。入力欄が読めない（/clear の後でまだ描かれていない）間は数回読み直し、
 // 書きかけが見えたときだけやめる。やめると /clear の後の会話に資料が渡らないので、読めないだけでは止めない。Herdr は分ける前のまま。
 if (mode === '--send') {
-  const careful = isOrca() || isHc();
+  const careful = isHc();
   if (!prompt(pane, '/clear') && careful) process.exit(1);
   sleep(3);
   if (careful) {
@@ -45,7 +45,7 @@ if (mode === '--send') {
   process.exit(0);
 }
 
-// Herdr のペイン・Orca の端末・hc の端末（lib/mux.mjs）。切り離した子は、親の環境を引き継ぐので同じ道具に送る。
+// Herdr のペイン・hc の端末（lib/mux.mjs）。切り離した子は、親の環境を引き継ぐので同じ道具に送る。
 const { id: self, sid } = selfOf();
 if (!self || !sid) skip(`自分のペインかセッションIDを特定できない（${lastError()}）`);
 
