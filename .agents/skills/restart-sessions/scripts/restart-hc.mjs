@@ -45,11 +45,20 @@ if (!target || !name || !handoff) {
 }
 
 const log = (message) => process.stderr.write(`[${name}] ${message}\n`);
+// 旧の端末に restarting を付けている間は true。旧が残ったまま止まるときは外す（残すと、後で旧が終わっても rencon がタイルを閉じず、来ない新しい端末を待ち続ける）。
+let restarting = false;
+const clearRestarting = () => {
+  if (!restarting) return;
+  restarting = false;
+  if (!markRestarting(target, false)) log(`端末 ${target} のラベル restarting を外せなかった（${hcError()}）。'hc label ${target} restarting=' で外すこと`);
+};
 const skip = (message) => {
+  clearRestarting();
   process.stderr.write(`[${name}] SKIP: ${message}\n`);
   process.exit(1);
 };
 const fail = (message) => {
+  clearRestarting();
   process.stderr.write(`[${name}] FAIL: ${message}\n`);
   process.exit(1);
 };
@@ -109,13 +118,11 @@ if (draft) {
 
 log(`旧セッション ${sid}（止まったまま残ったら、claude --resume ${sid} で元の会話に戻れる）`);
 log('終了');
-if (!markRestarting(target)) log(`端末 ${target} にラベル restarting を付けられなかった（${hcError()}）。rencon のタイルは移らずに閉じる`);
+restarting = markRestarting(target);
+if (!restarting) log(`端末 ${target} にラベル restarting を付けられなかった（${hcError()}）。rencon のタイルは移らずに閉じる`);
 if (!prompt(target, '/exit')) {
   const error = hcError();
-  if (SEND_REFUSED.has(hcErrorKind())) {
-    markRestarting(target, false);
-    skip(`/exit を送れなかった（${error}）。対象はそのまま動いている`);
-  }
+  if (SEND_REFUSED.has(hcErrorKind())) skip(`/exit を送れなかった（${error}）。対象はそのまま動いている`);
   fail(`/exit の送信が失敗した（${error || '理由不明'}）。対象が終了したまま起動されていないかもしれない。'hc read ${target}' で見ること。claude が動いていれば、入力欄に /exit が残っていないか確かめて消す。終わっていれば、${recovery}`);
 }
 
@@ -129,21 +136,19 @@ for (let i = 0; i < 60; i += 1) {
     break;
   }
   if (now && statusOf(now) === 'blocked') {
-    markRestarting(target, false);
     fail(`/exit の後に確認画面が出ている。端末で答えてもらうこと。キャンセルして claude が動き続けているなら何も変わっていないので、同じ引数で呼び直せる。終了したら、${recovery}`);
   }
 }
-if (!after) {
-  markRestarting(target, false);
-  fail(`60秒たっても claude が終わらない。'hc read ${target}' で見ること。終了していたら、${recovery}`);
-}
+if (!after) fail(`60秒たっても claude が終わらない。'hc read ${target}' で見ること。終了していたら、${recovery}`);
 
 // 端末ごと終わったなら外して名前を空ける。シェルに戻った端末は残す。
 let newName = info.name ?? '';
 if (after.state === 'finished') {
+  // 旧はもう終わっているので、この後に止まっても印は外さない（rencon は新しい端末を待つ）。
+  restarting = false;
   if (hc(['rm', target]) === null) log(`終わった端末 ${target} を外せなかった（${hcError()}）。名前が空かなければ別の名前で作る`);
 } else {
-  markRestarting(target, false);
+  clearRestarting();
   log(`元の端末 ${target} はシェルに戻ったので残す。用が済んでいれば 'hc kill ${target}' と 'hc rm ${target}' で閉じること`);
 }
 const taken = liveNames();
