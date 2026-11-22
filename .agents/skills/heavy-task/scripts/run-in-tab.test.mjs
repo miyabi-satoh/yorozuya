@@ -10,67 +10,50 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const script = fileURLToPath(new URL('./run-in-tab.mjs', import.meta.url));
+const fakeTools = fileURLToPath(new URL('./run-in-tab.fake-tools.cjs', import.meta.url));
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'run-in-tab-test-'));
+const windows = process.platform === 'win32';
+// POSIX のシグナルを送る・受けるテスト。Windows の Node は SIGHUP などを送ると相手をすぐ終わらせ、受けた側のハンドラーは動かない
+// （Windows でタブが閉じたときの扱いは run-in-tab.mjs の STATUS_CONTROL_C_EXIT で、ここでは試せない）。
+const posixSignals = { skip: windows && 'Windows には POSIX のシグナルが無い' };
+// タブの中のシェルは、Windows では pwsh（run-in-tab.mjs の shellFor）。
+const shellCommand = (posix, pwsh) => (windows ? pwsh : posix);
 
-function fakeHerdr() {
+// 偽物の hc・herdr を置いた bin と、偽物が書き残す state。中身は run-in-tab.fake-tools.cjs。
+function fakeBin(tool) {
   const bin = tmp();
   const state = tmp();
-  fs.writeFileSync(
-    path.join(bin, 'herdr'),
-    `#!/bin/sh
-state='${state}'
-case "$1 $2" in
-  'tab create') printf '%s\n' "$@" > "$state/create-args"; echo '{"result":{"root_pane":{"pane_id":"w1:p1"},"tab":{"tab_id":"w1:t1"}}}' ;;
-  # 本物の herdr のように送ったらすぐ返るよう、後ろで流す側の出力も herdr の出力から切り離す。
-  'pane run') { [ -e "$state/no-run" ] || sh -c "$4"; } >/dev/null 2>&1 & ;;
-  'pane get') if [ -e "$state/gone" ]; then echo '{"error":{"code":"pane_not_found"}}'; exit 1; fi ;;
-  'pane read') echo 'screen' ;;
-  'tab close') touch "$state/closed" ;;
-esac
-`,
-    { mode: 0o755 },
-  );
-  const env = { ...process.env, HC_TERMINAL_ID: '', HERDR_ENV: '1', PATH: `${bin}${path.delimiter}${process.env.PATH}`, SHELL: '/bin/sh' };
+  const link = path.join(bin, windows ? `${tool}.exe` : tool);
+  try {
+    fs.linkSync(process.execPath, link);
+  } catch {
+    // 別のドライブなどで張れなければ写す。
+    fs.copyFileSync(process.execPath, link);
+    fs.chmodSync(link, 0o755);
+  }
+  const preload = `--require ${JSON.stringify(fakeTools)}`;
+  const env = {
+    ...process.env,
+    FAKE_TOOLS_STATE: state,
+    FAKE_TOOLS_NODE: process.execPath,
+    NODE_OPTIONS: [process.env.NODE_OPTIONS, preload].filter(Boolean).join(' '),
+    PATH: `${bin}${path.delimiter}${process.env.PATH}`,
+    SHELL: '/bin/sh',
+  };
   return { env, state };
 }
 
-// hc の偽物。出力の形は hc 0.1.21 の --json に合わせる（成功は stdout、失敗は stderr の {"error":{"kind"}}）。
-// run は -- の後の argv を後ろで流し、終わったら finished にする。名前の taken-<名前> があれば name_taken で断る。
+function fakeHerdr() {
+  const { env, state } = fakeBin('herdr');
+  return { env: { ...env, HC_TERMINAL_ID: '', HERDR_ENV: '1' }, state };
+}
+
+// 名前の taken-<名前> を state に置くと、その名前を name_taken で断る。
 function fakeHc() {
-  const bin = tmp();
-  const state = tmp();
-  fs.writeFileSync(
-    path.join(bin, 'hc'),
-    `#!/bin/sh
-state='${state}'
-sub="$1"
-shift
-printf '%s\\n' "$sub $*" >> "$state/calls"
-case "$sub" in
-  run)
-    name=''
-    while [ $# -gt 0 ] && [ "$1" != '--' ]; do
-      case "$1" in --name) name="$2"; shift ;; esac
-      shift
-    done
-    shift
-    if [ -e "$state/taken-$name" ]; then echo '{"error":{"kind":"name_taken","message":"taken"}}' >&2; exit 1; fi
-    { [ -e "$state/no-run" ] || "$@"; touch "$state/finished"; } >/dev/null 2>&1 &
-    echo "{\\"address\\":\\"t9\\",\\"name\\":\\"$name\\",\\"state\\":\\"live\\"}" ;;
-  get)
-    if [ -e "$state/gone" ]; then echo '{"error":{"kind":"not_found","message":"no terminal"}}' >&2; exit 3; fi
-    if [ -e "$state/finished" ]; then echo '{"address":"t9","state":"finished"}'; else echo '{"address":"t9","state":"live"}'; fi ;;
-  read) echo '{"text":"screen","complete":true,"how":"screen"}' ;;
-  kill) touch "$state/killed"; echo '{"address":"t9","state":"finished"}' ;;
-  rm) touch "$state/closed"; echo '{"removed":"t9"}' ;;
-esac
-`,
-    { mode: 0o755 },
-  );
+  const { env, state } = fakeBin('hc');
   // HERDR_ENV=1 も入れておく。hc の端末は core を起動した環境の HERDR_ENV を引き継ぐことがあり、それでも hc を先にする。
-  const env = { ...process.env, HC_TERMINAL_ID: 't3', HERDR_ENV: '1', PATH: `${bin}${path.delimiter}${process.env.PATH}`, SHELL: '/bin/sh' };
   const calls = () => fs.readFileSync(path.join(state, 'calls'), 'utf8').trim().split('\n');
-  return { env, state, calls };
+  return { env: { ...env, HC_TERMINAL_ID: 't3', HERDR_ENV: '1' }, state, calls };
 }
 
 function run(env, ...args) {
@@ -80,7 +63,7 @@ function run(env, ...args) {
 test('出力と終了コードを残し、終わったらタブを閉じる', () => {
   const { env, state } = fakeHerdr();
   const dir = tmp();
-  const result = run(env, '--dir', dir, '--', 'echo out; echo err >&2; exit 3');
+  const result = run(env, '--dir', dir, '--', shellCommand('echo out; echo err >&2; exit 3', "echo out; [Console]::Error.WriteLine('err'); exit 3"));
   assert.equal(result.status, 3);
   assert.match(result.stdout, /exit=3/);
   const log = fs.readFileSync(path.join(dir, 'output.log'), 'utf8');
@@ -91,7 +74,7 @@ test('出力と終了コードを残し、終わったらタブを閉じる', ()
   assert.equal(fs.existsSync(path.join(state, 'closed')), true);
 });
 
-test('シグナルで落ちた処理は、シグナルの名前を残す', () => {
+test('シグナルで落ちた処理は、シグナルの名前を残す', posixSignals, () => {
   const { env } = fakeHerdr();
   const dir = tmp();
   const result = run(env, '--dir', dir, '--', 'kill -KILL $$');
@@ -99,7 +82,7 @@ test('シグナルで落ちた処理は、シグナルの名前を残す', () =>
   assert.match(result.stdout, /signal=SIGKILL/);
 });
 
-test('タブの側が止められたら、受けたシグナルを残す', async () => {
+test('タブの側が止められたら、受けたシグナルを残す', posixSignals, async () => {
   const dir = tmp();
   fs.writeFileSync(path.join(dir, 'job.json'), JSON.stringify({ command: 'sleep 30', cwd: dir }));
   const child = spawn('node', [script, '--runner', dir], { stdio: 'ignore', env: { ...process.env, SHELL: '/bin/sh' } });
@@ -112,7 +95,7 @@ test('タブの側が止められたら、受けたシグナルを残す', async
   assert.equal(result.signal, 'SIGHUP');
 });
 
-test('止める知らせを無視する処理でも、理由を残して終わる', async () => {
+test('止める知らせを無視する処理でも、理由を残して終わる', posixSignals, async () => {
   const dir = tmp();
   fs.writeFileSync(path.join(dir, 'job.json'), JSON.stringify({ command: "trap '' HUP; sleep 30 & echo $! > pid; wait", cwd: dir }));
   const child = spawn('node', [script, '--runner', dir], { stdio: 'ignore', env: { ...process.env, SHELL: '/bin/sh' } });
@@ -177,7 +160,7 @@ test('タブ名の頭に、作ったセッションの名前を付ける', () =>
   const home = tmp();
   fs.mkdirSync(path.join(home, '.claude', 'sessions'), { recursive: true });
   fs.writeFileSync(path.join(home, '.claude', 'sessions', '999.json'), JSON.stringify({ name: 'repo-ab' }));
-  assert.equal(run({ ...env, HOME: home, CLAUDE_PID: '999' }, '--label', '検査', '--', 'exit 0').status, 0);
+  assert.equal(run({ ...env, HOME: home, USERPROFILE: home, CLAUDE_PID: '999' }, '--label', '検査', '--', 'exit 0').status, 0);
   assert.match(fs.readFileSync(path.join(state, 'create-args'), 'utf8'), /^repo-ab: 検査$/m);
 });
 
@@ -243,7 +226,7 @@ test('hc の名前が使われていれば、-2 を付けて作り直す', () =>
   fs.writeFileSync(path.join(home, '.claude', 'sessions', '999.json'), JSON.stringify({ name: 'repo-ab' }));
   // タブ名「repo-ab: 検査」は、日本語が落ちて repo-ab になる。
   fs.writeFileSync(path.join(state, 'taken-repo-ab'), '');
-  const result = run({ ...env, HOME: home, CLAUDE_PID: '999' }, '--label', '検査', '--', 'exit 0');
+  const result = run({ ...env, HOME: home, USERPROFILE: home, CLAUDE_PID: '999' }, '--label', '検査', '--', 'exit 0');
   assert.equal(result.status, 0);
   const names = calls()
     .filter((line) => line.startsWith('run '))
