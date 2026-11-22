@@ -104,7 +104,7 @@ const { path: sent, error: guideProblem } = attachGuide(handoff, note, steps);
 if (guideProblem) skip(guideProblem);
 
 const request = `@${sent} このセッション自身の再起動です。資料の先頭の「自己再起動の手順」に従うこと。`;
-const created = startClaude({ cwd, name, request });
+const created = startClaude({ cwd, name, request, replaces: info.address });
 if (!created) skip(`新しい端末で claude を起動できなかった（${hcError()}）。何も変えていない`);
 log(`新しい端末 ${created}${name ? `（${name}）` : ''}`);
 

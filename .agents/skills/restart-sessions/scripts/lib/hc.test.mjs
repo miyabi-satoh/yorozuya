@@ -178,9 +178,9 @@ test('送る文は -- の後に置き、呼び出し元の端末を外して hc 
 
 test('claude は呼び出し元の子にせず、依頼を引数で渡して起動する', { skip: process.platform === 'win32' }, (t) => {
   const { call, seen } = fakeHc(t);
-  const result = call(`console.log(hc.startClaude({ cwd: '/w', name: 'knowledge-4b-2', request: '@/tmp/a.md 読むこと' }));`);
+  const result = call(`console.log(hc.startClaude({ cwd: '/w', name: 'knowledge-4b-2', request: '@/tmp/a.md 読むこと', replaces: 't1b' }));`);
   assert.equal(result.stdout.trim(), 't9');
-  assert.deepEqual(seen(), ['t3|unsetunset|run --json --bg --no-parent --cwd /w --name knowledge-4b-2 -- claude @/tmp/a.md 読むこと']);
+  assert.deepEqual(seen(), ['t3|unsetunset|run --json --bg --no-parent --cwd /w --name knowledge-4b-2 --label replaces=t1b -- claude @/tmp/a.md 読むこと']);
 });
 
 test('閉じるときは kill してから、終わったのを見て rm する。失敗は kind で読める', { skip: process.platform === 'win32' }, (t) => {
