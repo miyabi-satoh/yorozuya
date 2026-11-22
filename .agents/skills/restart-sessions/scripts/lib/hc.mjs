@@ -230,7 +230,7 @@ export function successorName(name, taken) {
 // 新しい端末で claude を起動し、最初の依頼を引数で渡す（claude は引数の文を最初の入力として送る）。
 // 起動したばかりの claude へ hc send で送ると落ちることがあると hc の文書にあるので、送らずに引数で渡す。
 // --no-parent は外さない。呼び出し元の端末の子にすると、呼び出し元が終わったときに一緒に終わる（hc の既定。実測）。
-// replaces は立て直す前の端末の address。ラベル replaces=<address> を付け、rencon がその端末のタイルを新しい端末へ移す目印にする（rencon は旧が終わってから移すので、新が起動に失敗しても旧の FAIL がタイルに残る）。
+// replaces は立て直す前の端末の address。ラベル replaces=<address> を付け、rencon がその端末のタイルを新しい端末へ移す目印にする（rencon は旧の端末が終わるか外れてから移す）。
 // 返すのは address。作れなければ ''（理由は hcError()）。
 export function startClaude({ cwd, name, request, replaces }) {
   const created = hc(['run', '--bg', '--no-parent', '--cwd', cwd, ...(name ? ['--name', name] : []), ...(replaces ? ['--label', `replaces=${replaces}`] : []), '--', 'claude', request]);
