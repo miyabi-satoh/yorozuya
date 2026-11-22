@@ -49,9 +49,12 @@ const log = (message) => process.stderr.write(`[${name}] ${message}\n`);
 let restarting = false;
 const clearRestarting = () => {
   if (!restarting) return;
-  // 外せたときだけ下ろす。外せなければ、この後の SKIP・FAIL でもう一度試す。
-  if (markRestarting(target, false)) restarting = false;
-  else log(`端末 ${target} のラベル restarting を外せなかった（${hcError()}）。'hc label ${target} restarting=' で外すこと`);
+  // 一時の失敗で残らないよう、1秒おきに3回まで試す。外せたときだけ下ろす（シェルに戻った道で外せなければ、後の SKIP・FAIL でもう一度試す）。
+  for (let i = 0; i < 3 && restarting; i += 1) {
+    if (i > 0) sleep(1);
+    if (markRestarting(target, false)) restarting = false;
+  }
+  if (restarting) log(`端末 ${target} のラベル restarting を外せなかった（${hcError()}）。'hc label ${target} restarting=' で外すこと`);
 };
 const skip = (message) => {
   clearRestarting();
