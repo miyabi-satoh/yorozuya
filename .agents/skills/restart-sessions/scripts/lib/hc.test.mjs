@@ -152,6 +152,7 @@ case "$1" in
   rm) echo '{"removed":"t9"}' ;;
   ls) echo '{"terminals":[],"hidden_finished":0,"machines":[]}' ;;
   keys) ;;
+  label) if [ -z "$4" ]; then echo '{"error":{"kind":"not_found","message":"no terminal"}}' >&2; exit 3; fi ;;
   read) echo 'not json' ;;
   *) echo '{"error":{"kind":"not_found","message":"no terminal"}}' >&2; exit 3 ;;
 esac
@@ -181,6 +182,12 @@ test('claude は呼び出し元の子にせず、依頼を引数で渡して起�
   const result = call(`console.log(hc.startClaude({ cwd: '/w', name: 'knowledge-4b-2', request: '@/tmp/a.md 読むこと', replaces: 't1b' }));`);
   assert.equal(result.stdout.trim(), 't9');
   assert.deepEqual(seen(), ['t3|unsetunset|run --json --bg --no-parent --cwd /w --name knowledge-4b-2 --label replaces=t1b -- claude @/tmp/a.md 読むこと']);
+});
+
+test('立て直しの間の印は restarting=1 で付け、restarting= で外す', { skip: process.platform === 'win32' }, (t) => {
+  const { call, seen } = fakeHc(t);
+  assert.equal(call(`console.log(hc.markRestarting('t5'), hc.markRestarting('t5', false));`).stdout.trim(), 'true true');
+  assert.deepEqual(seen(), ['t3|unsetunset|label --json t5 restarting=1', 't3|unsetunset|label --json t5 restarting=']);
 });
 
 test('閉じるときは kill してから、終わったのを見て rm する。失敗は kind で読める', { skip: process.platform === 'win32' }, (t) => {

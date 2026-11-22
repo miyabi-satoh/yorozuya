@@ -21,6 +21,7 @@ import {
   inputDraft,
   isClaude,
   liveNames,
+  markRestarting,
   prompt,
   selfId,
   SEND_REFUSED,
@@ -44,11 +45,24 @@ if (!target || !name || !handoff) {
 }
 
 const log = (message) => process.stderr.write(`[${name}] ${message}\n`);
+// 旧の端末に restarting を付けている間は true。旧が残ったまま止まるときは外す（残すと、後で旧が終わっても rencon がタイルを閉じず、来ない新しい端末を待ち続ける）。
+let restarting = false;
+const clearRestarting = () => {
+  if (!restarting) return;
+  // 一時の失敗で残らないよう、1秒おきに3回まで試す。外せたときだけ下ろす（シェルに戻った道で外せなければ、後の SKIP・FAIL でもう一度試す）。
+  for (let i = 0; i < 3 && restarting; i += 1) {
+    if (i > 0) sleep(1);
+    if (markRestarting(target, false) || hcErrorKind() === 'not_found') restarting = false; // 端末が無ければ外すものも無い
+  }
+  if (restarting) log(`端末 ${target} のラベル restarting を外せなかった（${hcError()}）。'hc label ${target} restarting=' で外すこと`);
+};
 const skip = (message) => {
+  clearRestarting();
   process.stderr.write(`[${name}] SKIP: ${message}\n`);
   process.exit(1);
 };
 const fail = (message) => {
+  clearRestarting();
   process.stderr.write(`[${name}] FAIL: ${message}\n`);
   process.exit(1);
 };
@@ -108,6 +122,8 @@ if (draft) {
 
 log(`旧セッション ${sid}（止まったまま残ったら、claude --resume ${sid} で元の会話に戻れる）`);
 log('終了');
+restarting = markRestarting(target);
+if (!restarting) log(`端末 ${target} にラベル restarting を付けられなかった（${hcError()}）。rencon のタイルは移らずに閉じる`);
 if (!prompt(target, '/exit')) {
   const error = hcError();
   if (SEND_REFUSED.has(hcErrorKind())) skip(`/exit を送れなかった（${error}）。対象はそのまま動いている`);
@@ -132,8 +148,11 @@ if (!after) fail(`60秒たっても claude が終わらない。'hc read ${targe
 // 端末ごと終わったなら外して名前を空ける。シェルに戻った端末は残す。
 let newName = info.name ?? '';
 if (after.state === 'finished') {
+  // 旧はもう終わっているので、この後に止まっても印は外さない（rencon は新しい端末を待つ）。
+  restarting = false;
   if (hc(['rm', target]) === null) log(`終わった端末 ${target} を外せなかった（${hcError()}）。名前が空かなければ別の名前で作る`);
 } else {
+  clearRestarting();
   log(`元の端末 ${target} はシェルに戻ったので残す。用が済んでいれば 'hc kill ${target}' と 'hc rm ${target}' で閉じること`);
 }
 const taken = liveNames();
