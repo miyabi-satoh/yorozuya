@@ -16,6 +16,7 @@ Find defects a real user (or a realistic actor the app's own model admits) would
 ## Read first for intended behavior
 - {repo instruction file}, {design docs / decision records / specs that cover this area}, {manual pages for this area}
 - {code navigation tool, if the repo has one}
+- Dependency sources fetched for this check: {paths, versions}
 
 ## What to look for
 {Area-specific checklist: 5–10 bullets naming the concrete mechanisms in this area (e.g. "restore: order of table copies vs. triggers", "number inputs: is the value rewritten while typing").}
@@ -33,7 +34,7 @@ Style, naming, refactors, missing tests, purely theoretical issues with no reali
 ## Constraints
 - Read-only. Do not edit any file. Do not run builds, tests, servers or package managers. grep/sed/cat and the code navigation tool are fine. No browser tools.
 - Do not read places that trigger OS permission dialogs ({e.g. on macOS: ~/Documents, ~/Desktop, ~/Downloads}).
-- Dependency behavior: read the pinned version's source ({e.g. ~/.cargo/registry/src/*/<crate>-<version>/, node_modules/<pkg>}; version from the lock file) instead of recalling it.
+- Dependency behavior: read the pinned version's source ({e.g. ~/.cargo/registry/src/*/<crate>-<version>/, node_modules/<pkg>}; version from the lock file) instead of recalling it. If a dependency's source is not on disk (e.g. a server or CLI the app talks to), say so in (b) with the version in use; the lead fetches it — do not guess its behavior.
 
 ## Return format (English, itemized, no prose intro; quote UI strings verbatim)
 For each finding:
