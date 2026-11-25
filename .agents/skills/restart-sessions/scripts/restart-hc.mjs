@@ -11,14 +11,17 @@
 //   そのときは名前が空かないので、lib/hc.mjs の successorName の名前にする。
 // - 新しい端末は呼び出し元の子にしない（--no-parent）。子にすると、呼び出し元が終わったときに一緒に終わる。
 
+import { reporter, takeFlag } from './lib/cli.mjs';
 import { handoffProblem } from './lib/handoff.mjs';
 import {
   backgroundWorkHint,
+  claudeFlagsOf,
   cwdOf,
   hc,
   hcError,
   hcErrorKind,
   isClaude,
+  lastStartNote,
   liveNames,
   markRestarting,
   prompt,
@@ -27,8 +30,6 @@ import {
   sessionOf,
   settledDraft,
   sleep,
-  lastStartNote,
-  claudeFlagsOf,
   startClaude,
   statusOf,
   successorName,
@@ -36,20 +37,20 @@ import {
   waitForStart,
 } from './lib/hc.mjs';
 import { paceNote } from './lib/pace.mjs';
-import { attachGuide, HOW_TO_PROCEED } from './lib/prompts.mjs';
+import { attachGuide, restartRequest } from './lib/prompts.mjs';
 
-const rawArgs = process.argv.slice(2);
-const allowBackground = rawArgs.includes('--allow-background');
-const [target, name, handoff] = rawArgs.filter((arg) => arg !== '--allow-background');
+const { on: allowBackground, rest } = takeFlag(process.argv.slice(2), '--allow-background');
+const [target, name, handoff] = rest;
 if (!target || !name || !handoff) {
   process.stderr.write('usage: restart.mjs [--allow-background] <端末の address> <名前> <資料の絶対パス>\n');
   process.exit(1);
 }
 
-const log = (message) => process.stderr.write(`[${name}] ${message}\n`);
+// 止まるときは、先にタイルの保持を戻す（clearRestarting）。
+const { log, skip, fail } = reporter(name, clearRestarting);
 // 旧の端末のタイルを残している（rencon handover hold）間は true。旧が残ったまま止まるときは外す（残すと、後で旧が終わっても rencon がタイルを閉じず、来ない新しい端末を待ち続ける）。
 let restarting = false;
-const clearRestarting = () => {
+function clearRestarting() {
   if (!restarting) return;
   // 一時の失敗で残らないよう、1秒おきに3回まで試す。外せたときだけ下ろす（シェルに戻った道で外せなければ、後の SKIP・FAIL でもう一度試す）。
   for (let i = 0; i < 3 && restarting; i += 1) {
@@ -57,17 +58,7 @@ const clearRestarting = () => {
     if (markRestarting(target, false) || hcErrorKind() === 'not_found') restarting = false; // 端末が無ければ外すものも無い
   }
   if (restarting) log(`端末 ${target} のタイルの保持を戻せなかった（${hcError()}）。'rencon handover release ${target}' で戻すこと`);
-};
-const skip = (message) => {
-  clearRestarting();
-  process.stderr.write(`[${name}] SKIP: ${message}\n`);
-  process.exit(1);
-};
-const fail = (message) => {
-  clearRestarting();
-  process.stderr.write(`[${name}] FAIL: ${message}\n`);
-  process.exit(1);
-};
+}
 
 // --- /exit を送る前に、確かめられることは全部ここで確かめる ---
 
@@ -110,7 +101,7 @@ if (guideProblem) skip(guideProblem);
 
 // 案内に載せるコマンドの引数。シェルに貼っても $ や ` が展開されないよう、POSIX のシングルクォートで包む（中の ' は '\'' にする）。
 const shellQuote = (value) => `'${String(value).replace(/'/g, `'\\''`)}'`;
-const request = `@${sent} 前セッションの引き継ぎ資料です。${HOW_TO_PROCEED}`;
+const request = restartRequest(sent);
 // 起動の --model・--effort は旧の端末から引き継ぐ（/model で後から変えた分は引き継げない）。
 const flags = claudeFlagsOf(info);
 const recovery =

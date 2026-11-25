@@ -11,13 +11,11 @@ import { appendFileSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 
+import { reporter } from './lib/cli.mjs';
 import { closeSelfDetached, exitLogLine, isHubCwd, parseExitArgs } from './lib/exit.mjs';
 import { backgroundWorkHint, cwdOf, hcError, isClaude, selfId, sessionOf, terminalInfo } from './lib/hc.mjs';
 
-const skip = (message) => {
-  process.stderr.write(`[exit-self] SKIP: ${message}\n`);
-  process.exit(1);
-};
+const { skip } = reporter('exit-self');
 
 const args = parseExitArgs(process.argv.slice(2));
 if (!args) skip('usage: exit-self.mjs [--allow-background] <要約（最終報告の1行）>。要約は必須');

@@ -13,9 +13,10 @@
 // 見えていれば SKIP する（対象の自己申告と実際の追跡が食い違うことがあるため）。
 // 対象に止めてもらってから呼び直す。--allow-background は、対象がセッションを終えても動かし続けたいと明言した独立したプロセスにだけ使う。
 
+import { reporter, takeFlag } from './lib/cli.mjs';
 import { handoffProblem } from './lib/handoff.mjs';
 import { paceNote } from './lib/pace.mjs';
-import { attachGuide, HOW_TO_PROCEED } from './lib/prompts.mjs';
+import { attachGuide, restartRequest } from './lib/prompts.mjs';
 import {
   agentInfo,
   agentStatus,
@@ -33,23 +34,14 @@ import {
   waitForNameRelease,
 } from './lib/herdr.mjs';
 
-const rawArgs = process.argv.slice(2);
-const allowBackground = rawArgs.includes('--allow-background');
-const [pane, name, handoff] = rawArgs.filter((arg) => arg !== '--allow-background');
+const { on: allowBackground, rest } = takeFlag(process.argv.slice(2), '--allow-background');
+const [pane, name, handoff] = rest;
 if (!pane || !name || !handoff) {
   process.stderr.write('usage: restart.mjs [--allow-background] <pane_id> <name> <資料の絶対パス>\n');
   process.exit(1);
 }
 
-const log = (message) => process.stderr.write(`[${name}] ${message}\n`);
-const skip = (message) => {
-  process.stderr.write(`[${name}] SKIP: ${message}\n`);
-  process.exit(1);
-};
-const fail = (message) => {
-  process.stderr.write(`[${name}] FAIL: ${message}\n`);
-  process.exit(1);
-};
+const { log, skip, fail } = reporter(name);
 
 // --- /exit を送る前に、確かめられることは全部ここで確かめる ---
 
@@ -104,7 +96,7 @@ if (!allowBackground) {
     skip(
       `ペイン ${pane} のモードラインに「${hint}」と出ている。対象の自己申告と食い違っていないか確かめること。` +
         `対象に TaskStop で止めてもらい、モードラインから消えたのを確かめて同じ引数で呼び直す。` +
-          `--allow-background は、対象がセッションを終えても動かし続けたいと明言した独立したプロセスにだけ使う`,
+        `--allow-background は、対象がセッションを終えても動かし続けたいと明言した独立したプロセスにだけ使う`,
     );
   }
 }
@@ -182,7 +174,7 @@ if (!startAgent(name, pane)) {
     `起動できない（${herdrError()}）。ペインを見ること。claude が上がっていれば（確認やダイアログが出ていれば答えてから）'@${sent}' を打つ。シェルのままなら、${recovery}`,
   );
 }
-if (!prompt(name, `@${sent} 前セッションの引き継ぎ資料です。${HOW_TO_PROCEED}`)) {
+if (!prompt(name, restartRequest(sent))) {
   fail(`起動はしたが資料を渡せなかった（${herdrError()}）。ペインで @${sent} と打てば読める`);
 }
 

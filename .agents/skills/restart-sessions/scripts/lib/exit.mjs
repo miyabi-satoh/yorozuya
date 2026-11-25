@@ -4,11 +4,12 @@ import { realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 
+import { takeFlag } from './cli.mjs';
+
 // 引数は `[--allow-background] <要約>`。要約（最終報告の1行）が空なら null。
 export function parseExitArgs(args) {
-  const allowBackground = args.includes('--allow-background');
-  const summary = args
-    .filter((arg) => arg !== '--allow-background')
+  const { on: allowBackground, rest } = takeFlag(args, '--allow-background');
+  const summary = rest
     .join(' ')
     .replace(/\s+/g, ' ')
     .trim();
