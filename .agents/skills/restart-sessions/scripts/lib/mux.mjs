@@ -26,7 +26,7 @@ export const lastError = () => (isHc() ? hc.hcError() : herdr.herdrError());
 export function self() {
   if (isHc()) {
     const id = hc.selfId();
-    return { id, sid: hc.sessionIdOf(hc.terminalInfo(id)) };
+    return { id, sid: hc.sessionOf(hc.terminalInfo(id)) };
   }
   const current = herdr.currentPane();
   return { id: current?.pane_id ?? '', sid: current?.agent_session?.value ?? '' };

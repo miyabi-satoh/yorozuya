@@ -18,14 +18,14 @@ import {
   hc,
   hcError,
   hcErrorKind,
-  inputDraft,
   isClaude,
   liveNames,
   markRestarting,
   prompt,
   selfId,
   SEND_REFUSED,
-  sessionIdOf,
+  sessionOf,
+  settledDraft,
   sleep,
   startClaude,
   statusOf,
@@ -85,8 +85,8 @@ if ((info.name || info.address) !== name) skip(`端末 ${target} の名前は ${
 if (statusOf(info) === 'blocked') skip(`端末 ${target} は承認・質問ダイアログで止まっている。ユーザーに端末で答えてもらってから呼ぶこと`);
 
 // 旧セッションID は、途中で止まっても claude --resume で戻れるよう先に控える。控えられないなら終了させない。
-const sid = sessionIdOf(info);
-if (!sid) skip(`端末 ${target} にラベル claude_transcript が無く、セッションIDを引けない。resume の手がかりが無いまま終了させたくないので止まる`);
+const sid = sessionOf(info);
+if (!sid) skip(`端末 ${target} のセッションIDを claude agents から引けない（${hcError() || '前景の pid に当たる項目が無い'}）。resume の手がかりが無いまま終了させたくないので止まる`);
 const cwd = cwdOf(info);
 if (!cwd) skip(`端末 ${target} の cwd を hc から取れない。新しい端末をどこで起動するか決められないので止まる`);
 
@@ -114,7 +114,8 @@ const recovery =
   `元の会話に戻るなら 'claude --resume ${sid}'`;
 
 // 入力欄に書きかけがあれば送らない。/exit が書きかけの末尾につながり、書きかけごと送信される（Herdr 版と同じ）。
-const draft = inputDraft(target);
+// hc の画面には色が無く、薄字の入力候補も書きかけに見えるので、1字打って確かめる（settledDraft）。
+const draft = settledDraft(target);
 if (draft === null) skip(`端末 ${target} の入力欄を読めない（${hcError() || '枠が見つからない'}）。書きかけがあるかもしれないので止まる。端末を見ること`);
 if (draft) {
   skip(`端末 ${target} の入力欄に書きかけがある（「${draft.replace(/\s+/g, ' ').slice(0, 40)}」）。ユーザーが打っている最中かもしれないので止まる。送信されるか消えてから呼び直す`);

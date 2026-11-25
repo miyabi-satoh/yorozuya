@@ -2,8 +2,8 @@
 // hc は 0.1.21 で確かめた。--json の出力は、成功なら結果そのものが stdout に、失敗なら {"error":{"kind","message"}} が stderr に出る。
 //
 // 端末は address（`t7`）で指す。名前でも引けるが、終わった端末の名前は外れて別の新しい端末が使えるので（実測）、引いた後は address を使う。
-// claude のセッションIDは、claude の SessionStart の hook が端末のラベル claude_transcript に書く会話の記録のパス（`<セッションID>.jsonl`）から取る。
-// hook は起動・/clear・再開のたびに書き直すので、/clear の後も今のセッションを指す。
+// claude のセッションIDは、そのマシンの `claude agents --json` から、端末の前景の pid が同じものを引く（rencon の src/records.rs と同じ）。
+// claude agents は /clear・再開をすぐ映すので、/clear の後も今のセッションを指す。ほかのマシンの端末は hc exec --on で引く。
 
 import { spawnSync } from 'node:child_process';
 
@@ -97,11 +97,40 @@ export function agentStatus(t) {
   return statusOf(terminalInfo(t));
 }
 
-// ラベル claude_transcript のパスの末尾からセッションIDを取る。Windows のマシンのパス（`C:\…\x.jsonl`）も分ける。
-export function sessionIdOf(info) {
-  const path = info?.labels?.claude_transcript;
-  if (typeof path !== 'string' || !path.endsWith('.jsonl')) return '';
-  return path.split(/[\\/]/).pop().slice(0, -'.jsonl'.length);
+// 端末の前景の pid と同じ pid の claude agents の項目から、セッションIDを取る。引けなければ ''。
+// pid は前景（claude をシェルから起動したもの）を先にし、無ければ端末のプログラムの pid。どのマシンも claude 本体の pid と一致する（macOS・Linux・Windows で実測）。
+export function sessionIdOf(info, agents) {
+  const pid = info?.foreground?.pid ?? info?.pid;
+  if (!Number.isInteger(pid) || !Array.isArray(agents)) return '';
+  const id = agents.find((agent) => agent?.pid === pid)?.sessionId;
+  return typeof id === 'string' ? id : '';
+}
+
+// 端末の address のマシン（`aero/t5` の aero）。このマシンなら ''。
+export const machineOf = (address) => (typeof address === 'string' && address.includes('/') ? address.split('/')[0] : '');
+
+// hc exec --json の stdout（base64）を読む。終了コードが 0 でなければ null。
+export function execStdout(result) {
+  if (!result || result.code !== 0 || typeof result.stdout !== 'string') return null;
+  return Buffer.from(result.stdout, 'base64').toString('utf8');
+}
+
+// そのマシンの claude agents --json の一覧。取れなければ null。
+export function claudeAgents(machine = '') {
+  const out = execStdout(hc(['exec', ...(machine ? ['--on', machine] : []), 'claude', 'agents', '--json']));
+  if (out === null) return null;
+  try {
+    const list = JSON.parse(out);
+    return Array.isArray(list) ? list : null;
+  } catch {
+    lastError = `claude agents の出力を JSON として読めない: ${out.trim().slice(0, 200)}`;
+    return null;
+  }
+}
+
+// 端末の今のセッションID。引けなければ ''。
+export function sessionOf(info) {
+  return sessionIdOf(info, claudeAgents(machineOf(info?.address)));
 }
 
 // 今その端末の前に出ているのが claude か。claude が終わってシェルに戻ると、ラベルは残るが前景はシェルになる。
@@ -139,6 +168,23 @@ export function inputDraft(t) {
   return draftFromHcScreen(readScreen(t));
 }
 
+// 書きかけに見えたものが薄字の入力候補かを、1字打って確かめる。候補なら打った字に置き換わり、書きかけなら末尾に付く。
+// 打った字は消して戻す。返すのは inputDraft と同じ形で、候補だったなら ''。見分けが付かなければ元の書きかけを返して止まる側に倒す。
+// 打つ字は見える字にする（hc read は行末の空白を落とすので、空白では書きかけと見分けられない。実測）。
+export const PROBE_KEY = 'x';
+export function draftAfterProbe(before, after) {
+  if (!before) return before;
+  return after === PROBE_KEY ? '' : before;
+}
+export function settledDraft(t) {
+  const before = inputDraft(t);
+  if (!before) return before;
+  if (hc(['keys', t, PROBE_KEY]) === null) return before;
+  const after = inputDraft(t);
+  if (hc(['keys', t, 'backspace']) === null) return before;
+  return draftAfterProbe(before, after);
+}
+
 export function backgroundWorkHint(t) {
   return backgroundHintFromScreen(readScreen(t));
 }
@@ -174,17 +220,17 @@ export function claudeTerminals() {
   const terminals = hc(['ls'])?.terminals;
   if (!Array.isArray(terminals)) return null;
   const infos = terminals.filter((t) => t?.state === 'live' && isLocal(t.address)).map((t) => terminalInfo(t.address));
-  return claudeTerminalsFrom(infos);
+  return claudeTerminalsFrom(infos, claudeAgents());
 }
 
-export function claudeTerminalsFrom(infos) {
+export function claudeTerminalsFrom(infos, agents) {
   return infos
     .filter((info) => isClaude(info))
     .map((info) => ({
       id: info.address,
       name: info.name ?? '',
       label: info.name || info.title || info.address,
-      sid: sessionIdOf(info),
+      sid: sessionIdOf(info, agents),
       cwd: cwdOf(info),
       status: statusOf(info),
     }));
