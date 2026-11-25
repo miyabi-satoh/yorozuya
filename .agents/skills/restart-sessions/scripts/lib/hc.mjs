@@ -218,7 +218,8 @@ export function settledDraft(t) {
   // 消す直前にもう一度読み、揃ったときから変わっていれば（間にユーザーが打った）、消さずに止める。読んでから送るまでの数十ミリ秒は防げない。
   const now = inputDraft(t);
   if (now !== after) {
-    lastError = `確かめに ${PROBE_KEY} を打った後に入力欄が変わった（「${String(now).slice(0, 40)}」）。打っている最中かもしれないので、入力欄はそのままにした`;
+    const seen = now === null ? '読めなかった' : `「${now.slice(0, 40)}」`;
+    lastError = `確かめに ${PROBE_KEY} を打った後に入力欄が変わった（${seen}）。打っている最中かもしれないので消していない。入力欄の末尾近くに ${PROBE_KEY} が残っているので、端末で確かめること`;
     return null;
   }
   if (hc(['keys', t, 'backspace']) === null) {
