@@ -39,14 +39,24 @@ export function exitLogLine({ time = new Date(), name, cwd, sid, summary }) {
 // 自分の端末を、自分から切り離したプロセスに閉じさせる。端末を kill すると自分も終わるので、
 // 新しいセッション（setsid）・stdio なし・unref の別プロセスに、少し待ってから kill と rm をさせる。
 // /exit を送らないので、終了の確認画面が出ない。
-export function closeSelfDetached(id, hcModuleUrl, delaySeconds = 2) {
-  const code = `import(${JSON.stringify(hcModuleUrl)}).then((m) => { m.sleep(${Number(delaySeconds)}); m.closeTerminal(${JSON.stringify(id)}); });`;
+// 閉じられなかったときは、別プロセスが failure（記録のファイルと1行）を追記する。先に書いた「終わった」の行だけが残り、
+// 端末が生きたままなのに終わったと読まれないようにするため。起動できなければ null（呼び出し側は記録を書かずに止まる）。
+export function closeSelfDetached(id, hcModuleUrl, { delaySeconds = 2, failure } = {}) {
+  const onFail = failure
+    ? `import('node:fs').then((fs) => fs.appendFileSync(${JSON.stringify(failure.path)}, ${JSON.stringify(failure.line)}))`
+    : 'null';
+  const code =
+    `import(${JSON.stringify(hcModuleUrl)}).then((m) => { m.sleep(${Number(delaySeconds)}); ` +
+    `if (!m.closeTerminal(${JSON.stringify(id)})) return ${onFail}; });`;
   const child = spawn(process.execPath, ['--input-type=module', '-e', code], {
     detached: true,
     stdio: 'ignore',
     windowsHide: true,
     env: process.env,
   });
+  // 起動に失敗すると pid が無く、'error' が後から出る。受けないとこのプロセスが落ちるので、受けて捨てる（失敗は pid で返す）。
+  child.on('error', () => {});
+  if (!child.pid) return null;
   child.unref();
   return child.pid;
 }
