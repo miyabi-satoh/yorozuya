@@ -68,7 +68,7 @@ function runCli(program, argv, { env, timeout, payload }) {
   lastKind = '';
   renconFailed =
     program === 'rencon' &&
-    ((run.status === 2 && /^usage: rencon handover/.test(run.stderr ?? '')) || (run.status === 1 && /^rencon handover: hc:/.test(run.stderr ?? '')));
+    ((run.status === 2 && /^usage: rencon handover/m.test(run.stderr ?? '')) || (run.status === 1 && /^rencon handover: hc:/m.test(run.stderr ?? '')));
   if (run.error) {
     lastError = String(run.error.message ?? run.error);
     return null;
@@ -350,9 +350,10 @@ export function startClaude({ cwd, name, request, replaces }) {
   let created = null;
   if (replaces && hasHandover()) {
     created = runCli('rencon', ['handover', 'run', replaces, '--', '--json', ...runArgs], { payload: true });
+    const beforeHc = renconFailed;
     // rencon 自身が hc を流す前に落ちたと分かるときだけ、タイルは移らないが hc run で起動する。旧の claude はもう終わっているので、
     // タイルのために新しいセッションを起動しないままにしないため。それ以外（hc のエラー・時間切れ・読めない出力）は端末ができているかもしれないので、二重に起動しない。
-    if (created === null && renconFailed) created = hc(['run', ...runArgs]);
+    if (created === null && beforeHc) created = hc(['run', ...runArgs]);
   } else {
     created = hc(['run', ...runArgs]);
   }
