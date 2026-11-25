@@ -345,7 +345,11 @@ export function successorName(name, taken) {
 // rencon がその端末のタイルを新しい端末へ移す（旧の端末が終わるか外れてから移す）。印の付け方は rencon が持つ（rencon --skill）。
 // rencon handover は hc の出力・エラー・終了コードをそのまま返すので、hc run と同じく読む。
 // 返すのは address。作れなければ ''（理由は hcError()）。
+// 起動で知らせること（rencon で起動できず hc run で起動し直したなど）。無ければ ''。
+let startNote = '';
+export const lastStartNote = () => startNote;
 export function startClaude({ cwd, name, request, replaces }) {
+  startNote = '';
   const runArgs = ['--bg', '--no-parent', '--cwd', cwd, ...(name ? ['--name', name] : []), '--', 'claude', request];
   let created = null;
   if (replaces && hasHandover()) {
@@ -353,7 +357,18 @@ export function startClaude({ cwd, name, request, replaces }) {
     const beforeHc = renconFailed;
     // rencon 自身が hc を流す前に落ちたと分かるときだけ、タイルは移らないが hc run で起動する。旧の claude はもう終わっているので、
     // タイルのために新しいセッションを起動しないままにしないため。それ以外（hc のエラー・時間切れ・読めない出力）は端末ができているかもしれないので、二重に起動しない。
-    if (created === null && beforeHc) created = hc(['run', ...runArgs]);
+    if (created === null && beforeHc) {
+      const reason = hcError();
+      created = hc(['run', ...runArgs]);
+      const runError = [lastError, lastKind];
+      // hold で残したタイルは、来ない新しい端末を待ち続けるので戻す（hold していなくても release は害が無い）。
+      const released = markRestarting(replaces, false) || hcErrorKind() === 'not_found';
+      startNote =
+        `rencon handover run が落ちた（${reason}）ので hc run で起動した。タイルは移らない。` +
+        (released ? '' : `旧の端末のタイルの保持を戻せなかったので、'rencon handover release ${replaces}' で戻すこと`);
+      // 呼び出し元が起動の失敗の理由を hcError() で読めるよう、hc run の結果に戻す。
+      [lastError, lastKind] = runError;
+    }
   } else {
     created = hc(['run', ...runArgs]);
   }

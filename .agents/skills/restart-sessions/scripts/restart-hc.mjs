@@ -27,6 +27,7 @@ import {
   sessionOf,
   settledDraft,
   sleep,
+  lastStartNote,
   startClaude,
   statusOf,
   successorName,
@@ -163,6 +164,7 @@ if (wanted && !newName) log(`名前 ${wanted} とその代わりの名前がど�
 
 log('起動');
 const created = startClaude({ cwd, name: newName, request, replaces: info.address });
+if (lastStartNote()) log(lastStartNote());
 if (!created) fail(`新しい端末で claude を起動できなかった（${hcError()}）。${recovery}`);
 log(`新しい端末 ${created}${newName ? `（${newName}）` : ''}`);
 const started = waitForStart(created);

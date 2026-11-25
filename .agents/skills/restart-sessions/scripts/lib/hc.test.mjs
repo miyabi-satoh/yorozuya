@@ -244,9 +244,20 @@ test('handover の無い rencon なら、ただの hc run で起動し、タイ�
 
 test('rencon handover が hc を流す前に落ちたら、ただの hc run で起動し直す。ほかの失敗では起動し直さない', { skip: process.platform === 'win32' }, (t) => {
   const { call, seen, bin } = fakeHc(t);
-  fs.writeFileSync(path.join(bin, 'rencon'), `#!/bin/sh\nif [ "$1" = --skill ]; then exit 0; fi\necho 'rencon handover: hc: not found' >&2\nexit 1\n`, { mode: 0o755 });
-  assert.equal(call(`console.log(hc.startClaude({ cwd: '/w', name: 'k', request: 'r', replaces: 't1b' }));`).stdout.trim(), 't9');
-  assert.deepEqual(seen(), ['t3|unsetunset|run --json --bg --no-parent --cwd /w --name k -- claude r']);
+  // run だけ落ちる rencon。hold で残したタイルを release で戻す
+  fs.writeFileSync(
+    path.join(bin, 'rencon'),
+    `#!/bin/sh\nif [ "$1" = --skill ]; then exit 0; fi\nprintf 'rencon %s\\n' "$*" >> '${path.join(bin, 'calls')}'\n[ "$2" = run ] || exit 0\necho 'rencon handover: hc: not found' >&2\nexit 1\n`,
+    { mode: 0o755 },
+  );
+  const fellBack = call(`console.log(hc.startClaude({ cwd: '/w', name: 'k', request: 'r', replaces: 't1b' })); console.log(hc.lastStartNote());`).stdout.trim().split('\n');
+  assert.equal(fellBack[0], 't9');
+  assert.match(fellBack[1], /^rencon handover run が落ちた（rencon handover: hc: not found）ので hc run で起動した。タイルは移らない。$/);
+  assert.deepEqual(seen(), [
+    'rencon handover run t1b -- --json --bg --no-parent --cwd /w --name k -- claude r',
+    't3|unsetunset|run --json --bg --no-parent --cwd /w --name k -- claude r',
+    'rencon handover release t1b',
+  ]);
   // hc のエラーや読めない出力は、端末ができているかもしれないので起動し直さない
   fs.writeFileSync(path.join(bin, 'rencon'), `#!/bin/sh\nif [ "$1" = --skill ]; then exit 0; fi\necho '{"error":{"kind":"name_taken","message":"taken"}}' >&2\nexit 3\n`, { mode: 0o755 });
   assert.equal(call(`console.log(JSON.stringify(hc.startClaude({ cwd: '/w', name: 'k', request: 'r', replaces: 't1b' })), hc.hcErrorKind());`).stdout.trim(), '"" name_taken');
@@ -254,7 +265,8 @@ test('rencon handover が hc を流す前に落ちたら、ただの hc run で�
   assert.equal(call(`console.log(JSON.stringify(hc.startClaude({ cwd: '/w', name: 'k', request: 'r', replaces: 't1b' })));`).stdout.trim(), '""');
   fs.writeFileSync(path.join(bin, 'rencon'), `#!/bin/sh\nif [ "$1" = --skill ]; then exit 0; fi\necho 'plain failure' >&2\nexit 1\n`, { mode: 0o755 });
   assert.equal(call(`console.log(JSON.stringify(hc.startClaude({ cwd: '/w', name: 'k', request: 'r', replaces: 't1b' })));`).stdout.trim(), '""');
-  assert.deepEqual(seen(), ['t3|unsetunset|run --json --bg --no-parent --cwd /w --name k -- claude r']);
+  // 起動し直したのは最初の1回だけ
+  assert.equal(seen().filter((line) => line.startsWith('t3|')).length, 1);
 });
 
 test('立て直しの間のタイルは rencon handover hold で残し、release で戻す', { skip: process.platform === 'win32' }, (t) => {
