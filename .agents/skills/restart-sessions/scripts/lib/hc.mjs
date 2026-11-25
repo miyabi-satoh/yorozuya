@@ -11,6 +11,8 @@ import { backgroundHintFromScreen, draftFromScreen } from './herdr.mjs';
 
 let lastError = '';
 let lastKind = '';
+// 最後に叩いたものが、hc を流す前に rencon handover 自身で落ちたか（rencon --skill の文書の2つの形）。
+let renconFailed = false;
 
 export function hcError() {
   return lastError.trim();
@@ -64,6 +66,9 @@ function runCli(program, argv, { env, timeout, payload }) {
     timeout: timeout ?? TIMEOUT_MS,
   });
   lastKind = '';
+  renconFailed =
+    program === 'rencon' &&
+    ((run.status === 2 && /^usage: rencon handover/.test(run.stderr ?? '')) || (run.status === 1 && /^rencon handover: hc:/.test(run.stderr ?? '')));
   if (run.error) {
     lastError = String(run.error.message ?? run.error);
     return null;
@@ -345,9 +350,9 @@ export function startClaude({ cwd, name, request, replaces }) {
   let created = null;
   if (replaces && hasHandover()) {
     created = runCli('rencon', ['handover', 'run', replaces, '--', '--json', ...runArgs], { payload: true });
-    // hc のエラー（kind 付き）は hc run でも同じに落ちるので、そのまま返す。rencon 自身が落ちた（kind が無い）ときだけ、タイルは移らないが hc run で起動する。
-    // 旧の claude はもう終わっているので、タイルのために新しいセッションを起動しないままにしないため。
-    if (created === null && hcErrorKind() === '') created = hc(['run', ...runArgs]);
+    // rencon 自身が hc を流す前に落ちたと分かるときだけ、タイルは移らないが hc run で起動する。旧の claude はもう終わっているので、
+    // タイルのために新しいセッションを起動しないままにしないため。それ以外（hc のエラー・時間切れ・読めない出力）は端末ができているかもしれないので、二重に起動しない。
+    if (created === null && renconFailed) created = hc(['run', ...runArgs]);
   } else {
     created = hc(['run', ...runArgs]);
   }
