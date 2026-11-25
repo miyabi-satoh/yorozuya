@@ -364,7 +364,7 @@ export function startClaude({ cwd, name, request, replaces }) {
       // hold で残したタイルは、来ない新しい端末を待ち続けるので戻す（hold していなくても release は害が無い）。
       const released = markRestarting(replaces, false) || hcErrorKind() === 'not_found';
       startNote =
-        `rencon handover run が落ちた（${reason}）ので hc run で起動した。タイルは移らない。` +
+        `rencon handover run が落ちた（${reason}）ので hc run で${created ? '起動した。タイルは移らない。' : 'も起動を試した。'}` +
         (released ? '' : `旧の端末のタイルの保持を戻せなかったので、'rencon handover release ${replaces}' で戻すこと`);
       // 呼び出し元が起動の失敗の理由を hcError() で読めるよう、hc run の結果に戻す。
       [lastError, lastKind] = runError;
