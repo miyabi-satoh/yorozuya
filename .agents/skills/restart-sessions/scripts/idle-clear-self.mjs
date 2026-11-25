@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 
 import { sleep } from './lib/herdr.mjs';
 import { backgroundWorkHint, idleStatus, inputDraft, isHc, lastError, prompt, self as selfOf, settledDraft } from './lib/mux.mjs';
+import { idleClearPrompt } from './lib/prompts.mjs';
 
 const skip = (message) => {
   process.stderr.write(`[idle-clear-self] SKIP: ${message}\n`);
@@ -38,10 +39,7 @@ if (mode === '--send') {
     }
     if (draft || ['working', 'blocked'].includes(idleStatus(pane).status)) process.exit(1);
   }
-  prompt(
-    pane,
-    `@${handoff} /clear で消えた前任（このペインの直前のセッション）の会話ログです。最新のやり取りは「# 前の資料」の見出しの直前までで、見出しの下は古い世代です。読んで状況を短く確かめ、ユーザーの答え待ちだったなら同じ問いを出し直し、そうでなければ指示を待ってください（作業は始めない）。${shells === 'yes' ? '前任のバックグラウンドのシェルが残っています。その終わりの知らせが届いたら、会話ログにある予定に沿って続けてかまいません。' : ''}`,
-  );
+  prompt(pane, idleClearPrompt(handoff, shells === 'yes'));
   process.exit(0);
 }
 

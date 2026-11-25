@@ -23,11 +23,20 @@
 // - 承認は資料では運べないので、後戻りできない操作と外向きの操作は、新セッションが確かめ直す。
 //   ユーザーが記憶や CLAUDE.md で前もって決めた扱いは、新セッションにもそのまま見えるので、それに従わせる。
 //   ただし記憶は旧セッションも書けるので、個々の操作を承認済みとした記録は、前もって決めた扱いに数えない。
+// - 前セッションが依頼された仕事を終えていたら、新セッションは exit-self.md で終わる。引き継ぐ仕事の無いセッションが
+//   指示待ちで残り、手で /exit することになったため（2026-11-25 に実際に起きた）。再起動する先はこのスキルを持たないことが多いので、
+//   進め方の `<skill-dir>` は、つなぐときにこのスキルの置き場の絶対パスに置き換える。区切りは `/` にそろえる。
+//   Windows の Git Bash で `\` のままのパスを引数にすると、シェルが `\` を外してしまうため（node は `/` の区切りも読む）。
 
 import { readFileSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const GUIDE = fileURLToPath(new URL('../../after-restart.md', import.meta.url));
+export const SKILL_DIR = dirname(GUIDE).replaceAll('\\', '/');
+
+// 進め方の文に書いた `<skill-dir>` を、このスキルの置き場の絶対パスにする。
+export const withSkillDir = (text) => text.replaceAll('<skill-dir>', SKILL_DIR);
 
 export const HOW_TO_PROCEED = '資料の先頭の「再起動した先の進め方」に従って引き継ぐこと。';
 
@@ -43,11 +52,28 @@ export const GUIDE_SEPARATOR = '\n\n---\n\n';
 export function attachGuide(handoff, note = '', lead = '') {
   const path = `${handoff.endsWith('.md') ? handoff.slice(0, -3) : handoff}${WITH_GUIDE_SUFFIX}`;
   try {
-    const guide = readFileSync(GUIDE, 'utf8').trimEnd() + (note ? `\n\n${note}` : '');
+    const guide = withSkillDir(readFileSync(GUIDE, 'utf8').trimEnd()) + (note ? `\n\n${note}` : '');
     const body = readFileSync(handoff, 'utf8');
     writeFileSync(path, `${lead ? `${lead.trimEnd()}\n\n` : ''}${guide}${GUIDE_SEPARATOR}${body}`, 'utf8');
   } catch (error) {
     return { path, error: `進め方と資料をつないだファイルを作れない: ${error.message}` };
   }
   return { path, error: '' };
+}
+
+// 放置のあとの /clear（idle-clear.md の手順4）で、消えた前任の会話ログを読ませる1行のプロンプト。
+// after-restart.md を使わないのは、状態メモが無く、75分以上放置されていたペインが自分で作業を再開しないようにするため。
+// 前任が仕事を終えていたときに終わらせるのは、after-restart.md と同じ理由（上の決めごと）。75分以上の放置のあいだに
+// 終わらずに残った、仕事を終えたセッションを片付ける機会でもある。
+// パスはバッククォートでなく「」で囲む。手で送るときにシェルの二重引用符の中に置くので、バッククォートはコマンドの置き換えになる。
+// shells は前任のバックグラウンドのシェルが残っているか。残っていれば終わる一文は入れない。シェルは exit-self.md の
+// 終わらない条件で、続けてよいという一文とも食い違うため。
+export function idleClearPrompt(handoff, shells = false) {
+  return withSkillDir(
+    `@${handoff} /clear で消えた前任（このペインの直前のセッション）の会話ログです。最新のやり取りは「# 前の資料」の見出しの直前までで、見出しの下は古い世代です。読んで状況を短く確かめ、ユーザーの答え待ちだったなら同じ問いを出し直してください。${
+      shells
+        ? 'そうでなければ指示を待ってください（作業は始めない）。前任のバックグラウンドのシェルが残っています。その終わりの知らせが届いたら、会話ログにある予定に沿って続けてかまいません。'
+        : '前任が依頼された仕事を終えて報告も済ませていて、ほかに待っているものが無ければ、「<skill-dir>/exit-self.md」に従って終わってください。どちらでもなければ指示を待ってください（作業は始めない）。'
+    }`,
+  );
 }
