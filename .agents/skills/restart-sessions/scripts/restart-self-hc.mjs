@@ -16,6 +16,7 @@ import { basename, isAbsolute } from 'node:path';
 import { handoffProblem } from './lib/handoff.mjs';
 import {
   backgroundWorkHint,
+  claudeFlagsOf,
   cwdOf,
   hcError,
   isClaude,
@@ -105,7 +106,10 @@ const { path: sent, error: guideProblem } = attachGuide(handoff, note, steps);
 if (guideProblem) skip(guideProblem);
 
 const request = `@${sent} このセッション自身の再起動です。資料の先頭の「自己再起動の手順」に従うこと。`;
-const created = startClaude({ cwd, name, request, replaces: info.address });
+// 起動の --model・--effort は旧の端末から引き継ぐ（/model で後から変えた分は引き継げない）。
+const flags = claudeFlagsOf(info);
+if (flags.length) log(`旧の端末の起動の引数を引き継ぐ: ${flags.join(' ')}`);
+const created = startClaude({ cwd, name, request, replaces: info.address, flags });
 if (lastStartNote()) log(lastStartNote());
 if (!created) skip(`新しい端末で claude を起動できなかった（${hcError()}）。何も変えていない`);
 log(`新しい端末 ${created}${name ? `（${name}）` : ''}`);

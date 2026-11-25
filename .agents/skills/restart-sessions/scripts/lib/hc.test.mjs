@@ -8,6 +8,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 
 import {
+  claudeFlagsOf,
   claudeTerminalsFrom,
   cwdOf,
   draftAfterProbe,
@@ -303,4 +304,29 @@ test('道具は HC_TERMINAL_ID を一番先に見る（hc の端末は core を�
     }).stdout.trim();
   assert.equal(which({ HC_TERMINAL_ID: 't3', HERDR_ENV: '1', HERDR_PANE_ID: 'w1:p284' }), 'hc hc');
   assert.equal(which({ HC_TERMINAL_ID: '', HERDR_ENV: '1' }), 'herdr Herdr');
+});
+
+test('起動の --model・--effort だけを前景の argv から拾う（空白区切りと = の両方）', () => {
+  const argvOf = (argv) => claudeInfo({ foreground: { pid: 100, name: 'claude', argv, cwd: '/w' } });
+  assert.deepEqual(claudeFlagsOf(argvOf(['claude', '--model', 'sonnet', '--effort', 'high'])), ['--model', 'sonnet', '--effort', 'high']);
+  assert.deepEqual(claudeFlagsOf(argvOf(['claude', '--model=opus', '--effort=medium'])), ['--model', 'opus', '--effort', 'medium']);
+  // ほかの引数は拾わない。node 経由の起動でも拾える
+  assert.deepEqual(claudeFlagsOf(argvOf(['node', '/opt/bin/claude', '--dangerously-skip-permissions', '--model', 'fable', '@/tmp/a.md'])), ['--model', 'fable']);
+  // 無い・値が欠けている
+  assert.deepEqual(claudeFlagsOf(argvOf(['claude'])), []);
+  assert.deepEqual(claudeFlagsOf(argvOf(['claude', '--model', '--effort', 'low'])), ['--effort', 'low']);
+  assert.deepEqual(claudeFlagsOf(argvOf(['claude', '--model'])), []);
+  // claude でない端末・情報なし
+  assert.deepEqual(claudeFlagsOf(claudeInfo({ foreground: { pid: 9, name: 'bash', argv: ['bash', '--model', 'x'], cwd: '/w' } })), []);
+  assert.deepEqual(claudeFlagsOf(null), []);
+});
+
+test('起動し直す claude には、引き継いだ flags を依頼の前に付ける', { skip: process.platform === 'win32' }, (t) => {
+  const { call, seen } = fakeHc(t);
+  const result = call(`console.log(hc.startClaude({ cwd: '/w', name: 'k', request: 'r', replaces: 't1b', flags: ['--model', 'sonnet', '--effort', 'high'] }));`);
+  assert.equal(result.stdout.trim(), 't9');
+  assert.deepEqual(seen(), [
+    'rencon handover run t1b -- --json --bg --no-parent --cwd /w --name k -- claude --model sonnet --effort high r',
+    't3|unsetunset|run --json --bg --no-parent --cwd /w --name k -- claude --model sonnet --effort high r',
+  ]);
 });
