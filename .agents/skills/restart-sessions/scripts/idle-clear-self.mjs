@@ -13,7 +13,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { sleep } from './lib/herdr.mjs';
-import { backgroundWorkHint, idleStatus, inputDraft, isHc, lastError, prompt, self as selfOf } from './lib/mux.mjs';
+import { backgroundWorkHint, idleStatus, inputDraft, isHc, lastError, prompt, self as selfOf, settledDraft } from './lib/mux.mjs';
 
 const skip = (message) => {
   process.stderr.write(`[idle-clear-self] SKIP: ${message}\n`);
@@ -52,8 +52,8 @@ if (!self || !sid) skip(`自分のペインかセッションIDを特定でき�
 // idle-clear.md の手順1と同じ照合。どれかに当たれば流さない。
 const { idle, status } = idleStatus(self);
 if (!idle) skip(`ペインが idle でない（${status || '取れない'}）`);
-const draft = inputDraft(self);
-if (draft === null) skip('入力欄を読めない');
+const draft = settledDraft(self);
+if (draft === null) skip(`入力欄を読めない（${lastError() || '枠が見つからない'}）`);
 if (draft !== '') skip('入力欄に書きかけがある');
 // シェルは /clear の後も動き続け、終わりの知らせは /clear の後の小さい会話に届く（2.1.289 で確認）。
 // 見送ると、知らせが冷えた大きい会話のターンを起こして読み直しになるので、シェルだけなら流す。

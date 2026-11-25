@@ -62,6 +62,8 @@ test('セッションIDは claude agents から、端末の前景の pid が同�
   assert.equal(sessionIdOf(claudeInfo(), agents), SID);
   // 前景が無ければ端末のプログラムの pid で引く
   assert.equal(sessionIdOf(claudeInfo({ pid: 7, foreground: null }), agents), 'other');
+  // 前景が claude でなければ、端末のプログラムの pid で引き直す
+  assert.equal(sessionIdOf(claudeInfo({ foreground: { pid: 8 } }), agents), SID);
   assert.equal(sessionIdOf(claudeInfo({ pid: 8, foreground: { pid: 8 } }), agents), '');
   assert.equal(sessionIdOf(claudeInfo(), null), '');
   assert.equal(sessionIdOf(null, agents), '');
@@ -75,7 +77,7 @@ test('ほかのマシンの端末は、address の前の部分をマシンとし
 
 test('hc exec の stdout は base64。終了コードが 0 でなければ null', () => {
   assert.equal(execStdout({ code: 0, stdout: Buffer.from('[]').toString('base64') }), '[]');
-  assert.equal(execStdout({ code: 1, stdout: '' }), null);
+  assert.equal(execStdout({ code: 1, stdout: '', stderr: Buffer.from('boom').toString('base64') }), null);
   assert.equal(execStdout(null), null);
 });
 

@@ -98,21 +98,30 @@ export function agentStatus(t) {
 }
 
 // 端末の前景の pid と同じ pid の claude agents の項目から、セッションIDを取る。引けなければ ''。
-// pid は前景（claude をシェルから起動したもの）を先にし、無ければ端末のプログラムの pid。どのマシンも claude 本体の pid と一致する（macOS・Linux・Windows で実測）。
+// pid は前景（claude をシェルから起動したもの）を先に、次に端末のプログラムの pid で引く。claude を端末のプログラムとして起動したものは、
+// どのマシンも両方が claude 本体の pid と一致する（macOS・Linux・Windows で実測）。
 export function sessionIdOf(info, agents) {
-  const pid = info?.foreground?.pid ?? info?.pid;
-  if (!Number.isInteger(pid) || !Array.isArray(agents)) return '';
-  const id = agents.find((agent) => agent?.pid === pid)?.sessionId;
-  return typeof id === 'string' ? id : '';
+  if (!Array.isArray(agents)) return '';
+  for (const pid of [info?.foreground?.pid, info?.pid]) {
+    if (!Number.isInteger(pid)) continue;
+    const id = agents.find((agent) => agent?.pid === pid)?.sessionId;
+    if (typeof id === 'string' && id !== '') return id;
+  }
+  return '';
 }
 
 // 端末の address のマシン（`aero/t5` の aero）。このマシンなら ''。
 export const machineOf = (address) => (typeof address === 'string' && address.includes('/') ? address.split('/')[0] : '');
 
-// hc exec --json の stdout（base64）を読む。終了コードが 0 でなければ null。
+// hc exec --json の stdout（base64）を読む。終了コードが 0 でなければ null にし、stderr を失敗の理由に残す。
+const decode = (text) => (typeof text === 'string' ? Buffer.from(text, 'base64').toString('utf8') : '');
 export function execStdout(result) {
-  if (!result || result.code !== 0 || typeof result.stdout !== 'string') return null;
-  return Buffer.from(result.stdout, 'base64').toString('utf8');
+  if (!result) return null;
+  if (result.code !== 0 || typeof result.stdout !== 'string') {
+    lastError = `終了コード ${result.code ?? '不明'}: ${decode(result.stderr).trim().slice(0, 200)}`;
+    return null;
+  }
+  return decode(result.stdout);
 }
 
 // そのマシンの claude agents --json の一覧。取れなければ null。
@@ -171,6 +180,7 @@ export function inputDraft(t) {
 // 書きかけに見えたものが薄字の入力候補かを、1字打って確かめる。候補なら打った字に置き換わり、書きかけなら末尾に付く。
 // 打った字は消して戻す。返すのは inputDraft と同じ形で、候補だったなら ''。見分けが付かなければ元の書きかけを返して止まる側に倒す。
 // 打つ字は見える字にする（hc read は行末の空白を落とすので、空白では書きかけと見分けられない。実測）。
+// 打った直後は描き直す前の画面が返りうるので、画面が変わるまで少し読み直す。打った字を消せなければ null を返し、端末を見てもらう。
 export const PROBE_KEY = 'x';
 export function draftAfterProbe(before, after) {
   if (!before) return before;
@@ -180,8 +190,15 @@ export function settledDraft(t) {
   const before = inputDraft(t);
   if (!before) return before;
   if (hc(['keys', t, PROBE_KEY]) === null) return before;
-  const after = inputDraft(t);
-  if (hc(['keys', t, 'backspace']) === null) return before;
+  let after = inputDraft(t);
+  for (let i = 0; i < 10 && (after === null || after === before); i += 1) {
+    sleep(0.2);
+    after = inputDraft(t);
+  }
+  if (hc(['keys', t, 'backspace']) === null) {
+    lastError = `確かめに打った ${PROBE_KEY} を消せなかった（${hcError()}）。入力欄の末尾に ${PROBE_KEY} が残っているかもしれない`;
+    return null;
+  }
   return draftAfterProbe(before, after);
 }
 
