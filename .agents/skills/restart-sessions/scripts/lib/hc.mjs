@@ -11,6 +11,8 @@ import { backgroundHintFromScreen, draftFromScreen } from './herdr.mjs';
 
 let lastError = '';
 let lastKind = '';
+// 最後に叩いたものが、hc を流す前に rencon handover 自身で落ちたか（rencon --skill の文書の2つの形）。
+let renconFailed = false;
 
 export function hcError() {
   return lastError.trim();
@@ -46,15 +48,27 @@ export function hcEnv(env = process.env) {
 // 0.1.21 ではどのサブコマンドも JSON を出す（実測）。中身の要らないもの（NO_PAYLOAD）は、終了コードが 0 なら出力が空や JSON でなくても
 // 操作は通っているので成功にする。中身の要るもの（run・get・ls・read など）は、読めなければ失敗にする（空の結果を「無い」と読み違えないため）。
 export function hc(args, { env, timeout } = {}) {
-  const run = spawnSync('hc', [args[0], '--json', ...args.slice(1)], {
+  return runCli('hc', [args[0], '--json', ...args.slice(1)], {
+    env,
+    timeout: timeout ?? (args[0] === 'send' ? SEND_TIMEOUT_MS : TIMEOUT_MS),
+    payload: !NO_PAYLOAD.has(args[0]),
+  });
+}
+
+// hc か、hc をそのまま流す rencon handover を叩く。payload が false なら、終了コードが 0 であれば出力を読まずに成功にする。
+function runCli(program, argv, { env, timeout, payload }) {
+  const run = spawnSync(program, argv, {
     encoding: 'utf8',
     maxBuffer: 16 * 1024 * 1024,
     // Windows では、コンソールを持たない親（idle-clear-self.mjs が detached で起こす --send の子）から呼ぶと、hc ごとにコンソールの窓が開くため。
     windowsHide: true,
     env: env ?? hcEnv(),
-    timeout: timeout ?? (args[0] === 'send' ? SEND_TIMEOUT_MS : TIMEOUT_MS),
+    timeout: timeout ?? TIMEOUT_MS,
   });
   lastKind = '';
+  renconFailed =
+    program === 'rencon' &&
+    ((run.status === 2 && /^usage: rencon handover/m.test(run.stderr ?? '')) || (run.status === 1 && /^rencon handover: hc:/m.test(run.stderr ?? '')));
   if (run.error) {
     lastError = String(run.error.message ?? run.error);
     return null;
@@ -65,7 +79,7 @@ export function hc(args, { env, timeout } = {}) {
       lastError = '';
       return data;
     } catch {
-      if (NO_PAYLOAD.has(args[0])) {
+      if (!payload) {
         lastError = '';
         return {};
       }
@@ -327,17 +341,57 @@ export function successorName(name, taken) {
 // 新しい端末で claude を起動し、最初の依頼を引数で渡す（claude は引数の文を最初の入力として送る）。
 // 起動したばかりの claude へ hc send で送ると落ちることがあると hc の文書にあるので、送らずに引数で渡す。
 // --no-parent は外さない。呼び出し元の端末の子にすると、呼び出し元が終わったときに一緒に終わる（hc の既定。実測）。
-// replaces は立て直す前の端末の address。ラベル replaces=<address> を付け、rencon がその端末のタイルを新しい端末へ移す目印にする（rencon は旧の端末が終わるか外れてから移す）。
+// replaces は立て直す前の端末の address（このマシンの端末）。rencon があれば `rencon handover run <replaces> -- <hc run の引数>` で起動し、
+// rencon がその端末のタイルを新しい端末へ移す（旧の端末が終わるか外れてから移す）。印の付け方は rencon が持つ（rencon --skill）。
+// rencon handover は hc の出力・エラー・終了コードをそのまま返すので、hc run と同じく読む。
 // 返すのは address。作れなければ ''（理由は hcError()）。
+// 起動で知らせること（rencon で起動できず hc run で起動し直したなど）。無ければ ''。
+let startNote = '';
+export const lastStartNote = () => startNote;
 export function startClaude({ cwd, name, request, replaces }) {
-  const created = hc(['run', '--bg', '--no-parent', '--cwd', cwd, ...(name ? ['--name', name] : []), ...(replaces ? ['--label', `replaces=${replaces}`] : []), '--', 'claude', request]);
+  startNote = '';
+  const runArgs = ['--bg', '--no-parent', '--cwd', cwd, ...(name ? ['--name', name] : []), '--', 'claude', request];
+  let created = null;
+  if (replaces && hasHandover()) {
+    created = runCli('rencon', ['handover', 'run', replaces, '--', '--json', ...runArgs], { payload: true });
+    const beforeHc = renconFailed;
+    // rencon 自身が hc を流す前に落ちたと分かるときだけ、タイルは移らないが hc run で起動する。旧の claude はもう終わっているので、
+    // タイルのために新しいセッションを起動しないままにしないため。それ以外（hc のエラー・時間切れ・読めない出力）は端末ができているかもしれないので、二重に起動しない。
+    if (created === null && beforeHc) {
+      const reason = hcError();
+      created = hc(['run', ...runArgs]);
+      const runError = [lastError, lastKind];
+      // hold で残したタイルは、来ない新しい端末を待ち続けるので戻す（hold していなくても release は害が無い）。
+      const released = markRestarting(replaces, false) || hcErrorKind() === 'not_found';
+      startNote =
+        `rencon handover run が落ちた（${reason}）ので hc run で${created?.address ? '起動した。タイルは移らない。' : 'も起動を試した。'}` +
+        (released ? '' : `旧の端末のタイルの保持を戻せなかったので、'rencon handover release ${replaces}' で戻すこと`);
+      // 呼び出し元が起動の失敗の理由を hcError() で読めるよう、hc run の結果に戻す。
+      [lastError, lastKind] = runError;
+    }
+  } else {
+    created = hc(['run', ...runArgs]);
+  }
   return created?.address ?? '';
 }
 
-// 立て直しの間だけ、旧の端末にラベル restarting=1 を付ける（on=false で外す）。rencon は、このラベルのある端末が終わってもタイルを閉じず、replaces=<この端末> の新しい端末を待つ。
+// rencon handover を使えるか。古い rencon は handover を端末の名前と取って、開いている rencon の窓に渡してしまうので、
+// 先に `rencon --skill` が 0 で終わるか（handover のある版。古い版は知らない引数で 2 を返し、何も開かない）で確かめる。1回だけ確かめる。
+let handover = null;
+export function hasHandover() {
+  if (handover === null) {
+    const probe = spawnSync('rencon', ['--skill'], { stdio: 'ignore', windowsHide: true, timeout: TIMEOUT_MS });
+    handover = probe.status === 0;
+  }
+  return handover;
+}
+
+// 立て直しの間だけ、旧の端末のタイルを残す（on=false で戻す）。`rencon handover hold|release`。rencon は、旧の端末が終わってもタイルを閉じず、新しい端末を待つ。
 // restart.mjs は旧の端末を外してから新しい端末を作るので、その間にタイルが閉じないようにするため。付けられなくても再起動は進める（タイルが閉じるだけ）。
+// rencon が無ければ、残すタイルも無いので何もせず成功にする。
 export function markRestarting(t, on = true) {
-  return hc(['label', t, `restarting=${on ? '1' : ''}`]) !== null;
+  if (!hasHandover()) return true;
+  return runCli('rencon', ['handover', on ? 'hold' : 'release', t], { payload: false }) !== null;
 }
 
 const slot = new Int32Array(new SharedArrayBuffer(4));
