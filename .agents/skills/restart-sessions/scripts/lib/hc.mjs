@@ -219,7 +219,7 @@ export function settledDraft(t) {
   const now = inputDraft(t);
   if (now !== after) {
     const seen = now === null ? '読めなかった' : `「${now.slice(0, 40)}」`;
-    lastError = `確かめに ${PROBE_KEY} を打った後に入力欄が変わった（${seen}）。打っている最中かもしれないので消していない。入力欄の末尾近くに ${PROBE_KEY} が残っているので、端末で確かめること`;
+    lastError = `確かめに ${PROBE_KEY} を打った後に入力欄が変わった（${seen}）。打っている最中かもしれないので消していない。入力欄に ${PROBE_KEY} が残っているかもしれないので、端末で確かめること`;
     return null;
   }
   if (hc(['keys', t, 'backspace']) === null) {
