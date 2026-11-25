@@ -184,7 +184,7 @@ export function inputDraft(t) {
 // 書きかけに見えたものが薄字の入力候補かを、1字打って確かめる。候補なら打った字に置き換わり、書きかけなら末尾に付く。
 // 打った字は消して戻す。返すのは inputDraft と同じ形で、候補だったなら ''。見分けが付かなければ元の書きかけを返して止まる側に倒す。
 // 打つ字は見える字にする（hc read は行末の空白を落とすので、空白では書きかけと見分けられない。実測）。
-// 描き直しの途中の画面を拾わないよう、打った後と消した後は、待つ形（打った後は x か書きかけ+x、消した後は打つ前）が続けて2回読めるまで読み直す。
+// 描き直しの途中の画面を拾わないよう、打った後と消した後は、待つ形（打った後は x で終わる文、消した後は打つ前）が続けて2回読めるまで読み直す。
 // 消した後が打つ前と違えば（間にユーザーが打った・x が残った）、null を返して端末を見てもらう。
 export const PROBE_KEY = 'x';
 export function draftAfterProbe(before, after) {
@@ -206,7 +206,8 @@ export function settledDraft(t) {
   const before = inputDraft(t);
   if (!before) return before;
   if (hc(['keys', t, PROBE_KEY]) === null) return before;
-  const typed = (text) => text === PROBE_KEY || text === before + PROBE_KEY;
+  // 書きかけの末尾の空白は画面で落ちるので、書きかけ+x とぴったりには比べず、打つ前と違って x で終わるかで見る。
+  const typed = (text) => typeof text === 'string' && text !== before && text.endsWith(PROBE_KEY);
   const after = readUntil(t, typed);
   // 打った字が見えないまま消すと、遅れて入った x でなく書きかけの末尾の字を消しうる。消さずに止め、端末を見てもらう。
   if (!typed(after)) {
