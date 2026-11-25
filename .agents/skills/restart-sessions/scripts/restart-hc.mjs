@@ -28,6 +28,7 @@ import {
   settledDraft,
   sleep,
   lastStartNote,
+  claudeFlagsOf,
   startClaude,
   statusOf,
   successorName,
@@ -110,8 +111,10 @@ if (guideProblem) skip(guideProblem);
 // 案内に載せるコマンドの引数。シェルに貼っても $ や ` が展開されないよう、POSIX のシングルクォートで包む（中の ' は '\'' にする）。
 const shellQuote = (value) => `'${String(value).replace(/'/g, `'\\''`)}'`;
 const request = `@${sent} 前セッションの引き継ぎ資料です。${HOW_TO_PROCEED}`;
+// 起動の --model・--effort は旧の端末から引き継ぐ（/model で後から変えた分は引き継げない）。
+const flags = claudeFlagsOf(info);
 const recovery =
-  `新しいセッションで続けるなら、「hc run --bg --no-parent --cwd ${shellQuote(cwd)} claude」で起動し、上がったら '@${sent}' を打つ。` +
+  `新しいセッションで続けるなら、「hc run --bg --no-parent --cwd ${shellQuote(cwd)} -- claude${flags.map((f) => ` ${shellQuote(f)}`).join('')}」で起動し、上がったら '@${sent}' を打つ。` +
   `元の会話に戻るなら 'claude --resume ${sid}'`;
 
 // 入力欄に書きかけがあれば送らない。/exit が書きかけの末尾につながり、書きかけごと送信される（Herdr 版と同じ）。
@@ -163,7 +166,7 @@ if (newName && taken !== null) newName = successorName(newName, taken);
 if (wanted && !newName) log(`名前 ${wanted} とその代わりの名前がどれも使われているので、名前を付けずに起動する`);
 
 log('起動');
-const created = startClaude({ cwd, name: newName, request, replaces: info.address });
+const created = startClaude({ cwd, name: newName, request, replaces: info.address, flags });
 if (lastStartNote()) log(lastStartNote());
 if (!created) fail(`新しい端末で claude を起動できなかった（${hcError()}）。${recovery}`);
 log(`新しい端末 ${created}${newName ? `（${newName}）` : ''}`);

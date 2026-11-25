@@ -1,6 +1,6 @@
 ---
 name: restart-sessions
-description: hc（herdr-core）・Herdr 上の Claude セッションを、会話ログを引き継いで再起動する。ユーザーがペインの再起動を頼んだとき、自分のコンテキストが増えて自身を立て直すとき、対象から増加の申告があったとき、コンテキストの見張りから知らせが来たときに使う。
+description: hc（herdr-core）・Herdr 上の Claude セッションを、会話ログを引き継いで再起動する。ユーザーがペインの再起動を頼んだとき、自分のコンテキストが増えて自身を立て直すとき、対象から増加の申告があったとき、コンテキストの見張りから知らせが来たときに使う。仕事を終えたセッションが記録を残して自分の端末を閉じて終わるときにも使う。
 ---
 
 # セッションの再起動
@@ -18,6 +18,7 @@ description: hc（herdr-core）・Herdr 上の Claude セッションを、会�
 - コンテキストの見張りを始める・知らせを受ける: [watch.md](watch.md)
 - 放置で大きくなった会話を `/clear` して続ける（`IDLE` の知らせ）: [idle-clear.md](idle-clear.md)
 - 自分自身を再起動する: [restart-self.md](restart-self.md)
+- 仕事が済んだ自分の端末を閉じて終わる: [exit-self.md](exit-self.md)
 
 ## やらないこと
 

@@ -338,6 +338,28 @@ export function successorName(name, taken) {
 
 // --- claude の起動 ---
 
+// 旧の端末の claude を起動したときの --model・--effort を、前景の argv から拾う（`--model X` と `--model=X` の両方。ほかの引数は拾わない）。
+// 立て直した新しい claude が既定のモデルに戻らないようにするため。拾えるのは起動の引数だけで、
+// 実行中に /model で変えたモデルは argv に出ないので引き継げない（既定に戻る）。claude でない端末・引数が無ければ []。
+export function claudeFlagsOf(info) {
+  const argv = info?.foreground?.argv;
+  if (!isClaude(info) || !Array.isArray(argv)) return [];
+  const found = new Map();
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (typeof arg !== 'string') continue;
+    for (const flag of ['--model', '--effort']) {
+      if (arg === flag) {
+        const value = argv[i + 1];
+        if (typeof value === 'string' && value !== '' && !value.startsWith('-')) found.set(flag, value);
+      } else if (arg.startsWith(`${flag}=`) && arg.length > flag.length + 1) {
+        found.set(flag, arg.slice(flag.length + 1));
+      }
+    }
+  }
+  return [...found].flatMap(([flag, value]) => [flag, value]);
+}
+
 // 新しい端末で claude を起動し、最初の依頼を引数で渡す（claude は引数の文を最初の入力として送る）。
 // 起動したばかりの claude へ hc send で送ると落ちることがあると hc の文書にあるので、送らずに引数で渡す。
 // --no-parent は外さない。呼び出し元の端末の子にすると、呼び出し元が終わったときに一緒に終わる（hc の既定。実測）。
@@ -345,12 +367,13 @@ export function successorName(name, taken) {
 // rencon がその端末のタイルを新しい端末へ移す（旧の端末が終わるか外れてから移す）。印の付け方は rencon が持つ（rencon --skill）。
 // rencon handover は hc の出力・エラー・終了コードをそのまま返すので、hc run と同じく読む。
 // 返すのは address。作れなければ ''（理由は hcError()）。
+// flags は旧の端末の claude から引き継ぐ起動の引数（claudeFlagsOf）。
 // 起動で知らせること（rencon で起動できず hc run で起動し直したなど）。無ければ ''。
 let startNote = '';
 export const lastStartNote = () => startNote;
-export function startClaude({ cwd, name, request, replaces }) {
+export function startClaude({ cwd, name, request, replaces, flags = [] }) {
   startNote = '';
-  const runArgs = ['--bg', '--no-parent', '--cwd', cwd, ...(name ? ['--name', name] : []), '--', 'claude', request];
+  const runArgs = ['--bg', '--no-parent', '--cwd', cwd, ...(name ? ['--name', name] : []), '--', 'claude', ...flags, request];
   let created = null;
   if (replaces && hasHandover()) {
     created = runCli('rencon', ['handover', 'run', replaces, '--', '--json', ...runArgs], { payload: true });

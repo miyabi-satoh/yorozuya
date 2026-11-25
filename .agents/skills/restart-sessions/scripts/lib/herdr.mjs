@@ -242,6 +242,8 @@ export function paneHoldingName(name) {
   return agents.find((agent) => agent.name === name)?.pane_id ?? '';
 }
 
+// 旧のペインの claude の --model・--effort は引き継げない。herdr pane get/current の出力に前景の argv が無く（実測）、
+// 起動の引数を知る手段が無いため。hc 版（lib/hc.mjs の claudeFlagsOf）だけが引き継ぐ。
 export function startAgent(name, pane) {
   return herdr(['agent', 'start', name, '--kind', 'claude', '--pane', pane, '--timeout', '60000']) !== null;
 }
