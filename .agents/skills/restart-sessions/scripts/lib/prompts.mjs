@@ -40,6 +40,25 @@ export const withSkillDir = (text) => text.replaceAll('<skill-dir>', SKILL_DIR);
 
 export const HOW_TO_PROCEED = '資料の先頭の「再起動した先の進め方」に従って引き継ぐこと。';
 
+// 新セッションに送る1行の依頼。sent は attachGuide が作ったファイル。
+export const restartRequest = (sent) => `@${sent} 前セッションの引き継ぎ資料です。${HOW_TO_PROCEED}`;
+export const selfRestartRequest = (sent) => `@${sent} このセッション自身の再起動です。資料の先頭の「自己再起動の手順」に従うこと。`;
+
+// 自己再起動で進め方の前に置く節（attachGuide の lead）。端末の道具ごとに違うのは、前セッションの呼び方と閉じ方だけ。
+// where は「hc の端末 t7」「ペイン p1」、close は閉じる手順の文（「'hc kill t7' のあと 'hc rm t7' で前セッションの端末を閉じる」）、
+// old は旧の呼び名（「旧の端末」「旧ペイン」）。
+export function selfRestartSteps({ where, sid, close, old }) {
+  return `# 自己再起動の手順
+
+このセッション自身の再起動。前セッション（${where} / セッション ${sid}）は資料を書き終えて、閉じられるのを待っている。
+
+1. この資料を読んで現状を把握する。
+2. 把握できたら ${close}。閉じると前セッションは強制終了になる（資料は書けているので問題ない。戻りたくなったら 'claude --resume ${sid}'）。読み終える前に閉じないこと。
+3. ユーザーに再起動の結果を報告し、下の「再起動した先の進め方」に従って引き継ぐ。
+
+1 と 2 は確認を挟まずに進める。3 は、どれも（処理の立ち上げ直しも、作業の再開も、問いの出し直しや状態を聞く問いも）${old}を閉じてから行う。先に問いを出すと、答えを待つ間ずっと${old}が残る。`;
+}
+
 // つないだファイルの名前の末尾と、進め方と資料の間の区切り。extract-transcript.mjs が、つないだファイルから元の資料を割り出すのに使う。
 export const WITH_GUIDE_SUFFIX = '-with-guide.md';
 export const GUIDE_SEPARATOR = '\n\n---\n\n';

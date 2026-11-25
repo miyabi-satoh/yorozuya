@@ -12,14 +12,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { reporter } from './lib/cli.mjs';
 import { sleep } from './lib/herdr.mjs';
 import { backgroundWorkHint, idleStatus, inputDraft, isHc, lastError, prompt, self as selfOf, settledDraft } from './lib/mux.mjs';
 import { idleClearPrompt } from './lib/prompts.mjs';
 
-const skip = (message) => {
-  process.stderr.write(`[idle-clear-self] SKIP: ${message}\n`);
-  process.exit(1);
-};
+const { skip } = reporter('idle-clear-self');
 
 const [, , mode, pane, handoff, shells] = process.argv;
 

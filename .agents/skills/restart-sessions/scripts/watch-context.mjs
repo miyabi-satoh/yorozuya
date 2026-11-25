@@ -166,7 +166,7 @@ function readUsage(screen) {
   return Number.isFinite(value) ? value : null;
 }
 
-// Claude Code の選択式の問い（AskUserQuestion）は、Herdr 0.9.1 が blocked でなく idle・done と返す（notes/2026-09-25-herdr-dialog-not-blocked.md）。
+// Claude Code の選択式の問い（AskUserQuestion）は、Herdr 0.9.1 が blocked でなく idle・done と返す（2026-09-25 に実際に確かめた）。
 // 問いの間はダイアログがステータスラインを隠すので、blocked と同じく WARN の数に入れない（IDLE・UPDATE の判定は止めない。問いの画面では当たらない）。
 // 問いの最下部には `Enter to select · ↑/↓ to navigate · Esc to cancel` が出る（2.1.286 で実測）。その下にはタイトルの罫線の行しか無い。
 // 会話に同じ文言が映っても、入力欄とステータスラインがその下に来るので、末尾の数行には入らない。

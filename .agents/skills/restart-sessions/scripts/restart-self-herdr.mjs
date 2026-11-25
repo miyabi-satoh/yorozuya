@@ -12,9 +12,10 @@
 
 import { basename, isAbsolute } from 'node:path';
 
+import { reporter, takeFlag } from './lib/cli.mjs';
 import { handoffProblem } from './lib/handoff.mjs';
 import { paceNote } from './lib/pace.mjs';
-import { attachGuide } from './lib/prompts.mjs';
+import { attachGuide, selfRestartRequest, selfRestartSteps } from './lib/prompts.mjs';
 import {
   backgroundWorkHint,
   currentPane,
@@ -28,23 +29,14 @@ import {
   waitForNameRelease,
 } from './lib/herdr.mjs';
 
-const rawArgs = process.argv.slice(2);
-const allowBackground = rawArgs.includes('--allow-background');
-const [handoff, nameArg] = rawArgs.filter((arg) => arg !== '--allow-background');
+const { on: allowBackground, rest } = takeFlag(process.argv.slice(2), '--allow-background');
+const [handoff, nameArg] = rest;
 if (!handoff) {
   process.stderr.write('usage: restart-self.mjs [--allow-background] <資料の絶対パス> [name]\n');
   process.exit(1);
 }
 
-const log = (message) => process.stderr.write(`[restart-self] ${message}\n`);
-const skip = (message) => {
-  process.stderr.write(`[restart-self] SKIP: ${message}\n`);
-  process.exit(1);
-};
-const fail = (message) => {
-  process.stderr.write(`[restart-self] FAIL: ${message}\n`);
-  process.exit(1);
-};
+const { log, skip, fail } = reporter('restart-self');
 
 // --- 何かを変える前に、確かめられることは全部ここで確かめる ---
 
@@ -104,15 +96,12 @@ const selfHoldsName = holder === self;
 
 // 進め方を資料の前につないだファイルを作り、新セッションにはそちらを渡す。資料そのものは書き換えない。
 // 手順は資料の側に書き、新セッションへ送る依頼は1行にする（lib/prompts.mjs の先頭）。
-const steps = `# 自己再起動の手順
-
-このセッション自身の再起動。前セッション（ペイン ${self} / セッション ${sid}）は資料を書き終えて、閉じられるのを待っている。
-
-1. この資料を読んで現状を把握する。
-2. 把握できたら 'herdr pane close ${self}' で前セッションのペインを閉じる。閉じると前セッションは強制終了になる（資料は書けているので問題ない。戻りたくなったら 'claude --resume ${sid}'）。読み終える前に閉じないこと。
-3. ユーザーに再起動の結果を報告し、下の「再起動した先の進め方」に従って引き継ぐ。
-
-1 と 2 は確認を挟まずに進める。3 は、どれも（処理の立ち上げ直しも、作業の再開も、問いの出し直しや状態を聞く問いも）旧ペインを閉じてから行う。先に問いを出すと、答えを待つ間ずっと旧ペインが残る。`;
+const steps = selfRestartSteps({
+  where: `ペイン ${self}`,
+  sid,
+  close: `'herdr pane close ${self}' で前セッションのペインを閉じる`,
+  old: '旧ペイン',
+});
 const { path: sent, error: guideProblem } = attachGuide(handoff, note, steps);
 if (guideProblem) skip(guideProblem);
 
@@ -194,7 +183,7 @@ if (!startAgent(name, created)) {
 }
 log('起動');
 
-const request = `@${sent} このセッション自身の再起動です。資料の先頭の「自己再起動の手順」に従うこと。`;
+const request = selfRestartRequest(sent);
 
 // 送っただけでは、claude が受け取ったかは分からないので、動き出すまでこちらで見る。
 // 確かめる者がほかにいないため（ほかのセッションの再起動は、呼んだセッションが SKILL.md の手順6で確かめる）。

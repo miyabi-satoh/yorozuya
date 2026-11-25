@@ -7,7 +7,10 @@
 
 import { spawnSync } from 'node:child_process';
 
-import { backgroundHintFromScreen, draftFromScreen } from './herdr.mjs';
+import { backgroundHintFromScreen, draftFromScreen, sleep } from './herdr.mjs';
+
+// 待ちは herdr.mjs のものを使う（同じものを2つ置かない）。lib/exit.mjs の切り離したプロセスがこのモジュールから呼ぶので、ここからも出す。
+export { sleep };
 
 let lastError = '';
 let lastKind = '';
@@ -360,6 +363,10 @@ export function claudeFlagsOf(info) {
   return [...found].flatMap(([flag, value]) => [flag, value]);
 }
 
+// startClaude が起動で知らせること（rencon で起動できず hc run で起動し直したなど）。無ければ ''。
+let startNote = '';
+export const lastStartNote = () => startNote;
+
 // 新しい端末で claude を起動し、最初の依頼を引数で渡す（claude は引数の文を最初の入力として送る）。
 // 起動したばかりの claude へ hc send で送ると落ちることがあると hc の文書にあるので、送らずに引数で渡す。
 // --no-parent は外さない。呼び出し元の端末の子にすると、呼び出し元が終わったときに一緒に終わる（hc の既定。実測）。
@@ -368,9 +375,6 @@ export function claudeFlagsOf(info) {
 // rencon handover は hc の出力・エラー・終了コードをそのまま返すので、hc run と同じく読む。
 // 返すのは address。作れなければ ''（理由は hcError()）。
 // flags は旧の端末の claude から引き継ぐ起動の引数（claudeFlagsOf）。
-// 起動で知らせること（rencon で起動できず hc run で起動し直したなど）。無ければ ''。
-let startNote = '';
-export const lastStartNote = () => startNote;
 export function startClaude({ cwd, name, request, replaces, flags = [] }) {
   startNote = '';
   const runArgs = ['--bg', '--no-parent', '--cwd', cwd, ...(name ? ['--name', name] : []), '--', 'claude', ...flags, request];
@@ -415,11 +419,6 @@ export function hasHandover() {
 export function markRestarting(t, on = true) {
   if (!hasHandover()) return true;
   return runCli('rencon', ['handover', on ? 'hold' : 'release', t], { payload: false }) !== null;
-}
-
-const slot = new Int32Array(new SharedArrayBuffer(4));
-export function sleep(seconds) {
-  Atomics.wait(slot, 0, 0, seconds * 1000);
 }
 
 // 起動した claude が依頼を受け取って動き出したか（startedOf は1回分の見方、waitForStart が待つ）。返すのは次のどれか。
