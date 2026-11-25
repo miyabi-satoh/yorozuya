@@ -45,7 +45,7 @@ if (!target || !name || !handoff) {
 }
 
 const log = (message) => process.stderr.write(`[${name}] ${message}\n`);
-// 旧の端末に restarting を付けている間は true。旧が残ったまま止まるときは外す（残すと、後で旧が終わっても rencon がタイルを閉じず、来ない新しい端末を待ち続ける）。
+// 旧の端末のタイルを残している（rencon handover hold）間は true。旧が残ったまま止まるときは外す（残すと、後で旧が終わっても rencon がタイルを閉じず、来ない新しい端末を待ち続ける）。
 let restarting = false;
 const clearRestarting = () => {
   if (!restarting) return;
@@ -54,7 +54,7 @@ const clearRestarting = () => {
     if (i > 0) sleep(1);
     if (markRestarting(target, false) || hcErrorKind() === 'not_found') restarting = false; // 端末が無ければ外すものも無い
   }
-  if (restarting) log(`端末 ${target} のラベル restarting を外せなかった（${hcError()}）。'hc label ${target} restarting=' で外すこと`);
+  if (restarting) log(`端末 ${target} のタイルの保持を戻せなかった（${hcError()}）。'rencon handover release ${target}' で戻すこと`);
 };
 const skip = (message) => {
   clearRestarting();
@@ -124,7 +124,7 @@ if (draft) {
 log(`旧セッション ${sid}（止まったまま残ったら、claude --resume ${sid} で元の会話に戻れる）`);
 log('終了');
 restarting = markRestarting(target);
-if (!restarting) log(`端末 ${target} にラベル restarting を付けられなかった（${hcError()}）。rencon のタイルは移らずに閉じる`);
+if (!restarting) log(`端末 ${target} のタイルを残せなかった（rencon handover hold: ${hcError()}）。rencon のタイルは移らずに閉じる`);
 if (!prompt(target, '/exit')) {
   const error = hcError();
   if (SEND_REFUSED.has(hcErrorKind())) skip(`/exit を送れなかった（${error}）。対象はそのまま動いている`);

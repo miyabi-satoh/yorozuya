@@ -194,6 +194,18 @@ esac
 `,
     { mode: 0o755 },
   );
+  // rencon の偽物。--skill は bin/old があれば 2（handover の無い古い版）、無ければ 0。handover は呼ばれた引数を書き残し、run だけ hc の偽物へ流す。
+  fs.writeFileSync(
+    path.join(bin, 'rencon'),
+    `#!/bin/sh
+if [ "$1" = --skill ]; then [ -e '${bin}/old' ] && exit 2; exit 0; fi
+printf 'rencon %s\\n' "$*" >> '${calls}'
+[ "$2" = run ] || exit 0
+shift 4
+exec '${bin}/hc' run "$@"
+`,
+    { mode: 0o755 },
+  );
   t.after(() => fs.rmSync(bin, { recursive: true, force: true }));
   const lib = new URL('./hc.mjs', import.meta.url).href;
   const call = (code) =>
@@ -202,7 +214,7 @@ esac
       env: { PATH: `${bin}${path.delimiter}${process.env.PATH}`, HC_TERMINAL_ID: 't3', CLAUDE_CODE_CHILD_SESSION: '1', HERDR_ENV: '1' },
     });
   const seen = () => fs.readFileSync(calls, 'utf8').trim().split('\n');
-  return { call, seen };
+  return { call, seen, bin };
 }
 
 test('送る文は -- の後に置き、呼び出し元の端末を外して hc send に渡す（包まれると /exit が効かない）', { skip: process.platform === 'win32' }, (t) => {
@@ -212,17 +224,28 @@ test('送る文は -- の後に置き、呼び出し元の端末を外して hc 
   assert.deepEqual(seen(), ['unset|unsetunset|send --json -- t5 /exit']);
 });
 
-test('claude は呼び出し元の子にせず、依頼を引数で渡して起動する', { skip: process.platform === 'win32' }, (t) => {
+test('claude は呼び出し元の子にせず、依頼を引数で渡して、rencon handover run で旧の端末の代わりに起動する', { skip: process.platform === 'win32' }, (t) => {
   const { call, seen } = fakeHc(t);
   const result = call(`console.log(hc.startClaude({ cwd: '/w', name: 'knowledge-4b-2', request: '@/tmp/a.md 読むこと', replaces: 't1b' }));`);
   assert.equal(result.stdout.trim(), 't9');
-  assert.deepEqual(seen(), ['t3|unsetunset|run --json --bg --no-parent --cwd /w --name knowledge-4b-2 --label replaces=t1b -- claude @/tmp/a.md 読むこと']);
+  assert.deepEqual(seen(), [
+    'rencon handover run t1b -- --json --bg --no-parent --cwd /w --name knowledge-4b-2 -- claude @/tmp/a.md 読むこと',
+    't3|unsetunset|run --json --bg --no-parent --cwd /w --name knowledge-4b-2 -- claude @/tmp/a.md 読むこと',
+  ]);
 });
 
-test('立て直しの間の印は restarting=1 で付け、restarting= で外す', { skip: process.platform === 'win32' }, (t) => {
+test('handover の無い rencon なら、ただの hc run で起動し、タイルの保持は飛ばす', { skip: process.platform === 'win32' }, (t) => {
+  const { call, seen, bin } = fakeHc(t);
+  fs.writeFileSync(path.join(bin, 'old'), '');
+  const result = call(`console.log(hc.startClaude({ cwd: '/w', name: 'k', request: 'r', replaces: 't1b' }), hc.markRestarting('t5'), hc.markRestarting('t5', false));`);
+  assert.equal(result.stdout.trim(), 't9 true true');
+  assert.deepEqual(seen(), ['t3|unsetunset|run --json --bg --no-parent --cwd /w --name k -- claude r']);
+});
+
+test('立て直しの間のタイルは rencon handover hold で残し、release で戻す', { skip: process.platform === 'win32' }, (t) => {
   const { call, seen } = fakeHc(t);
   assert.equal(call(`console.log(hc.markRestarting('t5'), hc.markRestarting('t5', false));`).stdout.trim(), 'true true');
-  assert.deepEqual(seen(), ['t3|unsetunset|label --json t5 restarting=1', 't3|unsetunset|label --json t5 restarting=']);
+  assert.deepEqual(seen(), ['rencon handover hold t5', 'rencon handover release t5']);
 });
 
 test('閉じるときは kill してから、終わったのを見て rm する。失敗は kind で読める', { skip: process.platform === 'win32' }, (t) => {
