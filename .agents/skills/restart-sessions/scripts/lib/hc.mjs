@@ -117,8 +117,12 @@ export const machineOf = (address) => (typeof address === 'string' && address.in
 const decode = (text) => (typeof text === 'string' ? Buffer.from(text, 'base64').toString('utf8') : '');
 export function execStdout(result) {
   if (!result) return null;
-  if (result.code !== 0 || typeof result.stdout !== 'string') {
+  if (result.code !== 0) {
     lastError = `終了コード ${result.code ?? '不明'}: ${decode(result.stderr).trim().slice(0, 200)}`;
+    return null;
+  }
+  if (typeof result.stdout !== 'string') {
+    lastError = 'hc exec の結果に stdout が無い';
     return null;
   }
   return decode(result.stdout);
@@ -180,26 +184,42 @@ export function inputDraft(t) {
 // 書きかけに見えたものが薄字の入力候補かを、1字打って確かめる。候補なら打った字に置き換わり、書きかけなら末尾に付く。
 // 打った字は消して戻す。返すのは inputDraft と同じ形で、候補だったなら ''。見分けが付かなければ元の書きかけを返して止まる側に倒す。
 // 打つ字は見える字にする（hc read は行末の空白を落とすので、空白では書きかけと見分けられない。実測）。
-// 打った直後は描き直す前の画面が返りうるので、画面が変わるまで少し読み直す。打った字を消せなければ null を返し、端末を見てもらう。
+// 描き直しの途中の画面を拾わないよう、打った後と消した後は、待つ形（打った後は x か書きかけ+x、消した後は打つ前）が続けて2回読めるまで読み直す。
+// 消した後が打つ前と違えば（間にユーザーが打った・x が残った）、null を返して端末を見てもらう。
 export const PROBE_KEY = 'x';
 export function draftAfterProbe(before, after) {
   if (!before) return before;
   return after === PROBE_KEY ? '' : before;
 }
+// 読んだ値が accept に当たり、続けて2回同じになるまで 0.2 秒おきに読む。2秒で揃わなければ最後に読んだ値を返す。
+function readUntil(t, accept) {
+  let last = inputDraft(t);
+  for (let i = 0; i < 10; i += 1) {
+    sleep(0.2);
+    const now = inputDraft(t);
+    if (now === last && accept(now)) return now;
+    last = now;
+  }
+  return last;
+}
 export function settledDraft(t) {
   const before = inputDraft(t);
   if (!before) return before;
   if (hc(['keys', t, PROBE_KEY]) === null) return before;
-  let after = inputDraft(t);
-  for (let i = 0; i < 10 && (after === null || after === before); i += 1) {
-    sleep(0.2);
-    after = inputDraft(t);
-  }
+  const after = readUntil(t, (text) => text === PROBE_KEY || text === before + PROBE_KEY);
+  const verdict = draftAfterProbe(before, after);
   if (hc(['keys', t, 'backspace']) === null) {
     lastError = `確かめに打った ${PROBE_KEY} を消せなかった（${hcError()}）。入力欄の末尾に ${PROBE_KEY} が残っているかもしれない`;
     return null;
   }
-  return draftAfterProbe(before, after);
+  // 候補は、消すと元の候補に戻るか空になる（実測は戻る）。書きかけは元の書きかけに戻る。
+  const back = (text) => text === before || (verdict === '' && text === '');
+  const restored = readUntil(t, back);
+  if (!back(restored)) {
+    lastError = `確かめに ${PROBE_KEY} を打って消した後の入力欄が、打つ前と違う（「${String(restored).slice(0, 40)}」）`;
+    return null;
+  }
+  return verdict;
 }
 
 export function backgroundWorkHint(t) {
