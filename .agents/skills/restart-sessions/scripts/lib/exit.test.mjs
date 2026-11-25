@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 
-import { exitLogLine, isHubCwd, parseExitArgs } from './exit.mjs';
+import { exitLogLine, isHubCwd, parseExitArgs, sendMessageProblem } from './exit.mjs';
 
 test('引数は --allow-background と要約。要約が空なら null', () => {
   assert.deepEqual(parseExitArgs(['PR #12 をマージ', '済み']), { allowBackground: false, summary: 'PR #12 をマージ 済み' });
@@ -33,4 +33,42 @@ test('hub の cwd（と配下）は自分で終わらない。ほかは終わっ
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
+});
+
+// 会話ログの行の形は 2.1.332 の JSONL で実測（2026-11-25 に返信が届かなかったセッションのもの）。
+const use = (id, to) => JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id, name: 'SendMessage', input: { to, message: 'x' } }] } });
+const result = (id, body) => JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content: typeof body === 'string' ? body : JSON.stringify(body) }] } });
+const other = JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'b1', name: 'Bash', input: {} }] } });
+
+test('SendMessage を使っていなければ止めない', () => {
+  assert.equal(sendMessageProblem([other, 'not json', '']), null);
+});
+
+test('最後の SendMessage の結果がまだ無ければ止める（同じ手番に並べた）', () => {
+  assert.match(sendMessageProblem([use('s1', 'rencon-d6'), other]), /結果がまだ会話ログに無い/);
+});
+
+test('success:false なら止め、送り直して届けば止めない', () => {
+  const refused = { success: false, message: "No agent is named 'rencon-d6' exactly. Re-send with the ref" };
+  assert.match(sendMessageProblem([use('s1', 'rencon-d6'), result('s1', refused)]), /届いていない.*Re-send with the ref/);
+  const ok = { success: true, message: '"x" → rencon-d6/mac (a Claude session on another machine, over Remote Control; not confirmed read)' };
+  assert.equal(sendMessageProblem([use('s1', 'rencon-d6'), result('s1', refused), use('s2', 'rencon-d6/mac [b33426]'), result('s2', ok)]), null);
+});
+
+test('queued のときは、要約に queued と書いてあれば止めない', () => {
+  const queued = { success: true, message: 'not confirmed read; it is offline right now — delivery is queued until that machine reconnects' };
+  const lines = [use('s1', 'rencon-63/mac'), result('s1', queued)];
+  assert.match(sendMessageProblem(lines, '確かめを終えた'), /queued/);
+  assert.equal(sendMessageProblem(lines, '確かめを終えた。返信は未達のおそれ（queued）'), null);
+});
+
+test('結果の形が読めないとき（JSON でない・配列の text）は止めない', () => {
+  assert.equal(sendMessageProblem([use('s1', 'a'), result('s1', 'sent')]), null);
+  const arrayContent = JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 's1', content: [{ type: 'text', text: JSON.stringify({ success: false, message: 'no' }) }] }] } });
+  assert.match(sendMessageProblem([use('s1', 'a'), arrayContent]), /届いていない/);
+});
+
+test('会話でない行（api-request-blob）に写った同じ tool_use は数えない', () => {
+  const blob = JSON.stringify({ type: 'api-request-blob', message: { content: [{ type: 'tool_use', id: 's1', name: 'SendMessage', input: { to: 'a' } }] } });
+  assert.equal(sendMessageProblem([use('s1', 'a'), result('s1', { success: true, message: 'sent' }), blob]), null);
 });

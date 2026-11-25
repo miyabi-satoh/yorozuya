@@ -2,17 +2,17 @@
 // 仕事を終えた呼び出し元自身のセッションが、記録を残して自分の hc の端末を閉じる。
 // usage: exit-self.mjs [--allow-background] <要約（最終報告の1行）>
 //
-// 終えてよい条件（終わらないとき）は exit-self.md。ここで確かめるのは機械的に分かること（hc の claude の端末か・hub でないか・モードラインに処理が出ていないか）だけ。
+// 終えてよい条件（終わらないとき）は exit-self.md。ここで確かめるのは機械的に分かること（hc の claude の端末か・hub でないか・モードラインに処理が出ていないか・会話ログの最後の SendMessage が届いたか）だけ。
 // 要約は ~/.claude/session-exits.log に1行で残す。相談役（hub）がこれを読んでユーザーに知らせる。
 // /exit は送らない（終了の確認画面が出ることがある）。切り離したプロセスが 2 秒後に hc kill と hc rm をする。セッションIDは resume できる。
 // 終了コード: 0 は閉じる手配を済ませた（この後は何も出力しない）。1 は SKIP（何も変えていない。理由を報告して続ける）。
 
-import { appendFileSync, mkdirSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 
 import { reporter } from './lib/cli.mjs';
-import { closeSelfDetached, exitLogLine, isHubCwd, parseExitArgs } from './lib/exit.mjs';
+import { closeSelfDetached, exitLogLine, isHubCwd, parseExitArgs, sendMessageProblem } from './lib/exit.mjs';
 import { backgroundWorkHint, cwdOf, hcError, isClaude, selfId, sessionOf, terminalInfo } from './lib/hc.mjs';
 
 const { skip } = reporter('exit-self');
@@ -39,6 +39,13 @@ if (!args.allowBackground) {
   }
 }
 
+// 会話ログは ~/.claude/projects/*/<セッションID>.jsonl（extract-transcript.mjs と同じ探し方）。見つからなければ確かめずに進む（これまでと同じ）。
+const transcript = findTranscript(sid);
+if (transcript) {
+  const problem = sendMessageProblem(readFileSync(transcript, 'utf8').split('\n'), args.summary);
+  if (problem) skip(problem);
+}
+
 const logPath = path.join(homedir(), '.claude', 'session-exits.log');
 const line = exitLogLine({ name: info.name || self, cwd, sid, summary: args.summary });
 try {
@@ -61,3 +68,17 @@ if (!pid) {
 }
 process.stdout.write(`OK\t${self}\t${info.name ?? ''}\tresume:${sid}\n`);
 process.stderr.write(`[exit-self] 2秒後にこの端末 ${self} を閉じる。戻るなら 'claude --resume ${sid}'。ここで止まる（この先の出力は読まれない）\n`);
+
+function findTranscript(sessionId) {
+  const projectsDir = path.join(homedir(), '.claude', 'projects');
+  try {
+    return (
+      readdirSync(projectsDir, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => path.join(projectsDir, entry.name, `${sessionId}.jsonl`))
+        .find((file) => existsSync(file)) ?? null
+    );
+  } catch {
+    return null;
+  }
+}
