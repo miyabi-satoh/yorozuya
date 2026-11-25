@@ -10,10 +10,13 @@ import { test } from 'node:test';
 import {
   claudeTerminalsFrom,
   cwdOf,
+  draftAfterProbe,
   draftFromHcScreen,
+  execStdout,
   hcEnv,
   isClaude,
   isLocal,
+  machineOf,
   parseHcError,
   rawEnv,
   sessionIdOf,
@@ -34,7 +37,7 @@ const claudeInfo = (extra = {}) => ({
   cwd: '/Users/me/Projects/knowledge',
   pid: 100,
   foreground: { pid: 100, name: 'claude', argv: ['claude'], cwd: '/Users/me/Projects/knowledge' },
-  labels: { claude_transcript: '/Users/me/.claude/projects/-Users-me-Projects-knowledge/0b6c1a2e-1111-2222-3333-444455556666.jsonl' },
+  labels: {},
   status: { state: 'idle' },
   turn: 0,
   ...extra,
@@ -48,12 +51,43 @@ test('失敗は stderr の {"error":{"kind"}} から読む', () => {
   assert.equal(parseHcError('not json'), null);
 });
 
-test('セッションIDはラベル claude_transcript の記録のファイル名から取る。Windows のパスも分ける', () => {
-  assert.equal(sessionIdOf(claudeInfo()), '0b6c1a2e-1111-2222-3333-444455556666');
-  assert.equal(sessionIdOf({ labels: { claude_transcript: 'C:\\Users\\me\\.claude\\projects\\x\\abc-1.jsonl' } }), 'abc-1');
-  assert.equal(sessionIdOf({ labels: {} }), '');
-  assert.equal(sessionIdOf({ labels: { claude_transcript: '/x/abc.txt' } }), '');
-  assert.equal(sessionIdOf(null), '');
+// claude agents --json の形（2.1.332）。
+const SID = '0b6c1a2e-1111-2222-3333-444455556666';
+const agents = [
+  { pid: 7, cwd: '/w', kind: 'interactive', sessionId: 'other', name: 'rencon-1b', status: 'idle' },
+  { pid: 100, cwd: '/Users/me/Projects/knowledge', kind: 'interactive', sessionId: SID, name: 'knowledge-4b', status: 'busy' },
+];
+
+test('セッションIDは claude agents から、端末の前景の pid が同じ項目を引く', () => {
+  assert.equal(sessionIdOf(claudeInfo(), agents), SID);
+  // 前景が無ければ端末のプログラムの pid で引く
+  assert.equal(sessionIdOf(claudeInfo({ pid: 7, foreground: null }), agents), 'other');
+  // 前景が claude でなければ、端末のプログラムの pid で引き直す
+  assert.equal(sessionIdOf(claudeInfo({ foreground: { pid: 8 } }), agents), SID);
+  assert.equal(sessionIdOf(claudeInfo({ pid: 8, foreground: { pid: 8 } }), agents), '');
+  assert.equal(sessionIdOf(claudeInfo(), null), '');
+  assert.equal(sessionIdOf(null, agents), '');
+});
+
+test('ほかのマシンの端末は、address の前の部分をマシンとして引く', () => {
+  assert.equal(machineOf('mac-mini-2020/t160'), 'mac-mini-2020');
+  assert.equal(machineOf('t3'), '');
+  assert.equal(machineOf(undefined), '');
+});
+
+test('hc exec の stdout は base64。終了コードが 0 でなければ null', () => {
+  assert.equal(execStdout({ code: 0, stdout: Buffer.from('[]').toString('base64') }), '[]');
+  assert.equal(execStdout({ code: 1, stdout: '', stderr: Buffer.from('boom').toString('base64') }), null);
+  assert.equal(execStdout(null), null);
+});
+
+test('1字打って、その字だけになれば入力候補、書きかけの末尾に付けば書きかけ', () => {
+  assert.equal(draftAfterProbe('#64 まで入れ直して', 'x'), '');
+  assert.equal(draftAfterProbe('#64 まで入れ直して', '#64 まで入れ直してx'), '#64 まで入れ直して');
+  // 読めなかったら止まる側に倒す
+  assert.equal(draftAfterProbe('書きかけ', null), '書きかけ');
+  assert.equal(draftAfterProbe('', 'x'), '');
+  assert.equal(draftAfterProbe(null, 'x'), null);
 });
 
 test('status は claude が知らせる語。知らせていなければ空', () => {
@@ -87,9 +121,9 @@ test('入力欄は色の無い画面から読む。案内（Try "…"）だけ�
 test('見張りの一覧は claude の端末だけ。名前が無ければ address を見出しにする', () => {
   const shell = claudeInfo({ address: 't4', foreground: { pid: 5, name: 'bash', argv: ['bash'], cwd: '/w' } });
   const unnamed = claudeInfo({ address: 't5', name: null, title: '' });
-  assert.deepEqual(claudeTerminalsFrom([claudeInfo(), shell, unnamed, null]), [
-    { id: 't3', name: 'knowledge-4b', label: 'knowledge-4b', sid: '0b6c1a2e-1111-2222-3333-444455556666', cwd: '/Users/me/Projects/knowledge', status: 'idle' },
-    { id: 't5', name: '', label: 't5', sid: '0b6c1a2e-1111-2222-3333-444455556666', cwd: '/Users/me/Projects/knowledge', status: 'idle' },
+  assert.deepEqual(claudeTerminalsFrom([claudeInfo(), shell, unnamed, null], agents), [
+    { id: 't3', name: 'knowledge-4b', label: 'knowledge-4b', sid: SID, cwd: '/Users/me/Projects/knowledge', status: 'idle' },
+    { id: 't5', name: '', label: 't5', sid: SID, cwd: '/Users/me/Projects/knowledge', status: 'idle' },
   ]);
 });
 
@@ -152,6 +186,7 @@ case "$1" in
   rm) echo '{"removed":"t9"}' ;;
   ls) echo '{"terminals":[],"hidden_finished":0,"machines":[]}' ;;
   keys) ;;
+  exec) printf '{"code":0,"stdout":"%s"}\n' "$(printf '[{"pid":100,"sessionId":"s1"}]' | base64 | tr -d '\n')" ;;
   label) if [ -z "$4" ]; then echo '{"error":{"kind":"not_found","message":"no terminal"}}' >&2; exit 3; fi ;;
   read) echo 'not json' ;;
   *) echo '{"error":{"kind":"not_found","message":"no terminal"}}' >&2; exit 3 ;;
@@ -195,6 +230,12 @@ test('閉じるときは kill してから、終わったのを見て rm する�
   assert.equal(call(`console.log(hc.closeTerminal('t9'));`).stdout.trim(), 'true');
   assert.deepEqual(seen(), ['t3|unsetunset|kill --json t9', 't3|unsetunset|get --json t9', 't3|unsetunset|rm --json t9']);
   assert.equal(call(`console.log(hc.hc(['label', 't1']), hc.hcErrorKind());`).stdout.trim(), 'null not_found');
+});
+
+test('claude agents は hc exec で引き、ほかのマシンなら --on を付ける', { skip: process.platform === 'win32' }, (t) => {
+  const { call, seen } = fakeHc(t);
+  assert.equal(call(`console.log(hc.sessionOf({ address: 'mac/t1', foreground: { pid: 100 } }), JSON.stringify(hc.claudeAgents()));`).stdout.trim(), 's1 [{"pid":100,"sessionId":"s1"}]');
+  assert.deepEqual(seen(), ['t3|unsetunset|exec --json --on mac claude agents --json', 't3|unsetunset|exec --json claude agents --json']);
 });
 
 test('中身の要らない keys は出力が空でも成功、中身の要る read は JSON でなければ失敗', { skip: process.platform === 'win32' }, (t) => {

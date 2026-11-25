@@ -22,7 +22,7 @@ import {
   liveNames,
   NAME_PATTERN,
   selfId,
-  sessionIdOf,
+  sessionOf,
   slugName,
   startClaude,
   successorName,
@@ -59,8 +59,8 @@ const self = selfId();
 const info = self ? terminalInfo(self) : null;
 if (!info) skip(`自分の端末（HC_TERMINAL_ID=${self || '空'}）を hc から引けない（${hcError()}）`);
 // セッションIDは、資料が渡らなかったときに戻る手がかり。引けなければ止める。
-const sid = sessionIdOf(info);
-if (!sid) skip(`自分の端末 ${self} にラベル claude_transcript が無く、セッションIDを特定できない。claude の SessionStart の hook（hc-transcript-label）が入っているか確かめること`);
+const sid = sessionOf(info);
+if (!sid) skip(`自分の端末 ${self} のセッションIDを claude agents から引けない（${hcError() || '前景の pid に当たる項目が無い'}）`);
 // 時間がかかりうるので、照合の前に済ませる
 const note = paceNote(self);
 

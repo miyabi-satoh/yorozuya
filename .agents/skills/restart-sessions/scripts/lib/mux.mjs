@@ -26,7 +26,7 @@ export const lastError = () => (isHc() ? hc.hcError() : herdr.herdrError());
 export function self() {
   if (isHc()) {
     const id = hc.selfId();
-    return { id, sid: hc.sessionIdOf(hc.terminalInfo(id)) };
+    return { id, sid: hc.sessionOf(hc.terminalInfo(id)) };
   }
   const current = herdr.currentPane();
   return { id: current?.pane_id ?? '', sid: current?.agent_session?.value ?? '' };
@@ -45,6 +45,8 @@ export function idleStatus(id) {
 
 export const readScreen = (id) => pick().readScreen(id);
 export const inputDraft = (id) => pick().inputDraft(id);
+// 薄字の入力候補を書きかけとみなさない読み方。Herdr は色つきで読めるので inputDraft のまま。hc は1字打って確かめる（lib/hc.mjs）。
+export const settledDraft = (id) => (isHc() ? hc.settledDraft(id) : herdr.inputDraft(id));
 export const backgroundWorkHint = (id) => pick().backgroundWorkHint(id);
 export const prompt = (id, text) => pick().prompt(id, text);
 
