@@ -42,7 +42,13 @@ if (!args.allowBackground) {
 // 会話ログは ~/.claude/projects/*/<セッションID>.jsonl（extract-transcript.mjs と同じ探し方）。見つからなければ確かめずに進む（これまでと同じ）。
 const transcript = findTranscript(sid);
 if (transcript) {
-  const problem = sendMessageProblem(readFileSync(transcript, 'utf8').split('\n'), args.summary);
+  let lines = null;
+  try {
+    lines = readFileSync(transcript, 'utf8').split('\n');
+  } catch {
+    // 読めなければ、見つからないときと同じく確かめずに進む。
+  }
+  const problem = lines && sendMessageProblem(lines, args.summary);
   if (problem) skip(problem);
 }
 

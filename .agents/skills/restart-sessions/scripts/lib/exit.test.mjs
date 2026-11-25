@@ -60,6 +60,9 @@ test('queued のときは、要約に queued と書いてあれば止めない',
   const lines = [use('s1', 'rencon-63/mac'), result('s1', queued)];
   assert.match(sendMessageProblem(lines, '確かめを終えた'), /queued/);
   assert.equal(sendMessageProblem(lines, '確かめを終えた。返信は未達のおそれ（queued）'), null);
+  // 題に queued の語があっても、届いていれば止めない。
+  const delivered = { success: true, message: '"merge queued" → rencon-d6/mac (a Claude session on another machine, over Remote Control; not confirmed read)' };
+  assert.equal(sendMessageProblem([use('s1', 'rencon-d6/mac'), result('s1', delivered)], '済み'), null);
 });
 
 test('結果の形が読めないとき（JSON でない・配列の text）は止めない', () => {
@@ -71,4 +74,18 @@ test('結果の形が読めないとき（JSON でない・配列の text）は�
 test('会話でない行（api-request-blob）に写った同じ tool_use は数えない', () => {
   const blob = JSON.stringify({ type: 'api-request-blob', message: { content: [{ type: 'tool_use', id: 's1', name: 'SendMessage', input: { to: 'a' } }] } });
   assert.equal(sendMessageProblem([use('s1', 'a'), result('s1', { success: true, message: 'sent' }), blob]), null);
+});
+
+test('送り直せない失敗は、要約に未達と書けば通す。結果がまだ無いときは通さない', () => {
+  const refused = [use('s1', 'a'), result('s1', { success: false, message: 'no' })];
+  assert.match(sendMessageProblem(refused, '済み'), /未達/);
+  assert.equal(sendMessageProblem(refused, '済み。返信は未達（相手が終わっていた）'), null);
+  assert.match(sendMessageProblem([use('s1', 'a')], '返信は未達'), /結果がまだ会話ログに無い/);
+});
+
+test('is_error の結果は失敗として扱い、サブエージェントの行は数えない', () => {
+  const errored = JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 's1', is_error: true, content: 'Error: denied' }] } });
+  assert.match(sendMessageProblem([use('s1', 'a'), errored]), /届いていない（Error: denied）/);
+  const side = JSON.stringify({ type: 'assistant', isSidechain: true, message: { content: [{ type: 'tool_use', id: 'x1', name: 'SendMessage', input: { to: 'b' } }] } });
+  assert.equal(sendMessageProblem([use('s1', 'a'), result('s1', { success: true, message: 'sent' }), side]), null);
 });

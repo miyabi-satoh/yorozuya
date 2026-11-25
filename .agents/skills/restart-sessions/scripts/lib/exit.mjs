@@ -64,6 +64,7 @@ export function closeSelfDetached(id, hcModuleUrl, { delaySeconds = 2, failure }
 // 会話ログ（JSONL の行）の最後の SendMessage が、終わってよい形で済んでいるか。済んでいれば null、だめなら理由。
 // 報告を SendMessage で返して終わるセッションが、送れなかったことを読まずに終わらないようにする（exit-self.md「ほかのセッションへ報告を返すとき」）。
 // 止まる側にだけ倒す: 結果の形が読めないときは済んだものとして扱い、はっきり読めた失敗と未着だけを理由にする。
+// 届かない（送り直せない）と分かって終わるときは、要約に「未達」と書けば通す。前の失敗で終われなくならないため。
 export function sendMessageProblem(lines, summary = '') {
   const uses = new Map();
   let last = null;
@@ -76,6 +77,7 @@ export function sendMessageProblem(lines, summary = '') {
     }
     // 会話の行だけを見る。api-request-blob などの行は同じ tool_use を写して持つ。
     if (record?.type !== 'assistant' && record?.type !== 'user') continue;
+    if (record.isSidechain) continue;
     const content = record.message?.content;
     if (!Array.isArray(content)) continue;
     for (const block of content) {
@@ -83,25 +85,28 @@ export function sendMessageProblem(lines, summary = '') {
         last = block.id;
         uses.set(block.id, { to: block.input?.to, result: undefined });
       } else if (block?.type === 'tool_result' && uses.has(block.tool_use_id)) {
-        uses.get(block.tool_use_id).result = toolResultText(block.content);
+        Object.assign(uses.get(block.tool_use_id), { result: toolResultText(block.content), isError: block.is_error === true });
       }
     }
   }
   if (!last) return null;
-  const { to, result } = uses.get(last);
+  const { to, result, isError } = uses.get(last);
   if (result === undefined) {
     return `最後の SendMessage（宛先 ${to}）の結果がまだ会話ログに無い。同じ手番に並べず、結果を読んでから次の手番で呼び直す`;
   }
+  if (summary.includes('未達')) return null;
   let parsed = null;
   try {
     parsed = JSON.parse(result);
   } catch {
-    return null;
+    // JSON でない結果は形が読めないので通す。エラーと印の付いたものだけは失敗として扱う。
   }
-  if (parsed?.success === false) {
-    return `最後の SendMessage（宛先 ${to}）が届いていない（success:false: ${String(parsed.message ?? '').replace(/\s+/g, ' ').slice(0, 200)}）。結果の文面が言う形で送り直してから呼び直す`;
+  const brief = (text) => String(text ?? '').replace(/\s+/g, ' ').slice(0, 200);
+  if (isError || parsed?.success === false) {
+    return `最後の SendMessage（宛先 ${to}）が届いていない（${brief(parsed?.message ?? result)}）。結果の文面が言う形で送り直してから呼び直す。送り直せないなら、要約に「返信は未達」と理由を書いて呼び直す`;
   }
-  if (/queued/i.test(String(parsed?.message ?? '')) && !/queued/i.test(summary)) {
+  // 結果の文面は送った題を引用するので、題の語に当たらないよう、届け方を言う句で見る（2.1.332 で実測した文面）。
+  if (/delivery is queued/i.test(String(parsed?.message ?? ''))) {
     return `最後の SendMessage（宛先 ${to}）は相手がオフラインで queued のまま。要約に「返信は未達のおそれ（queued）」と書いて呼び直す`;
   }
   return null;
