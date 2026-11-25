@@ -206,7 +206,13 @@ export function settledDraft(t) {
   const before = inputDraft(t);
   if (!before) return before;
   if (hc(['keys', t, PROBE_KEY]) === null) return before;
-  const after = readUntil(t, (text) => text === PROBE_KEY || text === before + PROBE_KEY);
+  const typed = (text) => text === PROBE_KEY || text === before + PROBE_KEY;
+  const after = readUntil(t, typed);
+  // 打った字が見えないまま消すと、遅れて入った x でなく書きかけの末尾の字を消しうる。消さずに止め、端末を見てもらう。
+  if (!typed(after)) {
+    lastError = `確かめに打った ${PROBE_KEY} が入力欄に見えない（「${String(after).slice(0, 40)}」）。入力欄の末尾に ${PROBE_KEY} が残っているかもしれない`;
+    return null;
+  }
   const verdict = draftAfterProbe(before, after);
   if (hc(['keys', t, 'backspace']) === null) {
     lastError = `確かめに打った ${PROBE_KEY} を消せなかった（${hcError()}）。入力欄の末尾に ${PROBE_KEY} が残っているかもしれない`;
