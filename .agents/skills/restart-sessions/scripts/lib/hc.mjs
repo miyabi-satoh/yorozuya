@@ -342,10 +342,15 @@ export function successorName(name, taken) {
 // 返すのは address。作れなければ ''（理由は hcError()）。
 export function startClaude({ cwd, name, request, replaces }) {
   const runArgs = ['--bg', '--no-parent', '--cwd', cwd, ...(name ? ['--name', name] : []), '--', 'claude', request];
-  const created =
-    replaces && hasHandover()
-      ? runCli('rencon', ['handover', 'run', replaces, '--', '--json', ...runArgs], { payload: true })
-      : hc(['run', ...runArgs]);
+  let created = null;
+  if (replaces && hasHandover()) {
+    created = runCli('rencon', ['handover', 'run', replaces, '--', '--json', ...runArgs], { payload: true });
+    // hc のエラー（kind 付き）は hc run でも同じに落ちるので、そのまま返す。rencon 自身が落ちた（kind が無い）ときだけ、タイルは移らないが hc run で起動する。
+    // 旧の claude はもう終わっているので、タイルのために新しいセッションを起動しないままにしないため。
+    if (created === null && hcErrorKind() === '') created = hc(['run', ...runArgs]);
+  } else {
+    created = hc(['run', ...runArgs]);
+  }
   return created?.address ?? '';
 }
 
