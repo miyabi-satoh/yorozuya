@@ -38,7 +38,8 @@ test('置き場の exit-self.md とスクリプトは実在する', () => {
 test('/clear の後の1行のプロンプトは、仕事を終えていれば exit-self.md で終わらせる。シェルが残るときは終わらせず、続けてよいと足す', () => {
   const plain = idleClearPrompt('/tmp/idle.md');
   assert.ok(plain.startsWith('@/tmp/idle.md '));
-  assert.ok(plain.includes(`\`${exitSelf}\` に従って終わって`));
+  assert.ok(plain.includes(`「${exitSelf}」に従って終わって`));
+  assert.ok(!plain.includes('`'));
   assert.ok(!plain.includes('<skill-dir>'));
   assert.ok(!plain.includes('\n'));
   assert.ok(!plain.includes('バックグラウンドのシェル'));
