@@ -64,7 +64,8 @@ export function closeSelfDetached(id, hcModuleUrl, { delaySeconds = 2, failure }
 // 会話ログ（JSONL の行）の最後の SendMessage が、終わってよい形で済んでいるか。済んでいれば null、だめなら理由。
 // 報告を SendMessage で返して終わるセッションが、送れなかったことを読まずに終わらないようにする（exit-self.md「ほかのセッションへ報告を返すとき」）。
 // 止まる側にだけ倒す: 結果の形が読めないときは済んだものとして扱い、はっきり読めた失敗と未着だけを理由にする。
-// 届かない（送り直せない）と分かって終わるときは、要約に「返信は未達」と書けば通す。前の失敗や打ち切った手番で終われなくならないため。
+// 届いていない（送り直せない）と分かって終わるときは、要約に「返信は未達」と書けば通す。前の失敗で終われなくならないため。
+// 結果がまだ無いとき（同じ手番に並べた）は通さない。結果を読まずに終わるのを止めるのが、この確かめの目的のため。
 export function sendMessageProblem(lines, summary = '') {
   const uses = new Map();
   let last = null;
@@ -90,11 +91,11 @@ export function sendMessageProblem(lines, summary = '') {
     }
   }
   if (!last) return null;
-  if (summary.includes('返信は未達')) return null;
   const { to, result, isError } = uses.get(last);
   if (result === undefined) {
-    return `最後の SendMessage（宛先 ${to}）の結果がまだ会話ログに無い。同じ手番に並べず、結果を読んでから次の手番で呼び直す（手番を打ち切って結果が残らなかったなら、要約に「返信は未達」と書いて呼び直す）`;
+    return `最後の SendMessage（宛先 ${to}）の結果がまだ会話ログに無い。同じ手番に並べず、結果を読んでから次の手番で呼び直す`;
   }
+  if (summary.includes('返信は未達')) return null;
   let parsed = null;
   try {
     parsed = JSON.parse(result);
@@ -105,9 +106,8 @@ export function sendMessageProblem(lines, summary = '') {
   if (isError || parsed?.success === false) {
     return `最後の SendMessage（宛先 ${to}）が届いていない（${brief(parsed?.message ?? result)}）。結果の文面が言う形で送り直してから呼び直す。送り直せないなら、要約に「返信は未達」と理由を書いて呼び直す`;
   }
-  // 結果の文面は「“題” → 宛先 (届け方)」の形で送った題を引用するので、題の語に当たらないよう、最後の → より後ろを見る（2.1.332 で実測した文面）。
-  const message = String(parsed?.message ?? '');
-  if (/queued|offline/i.test(message.slice(message.lastIndexOf('→') + 1))) {
+  // 結果の文面は送った題と宛名を含むので、それらの語に当たらないよう、届け方を言う句で見る（2.1.332 で実測した文面）。
+  if (/offline right now|delivery is queued/i.test(String(parsed?.message ?? ''))) {
     return `最後の SendMessage（宛先 ${to}）は相手がオフラインで queued のまま。要約に「返信は未達のおそれ（queued）」と書いて呼び直す`;
   }
   return null;

@@ -55,7 +55,7 @@ test('success:false なら止め、送り直して届けば止めない', () => 
   assert.equal(sendMessageProblem([use('s1', 'rencon-d6'), result('s1', refused), use('s2', 'rencon-d6/mac [b33426]'), result('s2', ok)]), null);
 });
 
-test('queued のときは、要約に queued と書いてあれば止めない', () => {
+test('queued のときは、要約に「返信は未達」とあれば止めない。題や宛名の語では queued と見ない', () => {
   const queued = { success: true, message: 'not confirmed read; it is offline right now — delivery is queued until that machine reconnects' };
   const lines = [use('s1', 'rencon-63/mac'), result('s1', queued)];
   assert.match(sendMessageProblem(lines, '確かめを終えた'), /queued/);
@@ -63,8 +63,8 @@ test('queued のときは、要約に queued と書いてあれば止めない',
   // 題に queued の語があっても、届いていれば止めない。
   const delivered = { success: true, message: '"merge queued" → rencon-d6/mac (a Claude session on another machine, over Remote Control; not confirmed read)' };
   assert.equal(sendMessageProblem([use('s1', 'rencon-d6/mac'), result('s1', delivered)], '済み'), null);
-  const offline = { success: true, message: '"x" → rencon-63/mac (a Claude session on another machine; it is offline right now)' };
-  assert.match(sendMessageProblem([use('s1', 'rencon-63/mac'), result('s1', offline)], '済み'), /queued/);
+  const named = { success: true, message: '"offline migration" → offline-bot/mac (a Claude session on another machine, over Remote Control; not confirmed read)' };
+  assert.equal(sendMessageProblem([use('s1', 'offline-bot/mac'), result('s1', named)], '済み'), null);
 });
 
 test('結果の形が読めないとき（JSON でない・配列の text）は止めない', () => {
@@ -78,12 +78,12 @@ test('会話でない行（api-request-blob）に写った同じ tool_use は数
   assert.equal(sendMessageProblem([use('s1', 'a'), result('s1', { success: true, message: 'sent' }), blob]), null);
 });
 
-test('送り直せない失敗と結果の無いものは、要約に「返信は未達」と書けば通す（「未達成」では通さない）', () => {
+test('送り直せない失敗は、要約に「返信は未達」と書けば通す（「未達成」では通さない）。結果がまだ無いときは通さない', () => {
   const refused = [use('s1', 'a'), result('s1', { success: false, message: 'no' })];
   assert.match(sendMessageProblem(refused, '済み'), /未達/);
   assert.equal(sendMessageProblem(refused, '済み。返信は未達（相手が終わっていた）'), null);
   assert.match(sendMessageProblem(refused, '目標は未達成'), /届いていない/);
-  assert.equal(sendMessageProblem([use('s1', 'a')], '返信は未達（手番を打ち切った）'), null);
+  assert.match(sendMessageProblem([use('s1', 'a')], '返信は未達'), /結果がまだ会話ログに無い/);
 });
 
 test('is_error の結果は失敗として扱い、サブエージェントの行は数えない', () => {
