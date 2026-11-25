@@ -215,6 +215,12 @@ export function settledDraft(t) {
     return null;
   }
   const verdict = draftAfterProbe(before, after);
+  // 消す直前にもう一度読み、揃ったときから変わっていれば（間にユーザーが打った）、消さずに止める。読んでから送るまでの数十ミリ秒は防げない。
+  const now = inputDraft(t);
+  if (now !== after) {
+    lastError = `確かめに ${PROBE_KEY} を打った後に入力欄が変わった（「${String(now).slice(0, 40)}」）。打っている最中かもしれないので、入力欄はそのままにした`;
+    return null;
+  }
   if (hc(['keys', t, 'backspace']) === null) {
     lastError = `確かめに打った ${PROBE_KEY} を消せなかった（${hcError()}）。入力欄の末尾に ${PROBE_KEY} が残っているかもしれない`;
     return null;
