@@ -36,16 +36,23 @@ test('hub の cwd（と配下）は自分で終わらない。ほかは終わっ
 });
 
 // 会話ログの行の形は 2.1.332 の JSONL で実測（2026-11-25 に返信が届かなかったセッションのもの）。
-const use = (id, to) => JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id, name: 'SendMessage', input: { to, message: 'x' } }] } });
+const use = (id, to, msg = `m-${id}`) => JSON.stringify({ type: 'assistant', message: { id: msg, content: [{ type: 'tool_use', id, name: 'SendMessage', input: { to, message: 'x' } }] } });
 const result = (id, body) => JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content: typeof body === 'string' ? body : JSON.stringify(body) }] } });
-const other = JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'b1', name: 'Bash', input: {} }] } });
+const bash = (msg) => JSON.stringify({ type: 'assistant', message: { id: msg, content: [{ type: 'tool_use', id: `b-${msg}`, name: 'Bash', input: {} }] } });
+const other = bash('m-other');
 
 test('SendMessage を使っていなければ止めない', () => {
   assert.equal(sendMessageProblem([other, 'not json', '']), null);
 });
 
-test('最後の SendMessage の結果がまだ無ければ止める（同じ手番に並べた）', () => {
-  assert.match(sendMessageProblem([use('s1', 'rencon-d6'), other]), /結果がまだ会話ログに無い/);
+test('同じ手番に並べて結果がまだ無ければ、「返信は未達」でも止める', () => {
+  assert.match(sendMessageProblem([use('s1', 'rencon-d6', 'm1'), bash('m1')], '返信は未達'), /結果がまだ会話ログに無い/);
+});
+
+test('前の手番の SendMessage に結果が残っていなければ、「返信は未達」と書けば通す', () => {
+  const lines = [use('s1', 'rencon-d6', 'm1'), bash('m2')];
+  assert.match(sendMessageProblem(lines, '済み'), /結果が会話ログに残っていない/);
+  assert.equal(sendMessageProblem(lines, '済み。返信は未達'), null);
 });
 
 test('success:false なら止め、送り直して届けば止めない', () => {
@@ -83,7 +90,7 @@ test('送り直せない失敗は、要約に「返信は未達」と書けば�
   assert.match(sendMessageProblem(refused, '済み'), /未達/);
   assert.equal(sendMessageProblem(refused, '済み。返信は未達（相手が終わっていた）'), null);
   assert.match(sendMessageProblem(refused, '目標は未達成'), /届いていない/);
-  assert.match(sendMessageProblem([use('s1', 'a')], '返信は未達'), /結果がまだ会話ログに無い/);
+  assert.match(sendMessageProblem([use('s1', 'a', 'm1'), bash('m1')], '返信は未達'), /結果がまだ会話ログに無い/);
 });
 
 test('is_error の結果は失敗として扱い、サブエージェントの行は数えない', () => {
