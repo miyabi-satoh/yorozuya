@@ -83,7 +83,9 @@ export function sendMessageProblem(lines, summary = '') {
     if (record.isSidechain) continue;
     const content = record.message?.content;
     if (!Array.isArray(content)) continue;
-    if (last && record.type === 'assistant' && record.message.id !== uses.get(last).messageId) laterTurn = true;
+    // id の無い行では手番を分けない（同じ手番として扱い、止める側に倒す）。
+    const sentIn = last && uses.get(last).messageId;
+    if (typeof sentIn === 'string' && record.type === 'assistant' && typeof record.message.id === 'string' && record.message.id !== sentIn) laterTurn = true;
     for (const block of content) {
       if (block?.type === 'tool_use' && block.name === 'SendMessage' && !uses.has(block.id)) {
         last = block.id;

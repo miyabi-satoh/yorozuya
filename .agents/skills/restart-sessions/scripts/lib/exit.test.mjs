@@ -99,3 +99,10 @@ test('is_error の結果は失敗として扱い、サブエージェントの�
   const side = JSON.stringify({ type: 'assistant', isSidechain: true, message: { content: [{ type: 'tool_use', id: 'x1', name: 'SendMessage', input: { to: 'b' } }] } });
   assert.equal(sendMessageProblem([use('s1', 'a'), result('s1', { success: true, message: 'sent' }), side]), null);
 });
+
+test('手番は message.id が両方あるときだけ分ける。同じ手番の2通目に結果が無ければ止める', () => {
+  const noId = JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'x' }] } });
+  assert.match(sendMessageProblem([use('s1', 'a', 'm1'), noId], '返信は未達'), /結果がまだ会話ログに無い/);
+  const lines = [use('s1', 'a', 'm1'), result('s1', { success: true, message: 'sent' }), use('s2', 'b', 'm1'), bash('m1')];
+  assert.match(sendMessageProblem(lines, '返信は未達'), /宛先 b）の結果がまだ会話ログに無い/);
+});
