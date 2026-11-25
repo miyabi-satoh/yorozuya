@@ -39,15 +39,14 @@ export function exitLogLine({ time = new Date(), name, cwd, sid, summary }) {
 // 自分の端末を、自分から切り離したプロセスに閉じさせる。端末を kill すると自分も終わるので、
 // 新しいセッション（setsid）・stdio なし・unref の別プロセスに、少し待ってから kill と rm をさせる。
 // /exit を送らないので、終了の確認画面が出ない。
-// 閉じられなかったときは、別プロセスが failure（記録のファイルと1行）を追記する。先に書いた「終わった」の行だけが残り、
-// 端末が生きたままなのに終わったと読まれないようにするため。起動できなければ null（呼び出し側は記録を書かずに止まる）。
+// 閉じたことを確かめられなければ（hc が端末をまだ返す・読み込みや hc の呼び出しが落ちた）、別プロセスが failure（記録のファイルと1行）を追記する。
+// 先に書いた「終わった」の行だけが残り、端末が生きたままなのに終わったと読まれないようにするため。起動できなければ null（呼び出し側が止まる）。
 export function closeSelfDetached(id, hcModuleUrl, { delaySeconds = 2, failure } = {}) {
-  const onFail = failure
-    ? `import('node:fs').then((fs) => fs.appendFileSync(${JSON.stringify(failure.path)}, ${JSON.stringify(failure.line)}))`
-    : 'null';
+  const onFail = failure ? `(await import('node:fs')).appendFileSync(${JSON.stringify(failure.path)}, ${JSON.stringify(failure.line)});` : '';
   const code =
-    `import(${JSON.stringify(hcModuleUrl)}).then((m) => { m.sleep(${Number(delaySeconds)}); ` +
-    `if (!m.closeTerminal(${JSON.stringify(id)})) return ${onFail}; });`;
+    `let closed = false; try { const m = await import(${JSON.stringify(hcModuleUrl)}); m.sleep(${Number(delaySeconds)}); ` +
+    `m.closeTerminal(${JSON.stringify(id)}); closed = m.terminalInfo(${JSON.stringify(id)}) === null; } catch {} ` +
+    `if (!closed) { ${onFail} }`;
   const child = spawn(process.execPath, ['--input-type=module', '-e', code], {
     detached: true,
     stdio: 'ignore',

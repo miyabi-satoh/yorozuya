@@ -50,11 +50,16 @@ try {
   skip(`終了の記録を ${logPath} に書けない（${error.message}）。記録が残らないので終わらない`);
 }
 
-const failure = { path: logPath, line: exitLogLine({ name: info.name || self, cwd, sid, summary: `CLOSE FAILED: 端末 ${self} を閉じられなかった（前の行の終了は済んでいない）` }) };
+const failure = { path: logPath, line: exitLogLine({ name: info.name || self, cwd, sid, summary: `CLOSE FAILED: 端末 ${self} が閉じたことを確かめられなかった（前の行の終了は済んでいないかもしれない）` }) };
 const pid = closeSelfDetached(self, new URL('./lib/hc.mjs', import.meta.url).href, { failure });
 if (!pid) {
-  appendFileSync(logPath, failure.line);
-  skip(`端末を閉じるプロセスを起動できない。端末は閉じていない（記録には CLOSE FAILED を追記した）。終わらずに続ける`);
+  let note = '記録には CLOSE FAILED を追記した';
+  try {
+    appendFileSync(logPath, failure.line);
+  } catch (error) {
+    note = `記録への CLOSE FAILED の追記も失敗した（${error.message}）。${logPath} の最後の行は終わったと読めるので、手で直す`;
+  }
+  skip(`端末を閉じるプロセスを起動できない。端末は閉じていない（${note}）。終わらずに続ける`);
 }
 process.stdout.write(`OK\t${self}\t${info.name ?? ''}\tresume:${sid}\n`);
 process.stderr.write(`[exit-self] 2秒後にこの端末 ${self} を閉じる。戻るなら 'claude --resume ${sid}'。ここで止まる（この先の出力は読まれない）\n`);
