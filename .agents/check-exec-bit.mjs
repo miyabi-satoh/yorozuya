@@ -24,7 +24,7 @@ const missing = git('ls-files', '-s', '-z', '--full-name', '--', ':/')
   .filter((path) => shebang.has(path));
 
 if (missing.length > 0) {
-  console.error('shebang があるのに実行権限が無い（どの OS でも、下を流せば直る）:');
-  for (const path of missing) console.error(`  git update-index --chmod=+x '${path}'`);
+  console.error('shebang があるのに実行権限が無い（下を流すと、index と手元のファイルの両方が直る。Windows は Git Bash で）:');
+  for (const path of missing) console.error(`  chmod +x '${path}' && git update-index --chmod=+x '${path}'`);
   process.exit(1);
 }
