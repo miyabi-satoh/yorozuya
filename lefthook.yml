@@ -1,0 +1,5 @@
+# clone したマシンでは、一度 `lefthook install` を走らせる。
+pre-commit:
+  commands:
+    exec-bit:
+      run: node .agents/check-exec-bit.mjs
