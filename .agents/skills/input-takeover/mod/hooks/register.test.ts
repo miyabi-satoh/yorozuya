@@ -36,7 +36,8 @@ function fakeLocks(argv: string[], files: Map<string, string>, dead: Set<string>
     return { ok: true, lock: placed, previous: raw }
   }
   if (op === 'release') {
-    if (raw === null || !own(raw)) return { released: null }
+    // 同じフォルダのほかのセッションの鍵は、持ち主が生きていると分かれば外さない（locks.cjs の releasable）。
+    if (raw === null || !(raw.session === session || (own(raw) && alive !== true))) return { released: null }
     files.delete(path)
     return { released: raw }
   }
@@ -711,6 +712,15 @@ describe('入力を奪う操作', () => {
     await clock.advance(10 * 60 * 1000)
     expect(dialog.shown.notify).toHaveLength(1)
     expect(files.has(LOCK)).toBe(false)
+  })
+
+  test('同じフォルダで動いているほかのセッションの鍵は、end で外さない', async ($, on) => {
+    const files = new Map([[LOCK, JSON.stringify({ session: 'other', root: '/home/me/Projects/mawok', what: 'x', until: 60000 })]])
+    const dialog = machine(on, files, 'a')
+    dialog.unknown = new Set()
+    expect(JSON.stringify(await $.tool.call(end))).toContain('ほかのセッションの鍵')
+    expect(JSON.parse(files.get(LOCK) ?? '{}').session).toBe('other')
+    expect(dialog.shown.notify).toEqual([])
   })
 
   test('鍵の土台を呼べなければ、入力を奪う操作も start も止める', async ($, on) => {
