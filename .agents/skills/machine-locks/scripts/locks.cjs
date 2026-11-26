@@ -18,11 +18,14 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-// ファイルを読み書きする間の取り合いは、フォルダーを作れるか（mkdir は、どの OS でもあれば失敗する）で決める。
-// 持ち主が落ちて残ったものは、STALE_MUTEX_MS を過ぎたら消す（読み書きは数ミリ秒で終わる）。
+// ファイルを読み書きする間の取り合いは、取り合いのファイルを排他で作れるか（O_EXCL。どの OS でも、あれば失敗する）で決める。
+// ファイルには、入ったプロセスの pid とその回だけの札を書く。持ち主のプロセスが無くなって残ったものだけを消し、
+// 消す直前と出るときに札を読み直して、ほかのプロセスが作り直したものを消さない。時刻で古いと決めないのは、
+// 遅いだけの持ち主のものを消すと、2つが同時に入るため（そのときは待ち手が MUTEX_WAIT_MS で諦めて、鍵を扱えないと返す）。
 const MUTEX_WAIT_MS = 3000;
 const MUTEX_RETRY_MS = 20;
-const STALE_MUTEX_MS = 10 * 1000;
+// 作ってから札を書くまでの間に持ち主が落ちると、中身の無いファイルが残る。これより古い空のファイルだけは消す。
+const EMPTY_MUTEX_MS = 10 * 1000;
 
 // FIX: 前の置き場（input-takeover の mod が rule-guards にあった頃）の鍵。切り替えの瞬間に置かれていた鍵を守るため、効いている間は見る。
 // 置き場をそろえた後、前の作りで置かれた鍵がもう残っていないので、読むのをやめてよい。
@@ -131,63 +134,68 @@ function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
+function readText(file) {
+  try {
+    return fs.readFileSync(file, 'utf8');
+  } catch {
+    return undefined;
+  }
+}
+
+function pidAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code !== 'ESRCH';
+  }
+}
+
+// 持ち主が落ちて残った取り合いのファイルを消す。消す直前に札を読み直し、見たときと同じときだけ消す。
+function breakDeadMutex(mutex) {
+  const token = readText(mutex);
+  if (token === undefined) return;
+  if (token === '') {
+    try {
+      if (Date.now() - fs.statSync(mutex).mtimeMs <= EMPTY_MUTEX_MS) return;
+    } catch {
+      return;
+    }
+  } else if (pidAlive(Number(token.split(':')[0]))) {
+    return;
+  }
+  if (readText(mutex) === token) fs.rmSync(mutex, { force: true });
+}
+
 function withMutex(resource, options, fn) {
   fs.mkdirSync(lockDir(options), { recursive: true });
   const mutex = `${lockPath(resource, options)}.mutex`;
+  const token = `${process.pid}:${Date.now()}:${Math.random().toString(36).slice(2)}`;
   const deadline = Date.now() + MUTEX_WAIT_MS;
   for (;;) {
     try {
-      fs.mkdirSync(mutex);
+      fs.writeFileSync(mutex, token, { flag: 'wx' });
       break;
     } catch (error) {
       if (error.code !== 'EEXIST') throw error;
-      breakStaleMutex(mutex);
-      if (Date.now() > deadline) throw new Error(`${resource} の鍵のファイルを扱えなかった（${mutex} が残っている）`);
+      breakDeadMutex(mutex);
+      if (Date.now() > deadline) throw new Error(`${resource} の鍵のファイルを扱えなかった（${mutex} をほかのプロセスが持ったまま）`);
       sleepSync(MUTEX_RETRY_MS);
     }
   }
   try {
     return fn();
   } finally {
-    try {
-      fs.rmdirSync(mutex);
-    } catch {
-      // 古いとみなしたほかのセッションが先に消した。答えはもう出ているので、そのまま返す。
-    }
+    // 自分の札のときだけ消す。
+    if (readText(mutex) === token) fs.rmSync(mutex, { force: true });
   }
 }
 
-// 持ち主が落ちて残った取り合いのフォルダーを消す。2つの待ち手が同時に古いと見て、片方が作り直した新しいフォルダーを
-// もう片方が消すと、2つが同時に入ってしまう。そこで、別の名前へ移してから、移したものが古いと見たものと同じかを確かめる。
-// 違えば（ほかの待ち手が作り直したもの）、元の名前へ戻す。
-function breakStaleMutex(mutex) {
-  let seen;
-  try {
-    seen = fs.statSync(mutex);
-  } catch {
-    return; // ほかの待ち手が先に消した。
-  }
-  if (Date.now() - seen.mtimeMs <= STALE_MUTEX_MS) return;
-  const grave = `${mutex}.stale-${process.pid}-${Date.now()}`;
-  try {
-    fs.renameSync(mutex, grave);
-  } catch {
-    return;
-  }
-  try {
-    if (fs.statSync(grave).ino === seen.ino) fs.rmdirSync(grave);
-    else fs.renameSync(grave, mutex);
-  } catch {
-    // 戻せないときは、作り直したほかの待ち手が出たあとに、古いものとして次に消される。
-  }
-}
-
-// 書く途中で読まれても壊れて見えないよう、隣に書いてから置き換える。
-function writeLock(resource, lock, options) {
-  const file = lockPath(resource, options);
+// 隣に書いてから置き換える。書く途中で読まれても壊れて見えないように。
+// FIX: Windows では、ほかのプロセスが読んでいる間の置き換えが EPERM・EBUSY で失敗することがあるので、少し待って置き直す。
+function writeAtomic(file, text) {
   const temp = `${file}.${process.pid}.tmp`;
-  fs.writeFileSync(temp, JSON.stringify(lock));
-  // FIX: Windows では、ほかのプロセスが読んでいる間の置き換えが EPERM・EBUSY で失敗することがあるので、少し待って置き直す。
+  fs.writeFileSync(temp, text);
   for (let attempt = 0; ; attempt++) {
     try {
       fs.renameSync(temp, file);
@@ -200,6 +208,10 @@ function writeLock(resource, lock, options) {
       sleepSync(MUTEX_RETRY_MS);
     }
   }
+}
+
+function writeLock(resource, lock, options) {
+  writeAtomic(lockPath(resource, options), JSON.stringify(lock));
 }
 
 // 鍵を置く。ほかのセッションの鍵が効いていれば置かず、その鍵を返す。自分の鍵なら置き直して延ばす。
@@ -273,12 +285,10 @@ function claim(resource, options) {
     const file = claimsPath(resource, opts);
     const current = readJson(file);
     const claims = current !== null && typeof current === 'object' && !Array.isArray(current) ? current : {};
-    if (claims[options.key] !== undefined) return { claimed: false, by: claims[options.key].by };
     const kept = Object.fromEntries(Object.entries(claims).filter(([, c]) => typeof c?.at === 'number' && now - c.at < options.keepMs));
+    if (kept[options.key] !== undefined) return { claimed: false, by: kept[options.key].by };
     kept[options.key] = { by: options.session, at: now };
-    const temp = `${file}.${process.pid}.tmp`;
-    fs.writeFileSync(temp, JSON.stringify(kept));
-    fs.renameSync(temp, file);
+    writeAtomic(file, JSON.stringify(kept));
     return { claimed: true };
   });
 }

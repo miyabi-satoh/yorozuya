@@ -244,7 +244,11 @@ const expiredKey = (lock: InputLock) => `expired:${lock.session}:${lock.until}`
 const returnedKey = (lock: InputLock) => `returned:${lock.session}:${lock.until}`
 // 持ち主のセッションが終わった鍵。終わりの hook が記録したものも、落ちて見つかったものも、同じ鍵で一度だけ知らせる。
 const endedKey = (lock: { until: number }, session: string) => `ended:${session}:${lock.until}`
-const hasNoticed = async ($: EngineInterface, key: string) => (await readRecord($, await recordPath($, 'claims')))[key] !== undefined
+// 札の記録には古いものが残りうる（書くときにしか落とさない）ので、NOTICE_WINDOW_MS より古い札は取られていないものとみなす（土台と同じ）。
+const hasNoticed = async ($: EngineInterface, key: string) => {
+  const at = (await readRecord<{ at?: unknown }>($, await recordPath($, 'claims')))[key]?.at
+  return typeof at === 'number' && (await $.clock.now()) - at < NOTICE_WINDOW_MS
+}
 
 // 外されないまま見込みの時間を過ぎた鍵を知らせる。
 // hasWaited は、ほかのセッションの時間切れを待たずに知らせるか。start が上書きする前は、待つと知らせが消えるので待たない。

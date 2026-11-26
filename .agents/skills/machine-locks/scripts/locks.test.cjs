@@ -146,14 +146,29 @@ test('同時に取りに来ても、取れるのは1つだけ', async () => {
   assert.equal(results.filter((r) => JSON.parse(r.out).ok).length, 1);
 });
 
-test('残った取り合いのフォルダーは、古ければ消して進む', () => {
+// 終わったプロセスの pid を得る。
+function deadPid() {
+  return spawnSync(process.execPath, ['-e', 'process.stdout.write(String(process.pid))'], { encoding: 'utf8' }).stdout;
+}
+
+test('持ち主のプロセスが無くなって残った取り合いのファイルは、消して進む', () => {
   const dir = home();
   const mutex = `${locks.lockPath('cpu', { home: dir })}.mutex`;
-  fs.mkdirSync(mutex, { recursive: true });
+  fs.mkdirSync(path.dirname(mutex), { recursive: true });
+  fs.writeFileSync(mutex, `${deadPid()}:0:x`);
+  assert.equal(locks.acquire('cpu', base(dir, { session: 'a' })).ok, true);
+  assert.equal(fs.existsSync(mutex), false, '出るときに自分の札を消す');
+});
+
+test('生きている持ち主の取り合いのファイルは、古くても消さず、待って諦める', () => {
+  const dir = home();
+  const mutex = `${locks.lockPath('cpu', { home: dir })}.mutex`;
+  fs.mkdirSync(path.dirname(mutex), { recursive: true });
+  fs.writeFileSync(mutex, `${process.pid}:0:x`);
   const old = new Date(Date.now() - 60_000);
   fs.utimesSync(mutex, old, old);
-  assert.equal(locks.acquire('cpu', base(dir, { session: 'a' })).ok, true);
-  assert.equal(fs.existsSync(mutex), false);
+  assert.throws(() => locks.acquire('cpu', base(dir, { session: 'a' })), /cpu の鍵のファイルを扱えなかった/);
+  assert.equal(fs.readFileSync(mutex, 'utf8'), `${process.pid}:0:x`);
 });
 
 test('CLI は JSON を出し、引数の誤りは 2 で返す', () => {
@@ -200,8 +215,7 @@ test('claim は、同じ札を初めて取ったときだけ true で、古い�
   const opts = (extra) => ({ home: dir, keepMs: 10_000, now: 0, ...extra });
   assert.deepEqual(locks.claim('input', opts({ key: 'k', session: 'a' })), { claimed: true });
   assert.deepEqual(locks.claim('input', opts({ key: 'k', session: 'b' })), { claimed: false, by: 'a' });
-  locks.claim('input', opts({ key: 'other', session: 'b', now: 20_000 }));
-  assert.equal(locks.claim('input', opts({ key: 'k', session: 'b', now: 20_000 })).claimed, true, '古い札は落ちている');
+  assert.equal(locks.claim('input', opts({ key: 'k', session: 'b', now: 20_000 })).claimed, true, '古い札は無いものとみなす');
 
   const runs = Array.from({ length: 8 }, (_, i) =>
     new Promise((resolve) => {
@@ -212,14 +226,4 @@ test('claim は、同じ札を初めて取ったときだけ true で、古い�
     }),
   );
   assert.equal((await Promise.all(runs)).filter((r) => r.claimed).length, 1);
-});
-
-test('古い取り合いのフォルダーを消すとき、ほかの待ち手が作り直した新しいものは消さない', () => {
-  const dir = home();
-  const mutex = `${locks.lockPath('cpu', { home: dir })}.mutex`;
-  fs.mkdirSync(mutex, { recursive: true });
-  const old = new Date(Date.now() - 60_000);
-  fs.utimesSync(mutex, old, old);
-  assert.equal(locks.acquire('cpu', base(dir, { session: 'a' })).ok, true);
-  assert.deepEqual(fs.readdirSync(path.dirname(mutex)).filter((n) => n.includes('.stale-')), [], '消した古いものは残らない');
 });

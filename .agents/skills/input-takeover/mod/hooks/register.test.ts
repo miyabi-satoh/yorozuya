@@ -50,9 +50,9 @@ function fakeLocks(argv: string[], files: Map<string, string>, dead: Set<string>
     const claimsPath = '/home/me/.claude/locks/input.claims.json'
     const claims = JSON.parse(files.get(claimsPath) ?? '{}')
     const key = flag('--key') ?? ''
-    if (claims[key] !== undefined) return { claimed: false, by: claims[key].by }
     const keep = Number(flag('--keep-ms'))
-    const kept = Object.fromEntries(Object.entries(claims).filter(([, c]: [string, any]) => now - c.at < keep))
+    const kept = Object.fromEntries(Object.entries(claims).filter(([, c]: [string, any]) => typeof c?.at === 'number' && now - c.at < keep)) as Record<string, any>
+    if (kept[key] !== undefined) return { claimed: false, by: kept[key].by }
     files.set(claimsPath, JSON.stringify({ ...kept, [key]: { by: session, at: now } }))
     return { claimed: true }
   }
