@@ -160,15 +160,24 @@ test('持ち主のプロセスが無くなって残った取り合いのファ�
   assert.equal(fs.existsSync(mutex), false, '出るときに自分の札を消す');
 });
 
-test('生きている持ち主の取り合いのファイルは、古くても消さず、待って諦める', () => {
+test('生きている持ち主が入ったばかりの取り合いのファイルは消さず、待って諦める', () => {
   const dir = home();
   const mutex = `${locks.lockPath('cpu', { home: dir })}.mutex`;
   fs.mkdirSync(path.dirname(mutex), { recursive: true });
-  fs.writeFileSync(mutex, `${process.pid}:0:x`);
-  const old = new Date(Date.now() - 60_000);
-  fs.utimesSync(mutex, old, old);
+  const token = `${process.pid}:${Date.now()}:x`;
+  fs.writeFileSync(mutex, token);
   assert.throws(() => locks.acquire('cpu', base(dir, { session: 'a' })), /cpu の鍵のファイルを扱えなかった/);
-  assert.equal(fs.readFileSync(mutex, 'utf8'), `${process.pid}:0:x`);
+  assert.equal(fs.readFileSync(mutex, 'utf8'), token);
+});
+
+test('pid が使い回されて生きて見えても、1分より前に入ったままのものと、読めない札は消して進む', () => {
+  const dir = home();
+  const mutex = `${locks.lockPath('cpu', { home: dir })}.mutex`;
+  fs.mkdirSync(path.dirname(mutex), { recursive: true });
+  fs.writeFileSync(mutex, `${process.pid}:${Date.now() - 120_000}:x`);
+  assert.equal(locks.acquire('cpu', base(dir, { session: 'a' })).ok, true);
+  fs.writeFileSync(mutex, 'garbled');
+  assert.equal(locks.acquire('cpu', base(dir, { session: 'a', now: 2000 })).ok, true);
 });
 
 test('CLI は JSON を出し、引数の誤りは 2 で返す', () => {

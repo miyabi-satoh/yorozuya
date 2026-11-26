@@ -19,13 +19,17 @@ const os = require('node:os');
 const path = require('node:path');
 
 // ファイルを読み書きする間の取り合いは、取り合いのファイルを排他で作れるか（O_EXCL。どの OS でも、あれば失敗する）で決める。
-// ファイルには、入ったプロセスの pid とその回だけの札を書く。持ち主のプロセスが無くなって残ったものだけを消し、
-// 消す直前と出るときに札を読み直して、ほかのプロセスが作り直したものを消さない。時刻で古いと決めないのは、
-// 遅いだけの持ち主のものを消すと、2つが同時に入るため（そのときは待ち手が MUTEX_WAIT_MS で諦めて、鍵を扱えないと返す）。
+// ファイルには、入ったプロセスの pid と入った時刻と、その回だけの札を書く。持ち主のプロセスが無くなったか、
+// STALE_MUTEX_MS より前に入ったまま残っているものを消し、消す直前と出るときに札を読み直して、ほかのプロセスが作り直したものを消さない。
+// 中で鍵のファイルを読み書きするのは数ミリ秒なので、遅いだけの持ち主を消すことは無い。
+// ADR: 持ち主がその数ミリ秒の間に落ち、2つの待ち手が札を読み直してから消すまでの間に入れ違うと、2つが同時に入りうる。
+// 通常の使い方では起きないので、それを閉じるための手順（二重の取り合いなど）は足さない。
 const MUTEX_WAIT_MS = 3000;
 const MUTEX_RETRY_MS = 20;
-// 作ってから札を書くまでの間に持ち主が落ちると、中身の無いファイルが残る。これより古い空のファイルだけは消す。
-const EMPTY_MUTEX_MS = 10 * 1000;
+// pid が使い回されて生きて見えても、これより前に入ったものは残りとみなす。
+const STALE_MUTEX_MS = 60 * 1000;
+// 作ってから札を書くまでの間に持ち主が落ちると、中身の無いファイルが残る。待ち手が諦める前に消せるよう、MUTEX_WAIT_MS より短くする。
+const EMPTY_MUTEX_MS = 2 * 1000;
 
 // FIX: 前の置き場（input-takeover の mod が rule-guards にあった頃）の鍵。切り替えの瞬間に置かれていた鍵を守るため、効いている間は見る。
 // 置き場をそろえた後、前の作りで置かれた鍵がもう残っていないので、読むのをやめてよい。
@@ -143,6 +147,7 @@ function readText(file) {
 }
 
 function pidAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
     process.kill(pid, 0);
     return true;
@@ -161,8 +166,9 @@ function breakDeadMutex(mutex) {
     } catch {
       return;
     }
-  } else if (pidAlive(Number(token.split(':')[0]))) {
-    return;
+  } else {
+    const [pid, since] = token.split(':').map(Number);
+    if (pidAlive(pid) && Number.isFinite(since) && Date.now() - since <= STALE_MUTEX_MS) return;
   }
   if (readText(mutex) === token) fs.rmSync(mutex, { force: true });
 }
