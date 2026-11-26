@@ -454,7 +454,7 @@ export const register: Register = on => {
         type: 'object',
         properties: {
           action: { type: 'string', enum: ['start', 'end'] },
-          what: { type: 'string', description: 'start: 何をするか（ほかのセッションに見せる。例: mawok の macos-check）' },
+          what: { type: 'string', description: 'start: 何をするか（ほかのセッションに見せる。例: アプリの画面の確かめ）' },
           minutes: { type: 'number', description: 'start: 終わるまでの見込みの分。過ぎると鍵は無いものとみなされる' },
           notes: {
             type: 'array',

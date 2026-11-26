@@ -236,3 +236,13 @@ test('claim は、同じ札を初めて取ったときだけ true で、古い�
   );
   assert.equal((await Promise.all(runs)).filter((r) => r.claimed).length, 1);
 });
+
+test('sameRoot の release は、同じフォルダのほかのセッションの鍵を、その持ち主が生きていれば外さない', () => {
+  const dir = home();
+  session(dir, process.pid, 'other');
+  locks.acquire('input', base(dir, { session: 'other' }));
+  assert.deepEqual(locks.release('input', { home: dir, session: 'me', root: '/p/a', sameRoot: true, now: 2000 }), { released: null });
+  // 持ち主が生きているかを確かめられなければ、立ち上がり直す前の自分の鍵として外せる。
+  fs.rmSync(path.join(dir, '.claude', 'sessions', `${process.pid}.json`));
+  assert.equal(locks.release('input', { home: dir, session: 'me', root: '/p/a', sameRoot: true, now: 2000 }).released.session, 'other');
+});

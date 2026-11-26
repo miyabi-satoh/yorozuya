@@ -246,6 +246,10 @@ function releaseLegacy(resource, options) {
 }
 
 // 自分の鍵を外す。外した鍵を返す（無ければ null）。見込みの時刻を過ぎた自分の鍵も外して返す（呼ぶ側が、終わったことを知らせるため）。
+// sameRoot でも、同じフォルダのほかのセッションの鍵は、その持ち主が生きていると分かれば外さない（立ち上がり直す前の自分でなく、
+// 同じフォルダで動くほかのセッションの、操作の途中の鍵なので）。置き直しての引き継ぎ（acquire）は、了承を取り直す呼ぶ側に任せる。
+const releasable = (lock, options) => lock.session === options.session || (isOwn(lock, options) && holderAlive(lock, options) !== true);
+
 function release(resource, options) {
   const now = options.now ?? Date.now();
   const opts = { ...options, now };
@@ -257,7 +261,7 @@ function release(resource, options) {
       releaseLegacy(resource, opts);
       return { released: legacy };
     }
-    if (!isOwn(raw, opts)) return { released: null };
+    if (!releasable(raw, opts)) return { released: null };
     fs.rmSync(lockPath(resource, opts), { force: true });
     return { released: raw };
   });
