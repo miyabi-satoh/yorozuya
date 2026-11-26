@@ -4,12 +4,13 @@ import { isHeavyDeny } from './register'
 
 const DENY = 'PreToolUse:Bash hook error: CPU の空きが 4.2% で、10% を切っているため、重い処理を止めました。\nheavy-wait の mod があれば…'
 
-// hook に止められる重い処理と、--idle で測った空きを決め、セッションに届いた知らせを集める。
-function setUp(on: any, idles: number[]) {
+// hook に止められる重い処理と、--ready で測った空き（starting は、ほかのセッションが重い処理を始めたところか）を決め、セッションに届いた知らせを集める。
+function setUp(on: any, idles: number[], starting: boolean[] = []) {
   const sent: string[] = []
   on('fs.stat', () => ({ value: { realPath: '/skills/heavy-task/mod' } }))
   on('tool.call', () => ({ result: DENY, text: DENY, isError: true }))
-  on('process.run', () => ({ value: { exitCode: 0, stdout: `${idles.shift() ?? 0}\n`, stderr: '' } }))
+  on('process.run', () => ({ value: { exitCode: 0, stdout: `${JSON.stringify({ idle: idles.shift() ?? 0, heldBy: starting.shift() ? { session: 'b' } : null })}\n`, stderr: '' } }))
+  on('session.id', () => ({ value: 'a' }))
   on('prompt.submit', (_$: any, e: any) => {
     sent.push(e.text)
     return { text: e.text }
@@ -23,6 +24,7 @@ describe('isHeavyDeny', () => {
     expect(isHeavyDeny(DENY)).toBe(true)
     expect(isHeavyDeny('CPU の空きが 4.2% で、10% を切っているため、重い処理を止めました。')).toBe(true)
     expect(isHeavyDeny('echo "CPU の空きが 4.2% で、10% を切っているため、重い処理を止めました"')).toBe(false)
+    expect(isHeavyDeny('PreToolUse:Bash hook error: ほかのセッションが重い処理を始めたところなので、重い処理を止めました (/p の「just ci」、あと40秒)。')).toBe(true)
     expect(isHeavyDeny('command not found')).toBe(false)
     expect(isHeavyDeny('PreToolUse:Bash hook error: 重い処理は、Herdr の別のタブで流してください。')).toBe(false)
   })
@@ -42,6 +44,19 @@ describe('待ち', () => {
     expect(sent[0]).toContain('just ci')
   })
 
+  test('空いていても、ほかのセッションが始めたところなら待ち続ける', async ($, on) => {
+    const sent = setUp(on, [3, 40, 40], [false, true, false])
+    const clock = mock.clock(on, { now: 0 })
+    await ($.session as any).start({ source: 'startup', cwd: '/Users/me/Works/x' })
+    await $.tool.call({ tool: 'Bash', command: 'just ci' })
+    await clock.advance(60 * 1000)
+    await clock.advance(60 * 1000)
+    expect(sent).toEqual([])
+    await clock.advance(60 * 1000)
+    expect(sent.length).toBe(1)
+    expect(sent[0]).toContain('空きが 40.0% に戻った')
+  })
+
   test('15分たっても厳しければ、ユーザーに聞くよう知らせる', async ($, on) => {
     const sent = setUp(on, Array(20).fill(2))
     const clock = mock.clock(on, { now: 0 })
@@ -59,7 +74,8 @@ describe('hook の止め方', () => {
     on('fs.stat', () => ({ value: { realPath: '/skills/heavy-task/mod' } }))
     const clock = mock.clock(on, { now: 0 })
     on('classic.PreToolUse', () => ({ deny: DENY }))
-    on('process.run', () => ({ value: { exitCode: 0, stdout: '30\n', stderr: '' } }))
+    on('process.run', () => ({ value: { exitCode: 0, stdout: '{"idle":30,"heldBy":null}\n', stderr: '' } }))
+    on('session.id', () => ({ value: 'a' }))
     on('prompt.submit', (_$: any, e: any) => {
       sent.push(e.text)
       return { text: e.text }
