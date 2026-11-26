@@ -8,7 +8,8 @@
 //   node locks.cjs status  <資源>
 //   node locks.cjs acquire <資源> --what <何をするか> (--minutes <分> | --ms <ミリ秒>) [--same-root]
 //   node locks.cjs release <資源> [--same-root]
-//   node locks.cjs clear   <資源>（効いていない鍵を消す）
+//   node locks.cjs clear   <資源> [--holder <セッション> --until <時刻>]（効いていない鍵を消す）
+//   node locks.cjs claim   <資源> --key <札> [--keep-ms <ミリ秒>]（同じ知らせを1つのセッションだけが出すための札を取る）
 // 共通: --session <自分を見分ける文字列>（無ければ CLAUDE_CODE_SESSION_ID）・--root <作業フォルダ>（無ければ今のフォルダ）・
 //       --now <Unix ミリ秒>（無ければ今。呼ぶ側の時計に合わせるとき）・--home <ホーム>（試すとき）
 // 終了コード: 0 は答えを出したとき（取れなかったときも 0 で、ok: false）。1 は鍵を扱えなかったとき。2 は引数の誤り。
@@ -94,7 +95,9 @@ function claudePidOf(session, options) {
 
 // 持ち主が生きているか。true・false か、分からなければ null。
 // pid は、鍵を置いたときに Claude Code のセッションの記録から引けたときだけ持つ。
-// pid が使い回されて別のプロセスになっていることがあるので、そのセッションの記録が残っているかも見る（Claude Code は終わるときに消す）。
+// プロセスが無ければ落ちた。プロセスがあっても、その pid の記録が別のセッションを指していれば、pid が使い回されたか、
+// 同じプロセスで別のセッション（/clear の後など）に移ったので、持ち主はもういない。
+// 記録が無い・読めないときは決めない（書き直しの途中かもしれず、生きている持ち主の鍵を外すと、入力を奪い合うため）。
 function holderAlive(lock, options = {}) {
   if (!Number.isInteger(lock.pid)) return null;
   try {
@@ -103,7 +106,8 @@ function holderAlive(lock, options = {}) {
     if (error.code === 'ESRCH') return false;
   }
   const record = readJson(path.join(sessionsDir(options), `${lock.pid}.json`));
-  return record?.sessionId === lock.session;
+  if (typeof record?.sessionId !== 'string') return null;
+  return record.sessionId === lock.session;
 }
 
 const isOwn = (lock, { session, root, sameRoot }) => lock.session === session || (sameRoot === true && root !== undefined && lock.root === root);
@@ -137,11 +141,7 @@ function withMutex(resource, options, fn) {
       break;
     } catch (error) {
       if (error.code !== 'EEXIST') throw error;
-      try {
-        if (Date.now() - fs.statSync(mutex).mtimeMs > STALE_MUTEX_MS) fs.rmdirSync(mutex);
-      } catch {
-        // ほかのセッションが先に消した。
-      }
+      breakStaleMutex(mutex);
       if (Date.now() > deadline) throw new Error(`${resource} の鍵のファイルを扱えなかった（${mutex} が残っている）`);
       sleepSync(MUTEX_RETRY_MS);
     }
@@ -149,7 +149,36 @@ function withMutex(resource, options, fn) {
   try {
     return fn();
   } finally {
-    fs.rmdirSync(mutex);
+    try {
+      fs.rmdirSync(mutex);
+    } catch {
+      // 古いとみなしたほかのセッションが先に消した。答えはもう出ているので、そのまま返す。
+    }
+  }
+}
+
+// 持ち主が落ちて残った取り合いのフォルダーを消す。2つの待ち手が同時に古いと見て、片方が作り直した新しいフォルダーを
+// もう片方が消すと、2つが同時に入ってしまう。そこで、別の名前へ移してから、移したものが古いと見たものと同じかを確かめる。
+// 違えば（ほかの待ち手が作り直したもの）、元の名前へ戻す。
+function breakStaleMutex(mutex) {
+  let seen;
+  try {
+    seen = fs.statSync(mutex);
+  } catch {
+    return; // ほかの待ち手が先に消した。
+  }
+  if (Date.now() - seen.mtimeMs <= STALE_MUTEX_MS) return;
+  const grave = `${mutex}.stale-${process.pid}-${Date.now()}`;
+  try {
+    fs.renameSync(mutex, grave);
+  } catch {
+    return;
+  }
+  try {
+    if (fs.statSync(grave).ino === seen.ino) fs.rmdirSync(grave);
+    else fs.renameSync(grave, mutex);
+  } catch {
+    // 戻せないときは、作り直したほかの待ち手が出たあとに、古いものとして次に消される。
   }
 }
 
@@ -158,7 +187,19 @@ function writeLock(resource, lock, options) {
   const file = lockPath(resource, options);
   const temp = `${file}.${process.pid}.tmp`;
   fs.writeFileSync(temp, JSON.stringify(lock));
-  fs.renameSync(temp, file);
+  // FIX: Windows では、ほかのプロセスが読んでいる間の置き換えが EPERM・EBUSY で失敗することがあるので、少し待って置き直す。
+  for (let attempt = 0; ; attempt++) {
+    try {
+      fs.renameSync(temp, file);
+      return;
+    } catch (error) {
+      if (attempt >= 10 || !['EPERM', 'EBUSY', 'EACCES'].includes(error.code)) {
+        fs.rmSync(temp, { force: true });
+        throw error;
+      }
+      sleepSync(MUTEX_RETRY_MS);
+    }
+  }
 }
 
 // 鍵を置く。ほかのセッションの鍵が効いていれば置かず、その鍵を返す。自分の鍵なら置き直して延ばす。
@@ -171,7 +212,8 @@ function acquire(resource, options) {
   return withMutex(resource, opts, () => {
     const { lock: held, last } = status(resource, opts);
     if (held !== null && !isOwn(held, opts)) return { ok: false, heldBy: held };
-    const pid = claudePidOf(session, opts);
+    // 引けなければ、同じセッションの前の鍵の pid を引き継ぐ（延ばしたときに、落ちたかを見られなくならないように）。
+    const pid = claudePidOf(session, opts) ?? (held?.session === session ? held.pid : undefined);
     const lock = { resource, session, root, what, since: held !== null && held.session === session && !held.legacy ? held.since : now, until: now + ms };
     if (pid !== undefined) lock.pid = pid;
     writeLock(resource, lock, opts);
@@ -205,14 +247,39 @@ function release(resource, options) {
 
 // 効いていない鍵（見込みの時刻を過ぎたもの・持ち主が落ちたもの）を消す。消した鍵を返す（無ければ null）。
 // 持ち主でなくても消せる。誰も使っていない鍵なので。見張る側が、終わりを知らせた後に片付け、読み続けずに済むようにするため。
+// holder・until を渡すと、その鍵のときだけ消す（知らせた後に別の鍵へ置き換わっていたら、知らせていない鍵を消さないため）。
 function clear(resource, options) {
   const now = options.now ?? Date.now();
   const opts = { ...options, now };
   return withMutex(resource, opts, () => {
     const { state, last } = status(resource, opts);
     if ((state !== 'expired' && state !== 'dead') || last === null || last.legacy) return { cleared: null };
+    if ((options.holder !== undefined && last.session !== options.holder) || (options.until !== undefined && last.until !== options.until)) return { cleared: null };
     fs.rmSync(lockPath(resource, opts), { force: true });
     return { cleared: last };
+  });
+}
+
+// 同じ知らせを、同じマシンのセッションのうち1つだけが出すための札。key を初めて取ったときだけ claimed: true。
+// 取った札は keepMs のあいだ覚え、それより古いものは書くときに落とす。
+function claimsPath(resource, options) {
+  return path.join(lockDir(options), `${resource}.claims.json`);
+}
+
+function claim(resource, options) {
+  const now = options.now ?? Date.now();
+  const opts = { ...options, now };
+  return withMutex(resource, opts, () => {
+    const file = claimsPath(resource, opts);
+    const current = readJson(file);
+    const claims = current !== null && typeof current === 'object' && !Array.isArray(current) ? current : {};
+    if (claims[options.key] !== undefined) return { claimed: false, by: claims[options.key].by };
+    const kept = Object.fromEntries(Object.entries(claims).filter(([, c]) => typeof c?.at === 'number' && now - c.at < options.keepMs));
+    kept[options.key] = { by: options.session, at: now };
+    const temp = `${file}.${process.pid}.tmp`;
+    fs.writeFileSync(temp, JSON.stringify(kept));
+    fs.renameSync(temp, file);
+    return { claimed: true };
   });
 }
 
@@ -234,14 +301,23 @@ function parseArgs(argv) {
     else if (name === '--now') options.now = Number(value());
     else if (name === '--ms') options.ms = Number(value());
     else if (name === '--minutes') options.ms = Number(value()) * 60 * 1000;
+    else if (name === '--key') options.key = value();
+    else if (name === '--keep-ms') options.keepMs = Number(value());
+    else if (name === '--holder') options.holder = value();
+    else if (name === '--until') options.until = Number(value());
     else throw new Error(`知らない引数: ${name}`);
   }
-  if (!['status', 'acquire', 'release', 'clear'].includes(command)) throw new Error('status・acquire・release・clear のどれかを書く');
+  if (!['status', 'acquire', 'release', 'clear', 'claim'].includes(command)) throw new Error('status・acquire・release・clear・claim のどれかを書く');
   if (!RESOURCE.test(resource ?? '')) throw new Error('資源の名前（英小文字・数字・-）を書く');
   options.session ??= process.env.CLAUDE_CODE_SESSION_ID;
   options.root ??= process.cwd();
   if (options.now !== undefined && !Number.isFinite(options.now)) throw new Error('--now は数で書く');
-  if ((command === 'acquire' || command === 'release') && !options.session) throw new Error('--session が要る（CLAUDE_CODE_SESSION_ID も無い）');
+  if (command === 'claim') {
+    if (!options.key) throw new Error('--key が要る');
+    options.keepMs ??= 10 * 60 * 1000;
+    if (!(Number.isFinite(options.keepMs) && options.keepMs > 0)) throw new Error('--keep-ms は正の数で書く');
+  }
+  if ((command === 'acquire' || command === 'release' || command === 'claim') && !options.session) throw new Error('--session が要る（CLAUDE_CODE_SESSION_ID も無い）');
   if (command === 'acquire') {
     if (!options.what) throw new Error('--what が要る');
     if (!(Number.isFinite(options.ms) && options.ms > 0 && Number.isFinite((options.now ?? Date.now()) + options.ms))) throw new Error('--minutes か --ms に正の数が要る');
@@ -259,7 +335,7 @@ function main(argv) {
   }
   const { command, resource, options } = parsed;
   try {
-    const result = { status, acquire, release, clear }[command](resource, options);
+    const result = { status, acquire, release, clear, claim }[command](resource, options);
     process.stdout.write(`${JSON.stringify(result)}\n`);
     return 0;
   } catch (error) {
@@ -271,5 +347,5 @@ function main(argv) {
 if (require.main === module) {
   process.exitCode = main(process.argv.slice(2));
 } else {
-  module.exports = { acquire, release, clear, status, readRaw, holderAlive, lockPath, lockDir };
+  module.exports = { acquire, release, clear, claim, status, readRaw, holderAlive, lockPath, lockDir };
 }

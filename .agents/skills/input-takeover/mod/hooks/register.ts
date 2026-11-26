@@ -145,9 +145,9 @@ async function homeDir($: EngineInterface) {
   return home.replace(/\\/g, '/').replace(/\/+$/, '')
 }
 
-// 鍵の隣に置く、この mod だけが使う記録（了承・知らせた鍵・終わったセッションの鍵）。鍵のファイルとは分ける。
-// 鍵の取り合いと関わらず、読んでから書くまでに消えても、問い直すか一度多く知らせるだけで済むため。
-async function recordPath($: EngineInterface, name: 'approved' | 'noticed' | 'ended') {
+// 鍵の隣に置く、この mod だけが使う記録（了承・終わったセッションの鍵）と、土台が書く知らせの札（claims）。
+// 了承と終わりの記録は、読んでから書くまでにほかのセッションに消されても、問い直すか、終わりの hook の書き直しで済む。
+async function recordPath($: EngineInterface, name: 'approved' | 'ended' | 'claims') {
   return `${await homeDir($)}/.claude/locks/input.${name}.json`
 }
 
@@ -231,15 +231,12 @@ async function recordEnded($: EngineInterface, lock: InputLock) {
   $.ui.log(`input-takeover: 終わった鍵の記録を書けなかった（${lock.what}）`, { to: 'debug' })
 }
 
-// 同じ知らせを出すのは1つのセッションだけにする。書いて読み直し、自分の名が残っていれば出す（同時に書いたときは後のほうが出す）。
-// 知らせた鍵は、知らせた時刻と一緒に NOTICE_WINDOW_MS のあいだ覚える。1件だけだと、続いた別の知らせに上書きされ、前のものをまた出すため。
+// 同じ知らせを出すのは1つのセッションだけにする。札は土台が取り合いの順番の中で取るので、同時に取りに来ても1つだけが取れる。
+// 取った札は NOTICE_WINDOW_MS のあいだ覚える。取られた札は、土台を呼ばずにファイルで見て済ませる（見張りは15秒ごとに走るため）。
 async function claimNotice($: EngineInterface, key: string, session: string) {
-  const path = await recordPath($, 'noticed')
-  const noticed = await readRecord<{ by: string; at: number }>($, path)
-  if (noticed[key] !== undefined) return false
-  const now = await $.clock.now()
-  await $.fs.write(path, JSON.stringify({ ...keepFresh(noticed, now), [key]: { by: session, at: now } }))
-  return (await readRecord<{ by: string }>($, path))[key]?.by === session
+  if (await hasNoticed($, key)) return false
+  const { claimed } = (await locks($, ['claim', 'input', '--key', key, '--keep-ms', String(NOTICE_WINDOW_MS)], session)) as { claimed: boolean }
+  return claimed
 }
 
 const expiredKey = (lock: InputLock) => `expired:${lock.session}:${lock.until}`
@@ -247,7 +244,7 @@ const expiredKey = (lock: InputLock) => `expired:${lock.session}:${lock.until}`
 const returnedKey = (lock: InputLock) => `returned:${lock.session}:${lock.until}`
 // 持ち主のセッションが終わった鍵。終わりの hook が記録したものも、落ちて見つかったものも、同じ鍵で一度だけ知らせる。
 const endedKey = (lock: { until: number }, session: string) => `ended:${session}:${lock.until}`
-const hasNoticed = async ($: EngineInterface, key: string) => (await readRecord($, await recordPath($, 'noticed')))[key] !== undefined
+const hasNoticed = async ($: EngineInterface, key: string) => (await readRecord($, await recordPath($, 'claims')))[key] !== undefined
 
 // 外されないまま見込みの時間を過ぎた鍵を知らせる。
 // hasWaited は、ほかのセッションの時間切れを待たずに知らせるか。start が上書きする前は、待つと知らせが消えるので待たない。
@@ -273,12 +270,17 @@ async function noticeDead($: EngineInterface, lock: InputLock) {
 async function noticeLast($: EngineInterface, status: Status, options: { hasWaited?: boolean } = {}) {
   const last = status.last
   if (last === null || last.legacy || (status.state !== 'expired' && status.state !== 'dead')) return
-  if (status.state === 'expired') await noticeExpired($, last, options)
   const late = (await $.clock.now()) - last.until
-  // 切れてから NOTICE_WINDOW_MS を過ぎて落ちたものは、古い話なので知らせずに片付ける。
-  if (status.alive === false && (status.state === 'dead' || late < NOTICE_WINDOW_MS)) await noticeDead($, last)
-  // 片付けると見張りが土台を呼ばずに済む（見張りは鍵のファイルがあるときだけ土台を呼ぶ）。
-  if (status.alive === false || late >= NOTICE_WINDOW_MS) await locks($, ['clear', 'input'])
+  if (status.alive === false) {
+    // 時間切れを知らせる前に落ちていたら、終わったことだけを知らせる（同じ出来事を2つ続けて知らせないため）。
+    if (status.state === 'expired') await claimNotice($, expiredKey(last), await $.session.id())
+    // 切れてから NOTICE_WINDOW_MS を過ぎて落ちたものは、古い話なので知らせずに片付ける。
+    if (status.state === 'dead' || late < NOTICE_WINDOW_MS) await noticeDead($, last)
+  } else if (status.state === 'expired') {
+    await noticeExpired($, last, options)
+  }
+  // 片付けると見張りが土台を呼ばずに済む（見張りは鍵のファイルがあるときだけ土台を呼ぶ）。知らせた鍵だけを消す。
+  if (status.alive === false || late >= NOTICE_WINDOW_MS) await locks($, ['clear', 'input', '--holder', last.session, '--until', String(last.until)])
 }
 
 async function watch($: EngineInterface) {
@@ -390,14 +392,16 @@ async function start($: EngineInterface, input: { what?: unknown; minutes?: unkn
 async function end($: EngineInterface) {
   const session = await $.session.id()
   const { released } = (await locks($, ['release', 'input', '--same-root'])) as { released: InputLock | null }
-  if (released !== null && (await claimNotice($, returnedKey(released), session))) {
-    // 時間切れ・終わりをまだ知らせていなければ、ほかのセッションが後から出さないよう、知らせたことにする。
-    await claimNotice($, expiredKey(released), session)
-    await claimNotice($, endedKey(released, released.session), session)
+  if (released !== null) {
     const notice = returnedNotice(released.what, await afterReturn($, session))
-    await announce($, notice)
+    if (await claimNotice($, returnedKey(released), session)) {
+      // 時間切れ・終わりをまだ知らせていなければ、ほかのセッションが後から出さないよう、知らせたことにする。
+      await claimNotice($, expiredKey(released), session)
+      await claimNotice($, endedKey(released, released.session), session)
+      await announce($, notice)
+    }
     return {
-      result: `鍵を外し、ユーザーに「${notice}」と知らせた（会話・toast・通知）。返答の文にも、この知らせのとおりに、キーボードとマウスを返したことと、もう使ってよいか（ほかのセッションが使っていればそのこと）を書く。次の start は、了承のうちでも取り直す。`,
+      result: `鍵を外し、ユーザーに「${notice}」と知らせた（会話・toast・通知。同じ鍵をもう知らせていれば出さない）。返答の文にも、この知らせのとおりに、キーボードとマウスを返したことと、もう使ってよいか（ほかのセッションが使っていればそのこと）を書く。次の start は、了承のうちでも取り直す。`,
     }
   }
   const held = await effectiveLock($)

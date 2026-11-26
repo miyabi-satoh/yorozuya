@@ -4,7 +4,8 @@ import { takesInputInBash, takesInputInPowerShell } from './register'
 
 // 鍵の土台（machine-locks skill の scripts/locks.cjs）の代わり。同じ入れ物（files）の鍵のファイルを、土台と同じ決まりで読み書きする。
 // 土台そのものの決まり（取り合い・持ち主が落ちたとき・前の置き場）は locks.test.cjs が確かめる。dead は、落ちたことにするセッション。
-function fakeLocks(argv: string[], files: Map<string, string>, dead: Set<string>) {
+// unknown は、持ち主が生きているかを決められない（pid の無い）セッション。
+function fakeLocks(argv: string[], files: Map<string, string>, dead: Set<string>, unknown: Set<string> = new Set()) {
   const [op, , ...rest] = argv.slice(2)
   const flag = (name: string) => {
     const i = rest.indexOf(name)
@@ -21,14 +22,16 @@ function fakeLocks(argv: string[], files: Map<string, string>, dead: Set<string>
   } catch {
     raw = null
   }
-  if (!(raw && typeof raw.session === 'string' && typeof raw.until === 'number')) raw = null
-  const state = raw === null ? 'free' : raw.until <= now ? 'expired' : dead.has(raw.session) ? 'dead' : 'held'
+  if (!(raw && typeof raw.session === 'string' && typeof raw.root === 'string' && typeof raw.what === 'string' && typeof raw.until === 'number')) raw = null
+  const alive = raw === null || unknown.has(raw.session) ? null : !dead.has(raw.session)
+  const state = raw === null ? 'free' : raw.until <= now ? 'expired' : alive === false ? 'dead' : 'held'
   const lock = state === 'held' ? raw : null
   const own = (l: any) => l.session === session || (sameRoot && l.root === root)
-  if (op === 'status') return { state, lock, last: raw, alive: raw === null ? null : !dead.has(raw.session) }
+  if (op === 'status') return { state, lock, last: raw, alive }
   if (op === 'acquire') {
     if (lock !== null && !own(lock)) return { ok: false, heldBy: lock }
-    const placed = { resource: 'input', session, root, what: flag('--what'), since: now, until: now + Number(flag('--ms')) }
+    const since = lock !== null && lock.session === session && typeof lock.since === 'number' ? lock.since : now
+    const placed = { resource: 'input', session, root, what: flag('--what'), since, until: now + Number(flag('--ms')) }
     files.set(path, JSON.stringify(placed))
     return { ok: true, lock: placed, previous: raw }
   }
@@ -39,18 +42,29 @@ function fakeLocks(argv: string[], files: Map<string, string>, dead: Set<string>
   }
   if (op === 'clear') {
     if (state !== 'expired' && state !== 'dead') return { cleared: null }
+    if ((flag('--holder') !== undefined && raw.session !== flag('--holder')) || (flag('--until') !== undefined && raw.until !== Number(flag('--until')))) return { cleared: null }
     files.delete(path)
     return { cleared: raw }
+  }
+  if (op === 'claim') {
+    const claimsPath = '/home/me/.claude/locks/input.claims.json'
+    const claims = JSON.parse(files.get(claimsPath) ?? '{}')
+    const key = flag('--key') ?? ''
+    if (claims[key] !== undefined) return { claimed: false, by: claims[key].by }
+    const keep = Number(flag('--keep-ms'))
+    const kept = Object.fromEntries(Object.entries(claims).filter(([, c]: [string, any]) => now - c.at < keep))
+    files.set(claimsPath, JSON.stringify({ ...kept, [key]: { by: session, at: now } }))
+    return { claimed: true }
   }
   throw new Error(`知らない操作: ${op}`)
 }
 
 // 土台をこの入れ物で答え、通ったツール呼び出しには ok を返す。
-function setUp(on: any, files: Map<string, string> = new Map(), dialog: { dead?: Set<string>; noLocks?: boolean } = {}) {
+function setUp(on: any, files: Map<string, string> = new Map(), dialog: { dead?: Set<string>; unknown?: Set<string>; noLocks?: boolean } = {}) {
   on('fs.stat', () => ({ value: { realPath: '/skills/input-takeover/mod' } }))
   on('process.run', ($: any, e: any) => {
     if (dialog.noLocks || e.argv[1] !== '/skills/input-takeover/mod/../../machine-locks/scripts/locks.cjs') return { value: { exitCode: 1, stdout: '', stderr: '' } }
-    return { value: { exitCode: 0, stdout: JSON.stringify(fakeLocks(e.argv, files, (dialog.dead ??= new Set()))), stderr: '' } }
+    return { value: { exitCode: 0, stdout: JSON.stringify(fakeLocks(e.argv, files, (dialog.dead ??= new Set()), dialog.unknown)), stderr: '' } }
   })
   on('tool.call', () => ({ result: { text: 'ok' } }))
 }
@@ -72,6 +86,7 @@ describe('入力を奪う操作', () => {
     interrupted?: boolean
     session: string
     dead?: Set<string>
+    unknown?: Set<string>
     noLocks?: boolean
     shown: { log: string[]; toast: string[]; notify: string[] }
   }
@@ -675,6 +690,26 @@ describe('入力を奪う操作', () => {
     dialog.dead = new Set(['a'])
     await clock.advance(15000)
     expect(dialog.shown.notify.at(-1)).toContain('セッションが終わったので')
+    expect(files.has(LOCK)).toBe(false)
+  })
+
+  test('時間切れを知らせる前に持ち主が落ちていたら、終わったことだけを一度知らせる', async ($, on) => {
+    const files = new Map([[LOCK, JSON.stringify({ session: 'a', root: '/r', what: 'x', until: 60000 })]])
+    const { dialog, clock } = await watching($, on, files, 'b', 60000)
+    dialog.dead = new Set(['a'])
+    await clock.advance(60000)
+    expect(dialog.shown.notify).toEqual(['/r のセッションが終わったので、「x」の鍵を外しました。キーボードとマウスを返しました。もう使って大丈夫です。'])
+  })
+
+  test('持ち主が生きているか分からない切れた鍵は、時間切れだけを知らせ、10分を過ぎたら片付ける', async ($, on) => {
+    const files = new Map([[LOCK, JSON.stringify({ session: 'a', root: '/r', what: 'x', until: 60000 })]])
+    const { dialog, clock } = await watching($, on, files, 'b', 60000)
+    dialog.unknown = new Set(['a'])
+    await clock.advance(60000)
+    expect(dialog.shown.notify).toHaveLength(1)
+    expect(files.has(LOCK)).toBe(true)
+    await clock.advance(10 * 60 * 1000)
+    expect(dialog.shown.notify).toHaveLength(1)
     expect(files.has(LOCK)).toBe(false)
   })
 

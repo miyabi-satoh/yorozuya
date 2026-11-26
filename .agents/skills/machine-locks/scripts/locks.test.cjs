@@ -89,6 +89,10 @@ test('pid が別のセッションに使い回されていれば dead、記録�
   locks.acquire('input', base(dir, { session: 'a' }));
   session(dir, process.pid, 'other');
   assert.equal(locks.status('input', { home: dir, now: 2000 }).state, 'dead');
+  fs.rmSync(path.join(dir, '.claude', 'sessions', `${process.pid}.json`));
+  const unknown = locks.status('input', { home: dir, now: 2000 });
+  assert.equal(unknown.state, 'held', 'プロセスが生きていて記録が無いときは、外さない');
+  assert.equal(unknown.alive, null);
 
   const bare = home();
   fs.rmSync(path.join(bare, '.claude', 'sessions'), { recursive: true });
@@ -173,4 +177,49 @@ test('clear は効いていない鍵だけを、持ち主でなくても消す',
   assert.equal(locks.clear('input', { home: dir, now: 61_000 }).cleared.session, 'a');
   assert.equal(locks.status('input', { home: dir, now: 0 }).state, 'free');
   assert.deepEqual(locks.clear('input', { home: dir, now: 0 }), { cleared: null });
+});
+
+test('延ばしたときに pid を引けなければ、前の鍵の pid を引き継ぐ', () => {
+  const dir = home();
+  session(dir, process.pid, 'a');
+  assert.equal(locks.acquire('input', base(dir, { session: 'a' })).lock.pid, process.pid);
+  fs.rmSync(path.join(dir, '.claude', 'sessions'), { recursive: true });
+  assert.equal(locks.acquire('input', base(dir, { session: 'a', now: 5000 })).lock.pid, process.pid);
+});
+
+test('clear は、holder・until を渡すと、その鍵のときだけ消す', () => {
+  const dir = home();
+  locks.acquire('input', base(dir, { session: 'a' }));
+  assert.deepEqual(locks.clear('input', { home: dir, now: 61_000, holder: 'b' }), { cleared: null });
+  assert.deepEqual(locks.clear('input', { home: dir, now: 61_000, holder: 'a', until: 1 }), { cleared: null });
+  assert.equal(locks.clear('input', { home: dir, now: 61_000, holder: 'a', until: 61_000 }).cleared.session, 'a');
+});
+
+test('claim は、同じ札を初めて取ったときだけ true で、古い札は落とす', async () => {
+  const dir = home();
+  const opts = (extra) => ({ home: dir, keepMs: 10_000, now: 0, ...extra });
+  assert.deepEqual(locks.claim('input', opts({ key: 'k', session: 'a' })), { claimed: true });
+  assert.deepEqual(locks.claim('input', opts({ key: 'k', session: 'b' })), { claimed: false, by: 'a' });
+  locks.claim('input', opts({ key: 'other', session: 'b', now: 20_000 }));
+  assert.equal(locks.claim('input', opts({ key: 'k', session: 'b', now: 20_000 })).claimed, true, '古い札は落ちている');
+
+  const runs = Array.from({ length: 8 }, (_, i) =>
+    new Promise((resolve) => {
+      const child = spawn(process.execPath, [CLI, 'claim', 'cpu', '--home', dir, '--session', `s${i}`, '--key', 'same']);
+      let out = '';
+      child.stdout.on('data', (chunk) => (out += chunk));
+      child.on('exit', () => resolve(JSON.parse(out)));
+    }),
+  );
+  assert.equal((await Promise.all(runs)).filter((r) => r.claimed).length, 1);
+});
+
+test('古い取り合いのフォルダーを消すとき、ほかの待ち手が作り直した新しいものは消さない', () => {
+  const dir = home();
+  const mutex = `${locks.lockPath('cpu', { home: dir })}.mutex`;
+  fs.mkdirSync(mutex, { recursive: true });
+  const old = new Date(Date.now() - 60_000);
+  fs.utimesSync(mutex, old, old);
+  assert.equal(locks.acquire('cpu', base(dir, { session: 'a' })).ok, true);
+  assert.deepEqual(fs.readdirSync(path.dirname(mutex)).filter((n) => n.includes('.stale-')), [], '消した古いものは残らない');
 });

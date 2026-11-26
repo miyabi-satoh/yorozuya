@@ -42,18 +42,21 @@ async function check($: EngineInterface) {
   const current = await read($, waiting)
   if (current === null) return
   const measured = await measure($)
-  if (measured === null || measured.idle === null) return
+  if (measured === null) return
   const { idle, starting } = measured
   const elapsed = (await $.clock.now()) - current.since
-  if (idle >= CPU_IDLE_MIN && !starting) {
+  // 空きを測れないときは、hook も空きでは止めない（測れなければ通す）ので、始める瞬間の鍵だけで決める。
+  if (!starting && (idle === null || idle >= CPU_IDLE_MIN)) {
     await update($, waiting, () => null)
+    const why = idle === null ? 'ほかのセッションの始めたところを過ぎた（CPU の空きは測れなかった）' : `CPU の空きが ${idle.toFixed(1)}% に戻った`
     await $.prompt.submit({
-      text: `[重い処理の待ち] CPU の空きが ${idle.toFixed(1)}% に戻った。止められた次の処理を流し直してよい（heavy-task skill）。\n${current.command}`,
+      text: `[重い処理の待ち] ${why}。止められた次の処理を流し直してよい（heavy-task skill）。\n${current.command}`,
     })
   } else if (elapsed >= GIVE_UP_AFTER_MS) {
     await update($, waiting, () => null)
+    const idleText = idle === null ? '測れない' : `${idle.toFixed(1)}%`
     await $.prompt.submit({
-      text: `[重い処理の待ち] 15分たっても${starting ? '、ほかのセッションが重い処理を始め続けている（CPU の空きは ' + idle.toFixed(1) + '%）' : ` CPU の空きが ${idle.toFixed(1)}% のまま`}。heavy-task skill の手順どおり、待ち続けるか強行するかをユーザーに聞く。\n${current.command}`,
+      text: `[重い処理の待ち] 15分たっても${starting ? `、ほかのセッションが重い処理を始め続けている（CPU の空きは ${idleText}）` : ` CPU の空きが ${idleText} のまま`}。heavy-task skill の手順どおり、待ち続けるか強行するかをユーザーに聞く。\n${current.command}`,
     })
   }
 }
