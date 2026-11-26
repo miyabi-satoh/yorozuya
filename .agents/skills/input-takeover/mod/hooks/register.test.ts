@@ -94,7 +94,7 @@ describe('入力を奪う操作', () => {
 
   // 同じマシンのセッションどうしが見る鍵ファイルを、テストの中の1つの入れ物で代わりにする。
   // clock を渡すと、時計と待ちは mock.clock が答える（見張りの every を進めるため）。
-  function machine(on: any, files: Map<string, string>, session: string, root = '/home/me/Projects/mawok', clock?: { now: () => number }) {
+  function machine(on: any, files: Map<string, string>, session: string, root = '/home/me/Projects/app-a', clock?: { now: () => number }) {
     const dialog: Dialog = { reply: '始める', asked: [], now: 0, slept: [], session, shown: { log: [], toast: [], notify: [] } }
     if (clock === undefined) machineClock(on, dialog)
     on('ui.log', ($: any, e: any) => (dialog.shown.log.push(e.text), { value: undefined }))
@@ -130,7 +130,7 @@ describe('入力を奪う操作', () => {
   // 見張りを動かす。session.start で張った every を、時計を進めて回す。
   async function watching($: any, on: any, files: Map<string, string>, session: string, now = 0, isInteractive = true) {
     const clock = mock.clock(on, { now })
-    const dialog = machine(on, files, session, '/home/me/Projects/mawok', clock)
+    const dialog = machine(on, files, session, '/home/me/Projects/app-a', clock)
     on('session.start', (_: any, e: any) => ({ cwd: e.cwd }))
     on('tool.register', () => ({ value: undefined }))
     on('session.end', (_: any, e: any) => ({ sessionId: e.sessionId }))
@@ -160,12 +160,12 @@ describe('入力を奪う操作', () => {
   })
 
   test('ほかのセッションの鍵が効いていれば、操作も start も止め、外れたら通す', async ($, on) => {
-    const files = new Map([[LOCK, JSON.stringify({ session: 'b', root: '/home/me/Projects/weblav', what: 'e2e', until: 5 * 60 * 1000 })]])
+    const files = new Map([[LOCK, JSON.stringify({ session: 'b', root: '/home/me/Projects/app-b', what: 'e2e', until: 5 * 60 * 1000 })]])
     machine(on, files, 'a')
     const denied = (await $.tool.call(capture) as any).deny
-    expect(denied).toContain('weblav')
+    expect(denied).toContain('app-b')
     expect(denied).toContain('あと5分')
-    expect((await $.tool.call(start()) as any).deny).toContain('weblav')
+    expect((await $.tool.call(start()) as any).deny).toContain('app-b')
 
     files.set(LOCK, '{}')
     expect((await $.tool.call(start()) as any).deny).toBeUndefined()
@@ -190,7 +190,7 @@ describe('入力を奪う操作', () => {
   })
 
   test('同じフォルダのセッションの鍵は、立ち上がり直した後に start と end で引き継げる', async ($, on) => {
-    const files = new Map([[LOCK, JSON.stringify({ session: 'old', root: '/home/me/Projects/mawok', what: 'x', until: 60000 })]])
+    const files = new Map([[LOCK, JSON.stringify({ session: 'old', root: '/home/me/Projects/app-a', what: 'x', until: 60000 })]])
     machine(on, files, 'new')
     expect((await $.tool.call(capture) as any).deny).toContain('引き継')
     expect((await $.tool.call(start()) as any).deny).toBeUndefined()
@@ -243,7 +243,7 @@ describe('入力を奪う操作', () => {
 
     dialog.session = 'b'
     await tick()
-    const notice = '/home/me/Projects/mawok のセッションが終わったので、「macos-check」の鍵を外しました。キーボードとマウスを返しました。もう使って大丈夫です。'
+    const notice = '/home/me/Projects/app-a のセッションが終わったので、「macos-check」の鍵を外しました。キーボードとマウスを返しました。もう使って大丈夫です。'
     expect(dialog.shown).toEqual({ log: [notice], toast: [notice], notify: [notice] })
     dialog.session = 'c'
     await tick()
@@ -329,11 +329,11 @@ describe('入力を奪う操作', () => {
   test('終わったセッションの知らせの時に、ほかのセッションが鍵を置いていれば、使ってよいとは言わない', async ($, on) => {
     const files = new Map([
       [ENDED, JSON.stringify({ a: { root: '/r', what: 'x', until: 60000, at: 0 } })],
-      [LOCK, JSON.stringify({ session: 'b', root: '/home/me/Projects/weblav', what: 'e2e', until: 5 * 60 * 1000 })],
+      [LOCK, JSON.stringify({ session: 'b', root: '/home/me/Projects/app-b', what: 'e2e', until: 5 * 60 * 1000 })],
     ])
     const { dialog, tick } = await watching($, on, files, 'c')
     await tick()
-    expect(dialog.shown.notify).toEqual(['/r のセッションが終わったので、「x」の鍵を外しました。キーボードとマウスは、いま /home/me/Projects/weblav の「e2e」が使っています（あと5分の見込み）。'])
+    expect(dialog.shown.notify).toEqual(['/r のセッションが終わったので、「x」の鍵を外しました。キーボードとマウスは、いま /home/me/Projects/app-b の「e2e」が使っています（あと5分の見込み）。'])
   })
 
   test('ほかのセッションの鍵が置かれた後で、切れた自分の鍵を end しても、その鍵を消さない', async ($, on) => {
@@ -483,9 +483,9 @@ describe('入力を奪う操作', () => {
     await $.tool.call(start())
     await $.tool.call({ ...start(), what: 'b' })
     expect(dialog.asked).toHaveLength(1)
-    await $.tool.call({ ...start(), what: 'c', notes: ['Mawok の窓に触れない'] })
+    await $.tool.call({ ...start(), what: 'c', notes: ['アプリの窓に触れない'] })
     expect(dialog.asked).toHaveLength(2)
-    expect(dialog.asked[1]).toContain('Mawok の窓に触れない')
+    expect(dialog.asked[1]).toContain('アプリの窓に触れない')
   })
 
   test('了承の後の待ちが中断されたら、鍵を外して断る', async ($, on) => {
@@ -501,7 +501,7 @@ describe('入力を奪う操作', () => {
   })
 
   test('同じフォルダのほかのセッションの鍵を引き継ぐときも、問い直す', async ($, on) => {
-    const files = new Map([[LOCK, JSON.stringify({ session: 'old', root: '/home/me/Projects/mawok', what: 'x', until: 60000 })]])
+    const files = new Map([[LOCK, JSON.stringify({ session: 'old', root: '/home/me/Projects/app-a', what: 'x', until: 60000 })]])
     const dialog = machine(on, files, 'new')
     dialog.reply = 'やめる'
     expect((await $.tool.call(start()) as any).deny).toBeTruthy()
@@ -561,7 +561,7 @@ describe('入力を奪う操作', () => {
 
   test('了承のうちでも、同じフォルダのほかのセッションの鍵を引き継ぐときは問う', async ($, on) => {
     const files = new Map([['/home/me/.claude/locks/input.approved.json', JSON.stringify({ new: 0 })]])
-    files.set(LOCK, JSON.stringify({ session: 'old', root: '/home/me/Projects/mawok', what: 'x', until: 60000 }))
+    files.set(LOCK, JSON.stringify({ session: 'old', root: '/home/me/Projects/app-a', what: 'x', until: 60000 }))
     const dialog = machine(on, files, 'new')
     await $.tool.call(start())
     expect(dialog.asked).toHaveLength(1)
@@ -595,9 +595,9 @@ describe('入力を奪う操作', () => {
   test('答えを待つ間にほかのセッションが鍵を置いたら、上書きしない', async ($, on) => {
     const files = new Map<string, string>()
     const dialog = machine(on, files, 'a')
-    const other = JSON.stringify({ session: 'b', root: '/home/me/Projects/weblav', what: 'e2e', until: 60000 })
+    const other = JSON.stringify({ session: 'b', root: '/home/me/Projects/app-b', what: 'e2e', until: 60000 })
     dialog.onAsk = () => files.set(LOCK, other)
-    expect((await $.tool.call(start()) as any).deny).toContain('weblav')
+    expect((await $.tool.call(start()) as any).deny).toContain('app-b')
     expect(files.get(LOCK)).toBe(other)
     // 断られた了承は残さない。
     expect(files.has('/home/me/.claude/locks/input.approved.json')).toBe(false)
@@ -715,7 +715,7 @@ describe('入力を奪う操作', () => {
   })
 
   test('同じフォルダで動いているほかのセッションの鍵は、end で外さない', async ($, on) => {
-    const files = new Map([[LOCK, JSON.stringify({ session: 'other', root: '/home/me/Projects/mawok', what: 'x', until: 60000 })]])
+    const files = new Map([[LOCK, JSON.stringify({ session: 'other', root: '/home/me/Projects/app-a', what: 'x', until: 60000 })]])
     const dialog = machine(on, files, 'a')
     dialog.unknown = new Set()
     expect(JSON.stringify(await $.tool.call(end))).toContain('ほかのセッションの鍵')
