@@ -18,6 +18,7 @@
 // ペインへ送るコマンドも同じように見る (ビルドやテストもペインで流すことがあるため)。
 // hc の端末と Herdr の中では、重い処理をペインの外で流すのも止める。ログと終了コードがタブの側に残り、途中で打ち切られても理由が分かるため。
 // 測れないときや入力が読めないときは、何もせずに通す (hook の不具合で作業を止めないため)。
+// 重い処理を通したら、始める瞬間の鍵 (machine-locks skill の cpu の鍵) を START_WINDOW_MS のあいだ置き、その間のほかのセッションの重い処理を止める。
 // 3つの OS で同じに動くよう、負荷は node の os モジュールで測る。
 
 const { execFileSync } = require('node:child_process');
@@ -270,15 +271,79 @@ function outsideTabReason(tool) {
   ].join('\n');
 }
 
-function denyReason(input, idle) {
+// toolName は hook のときのツールの名前。--admit で測ったときは undefined。
+function forceHint(toolName) {
+  if (toolName === undefined) return '強行を認められたときだけ、--admit を通さずに流します。';
+  return toolName === 'Workflow'
+    ? `Workflow では、script に // ${FORCE_MARK} の注釈を足してください。`
+    : `Bash ではコマンドの頭に ${FORCE_MARK} を付け、PowerShell では $env:${FORCE_MARK}; を前に置いてください。`;
+}
+
+const WAIT_HINT =
+  'heavy-wait の mod があれば、空きを測り続け、空いたとき (15分たっても厳しいときも) にプラグインのメッセージで知らせるので、その間は軽い作業を進めてください。mod が無ければ、5分待って確かめ直すのを3回 (計15分) 繰り返します。';
+
+function denyReason(toolName, idle) {
   return [
     `CPU の空きが ${idle.toFixed(1)}% で、${CPU_IDLE_MIN}% を切っているため、重い処理を止めました。`,
-    'heavy-wait の mod があれば、空きを測り続け、空いたとき (15分たっても厳しいときも) にプラグインのメッセージで知らせるので、その間は軽い作業を進めてください。mod が無ければ、5分待って確かめ直すのを3回 (計15分) 繰り返します。',
+    WAIT_HINT,
     `それでも厳しいままなら、待ち続けるか強行するかをユーザーに確かめてください。強行を認められたときだけ、${FORCE_MARK} を含めて実行し直します。`,
-    input.tool_name === 'Workflow'
-      ? `Workflow では、script に // ${FORCE_MARK} の注釈を足してください。`
-      : `Bash ではコマンドの頭に ${FORCE_MARK} を付け、PowerShell では $env:${FORCE_MARK}; を前に置いてください。`,
+    forceHint(toolName),
   ].join('\n');
+}
+
+// ほかのセッションが重い処理を始めて START_WINDOW_MS のうちは、空きを測っても、始めた処理の負荷がまだ出ていないことがあるので止める。
+// 2つのセッションがほぼ同時に測ると、どちらも空いて見えて両方が始めるため。
+// ADR: 鍵を持つのは始めてから決まった時間だけで、処理が終わるまでではない（ユーザーの決定）。空いていれば重い処理どうしも並べられ、終わりを取りこぼして皆が待つことも無いため。
+const START_WINDOW_MS = 60 * 1000;
+
+// heavy-wait の mod が、止めた理由の書き出しで見分けるので、文の形は変えない。
+function windowReason(toolName, held, now) {
+  const seconds = Math.max(1, Math.ceil((held.until - now) / 1000));
+  return [
+    `ほかのセッションが重い処理を始めたところなので、重い処理を止めました (${held.root} の「${held.what}」、あと${seconds}秒)。始めた処理の負荷が CPU の空きに出るまで待つためです。`,
+    WAIT_HINT,
+    `急ぐ事情があればユーザーに確かめ、強行を認められたときだけ ${FORCE_MARK} を含めて実行し直します。`,
+    forceHint(toolName),
+  ].join('\n');
+}
+
+// 鍵の土台 (machine-locks skill)。同じリポジトリの隣の skill にある (hook は symlink を解いたパスで読まれる)。
+// 無ければ、始める瞬間の鍵を使わずに、空きだけを見る。
+function loadLocks() {
+  try {
+    return require(path.join(__dirname, '..', '..', 'machine-locks', 'scripts', 'locks.cjs'));
+  } catch {
+    return null;
+  }
+}
+
+// 鍵を扱えないとき (ファイルを書けないなど) は、鍵を使わずに空きだけで決める (hook の不具合で作業を止めないため)。
+function tryLocks(fn) {
+  try {
+    return fn();
+  } catch {
+    return null;
+  }
+}
+
+// 重い処理を始めてよいか。session が無いときは、空きだけを見る。
+// ほかのセッションの始める瞬間の鍵を先に見るのは、効いていれば1秒かけて測らずに済むため。置くときにもう一度見るので、その間に置かれても重ならない。
+async function admit({ session, root, what, toolName }) {
+  const locks = session ? loadLocks() : null;
+  const held = locks && tryLocks(() => locks.status('cpu', {}).lock);
+  if (held && held.session !== session) return { ok: false, reason: windowReason(toolName, held, Date.now()) };
+  const idle = await cpuIdlePercent();
+  if (idle !== null && idle < CPU_IDLE_MIN) return { ok: false, idle, reason: denyReason(toolName, idle) };
+  const taken = locks && tryLocks(() => locks.acquire('cpu', { session, root, what, ms: START_WINDOW_MS }));
+  if (taken && !taken.ok) return { ok: false, idle, reason: windowReason(toolName, taken.heldBy, Date.now()) };
+  return { ok: true, idle };
+}
+
+// 鍵に書く「何をするか」。止めたほかのセッションに見せる。
+function describe(input, config, prePush) {
+  if (input.tool_name === 'Workflow') return 'Workflow';
+  const text = (heavySegments(input.tool_input?.command ?? '', config, prePush)[0] ?? []).join(' ');
+  return text.length > 80 ? `${text.slice(0, 79)}…` : text || '(重い処理)';
 }
 
 async function main() {
@@ -307,19 +372,48 @@ async function main() {
   }
   if (!isHeavy(input, config, prePush)) return;
 
-  const idle = await cpuIdlePercent();
-  if (idle !== null && idle < CPU_IDLE_MIN) {
-    output({ permissionDecision: 'deny', permissionDecisionReason: denyReason(input, idle) });
-  }
+  const { ok, reason } = await admit({ session: input.session_id, root: cwd, what: describe(input, config, prePush), toolName: input.tool_name });
+  if (!ok) output({ permissionDecision: 'deny', permissionDecisionReason: reason });
 }
 
-if (require.main === module && process.argv.includes('--idle')) {
-  // heavy-wait の mod が、止めた後に空きを測り直すのに使う。測れなければ何も出さない。
-  cpuIdlePercent()
-    .then((idle) => idle !== null && process.stdout.write(`${idle.toFixed(1)}\n`))
-    .catch(() => {});
+function argValue(name) {
+  const i = process.argv.indexOf(name);
+  return i === -1 ? undefined : process.argv[i + 1];
+}
+
+// heavy-wait の mod が、止めた後に流し直してよいかを測り直すのに使う。
+// 空き (測れなければ null) と、ほかのセッションの始める瞬間の鍵 (無ければ null) を JSON で1行出す。
+async function ready(session) {
+  const locks = loadLocks();
+  const held = locks && tryLocks(() => locks.status('cpu', {}).lock);
+  const idle = await cpuIdlePercent();
+  process.stdout.write(`${JSON.stringify({ idle, heldBy: held && held.session !== session ? held : null })}\n`);
+}
+
+// hook が拾わない重い処理を始める前に、hook と同じ判断をする (heavy-task skill の手順)。
+// 始めてよければ 0、待つなら理由を出して 1 で返す。
+async function admitCommand() {
+  const session = argValue('--session') ?? process.env.CLAUDE_CODE_SESSION_ID;
+  const what = argValue('--what');
+  if (!session || !what) {
+    process.stderr.write('--what <何をするか> と、--session <自分を見分ける文字列> (Claude Code なら無くてよい) が要る\n');
+    return 2;
+  }
+  const result = await admit({ session, root: process.cwd(), what });
+  const idle = result.idle == null ? '測れなかった' : `${result.idle.toFixed(1)}%`;
+  process.stdout.write(result.ok ? `始めてよい (CPU の空き: ${idle})\n` : `${result.reason}\n`);
+  return result.ok ? 0 : 1;
+}
+
+if (require.main === module && process.argv.includes('--ready')) {
+  ready(argValue('--ready')).catch(() => {});
+} else if (require.main === module && process.argv.includes('--admit')) {
+  admitCommand().then(
+    (code) => (process.exitCode = code),
+    () => (process.exitCode = 0),
+  );
 } else if (require.main === module) {
   main().catch(() => {});
 } else {
-  module.exports = { commandSegments, isHeavy, loadConfig, runsOutsideTab, FORCE_MARK };
+  module.exports = { commandSegments, isHeavy, loadConfig, runsOutsideTab, FORCE_MARK, START_WINDOW_MS };
 }

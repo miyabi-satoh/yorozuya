@@ -255,3 +255,55 @@ test('CPU が埋まっていれば重い処理を拒む', async () => {
     for (const burner of burners) burner.kill();
   }
 });
+
+// 始める瞬間の鍵は、HOME を試しのフォルダーにして、ほんとうの鍵に触れない。
+function hookAs(project, home, session, command = 'just ci') {
+  return spawnSync(process.execPath, [path.join(__dirname, 'guard-heavy-commands.cjs')], {
+    input: JSON.stringify({ ...bash(command), cwd: project, ...(session ? { session_id: session } : {}) }),
+    env: { ...process.env, HC_TERMINAL_ID: '', HERDR_ENV: '', CLAUDE_PROJECT_DIR: project, HOME: home, USERPROFILE: home, CLAUDE_PID: '' },
+    encoding: 'utf8',
+  });
+}
+
+test('重い処理を通したら、始めて60秒はほかのセッションの重い処理を止め、自分のは通す', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'guard-home-'));
+  const project = projectWith(JSON.stringify({ heavy: ['just ci'] }));
+  assert.equal(hookAs(project, home, 'a').stdout, '');
+  const lock = JSON.parse(fs.readFileSync(path.join(home, '.claude', 'locks', 'cpu.json'), 'utf8'));
+  assert.equal(lock.session, 'a');
+  assert.equal(lock.what, 'just ci');
+  assert.ok(lock.until - lock.since === 60_000);
+  const denied = JSON.parse(hookAs(project, home, 'b').stdout).hookSpecificOutput;
+  assert.equal(denied.permissionDecision, 'deny');
+  assert.match(denied.permissionDecisionReason, /^ほかのセッションが重い処理を始めたところなので、重い処理を止めました \(.+ の「just ci」、あと\d+秒\)/);
+  assert.equal(hookAs(project, home, 'a').stdout, '', '自分の続きは止めない');
+  assert.equal(hookAs(project, home, 'b', 'git status').stdout, '', '軽いものは止めない');
+});
+
+test('セッションが分からなければ、鍵を置かずに空きだけを見る', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'guard-home-'));
+  const project = projectWith(JSON.stringify({ heavy: ['just ci'] }));
+  assert.equal(hookAs(project, home, undefined).stdout, '');
+  assert.equal(fs.existsSync(path.join(home, '.claude', 'locks', 'cpu.json')), false);
+});
+
+test('--admit は hook と同じ判断で始めてよいかを返し、--ready はほかのセッションの鍵を添える', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'guard-home-'));
+  const run = (...args) =>
+    spawnSync(process.execPath, [path.join(__dirname, 'guard-heavy-commands.cjs'), ...args], {
+      env: { ...process.env, HOME: home, USERPROFILE: home, CLAUDE_PID: '', CLAUDE_CODE_SESSION_ID: '' },
+      encoding: 'utf8',
+    });
+  const first = run('--admit', '--session', 'a', '--what', '全体のビルド');
+  assert.equal(first.status, 0);
+  assert.match(first.stdout, /^始めてよい/);
+  const second = run('--admit', '--session', 'b', '--what', '変換');
+  assert.equal(second.status, 1);
+  assert.match(second.stdout, /「全体のビルド」/);
+  assert.match(second.stdout, /--admit を通さずに流します/);
+  assert.equal(run('--admit', '--what', 'x').status, 2);
+  const ready = JSON.parse(run('--ready', 'b').stdout);
+  assert.equal(typeof ready.idle, 'number');
+  assert.equal(ready.heldBy.session, 'a');
+  assert.equal(JSON.parse(run('--ready', 'a').stdout).heldBy, null);
+});
