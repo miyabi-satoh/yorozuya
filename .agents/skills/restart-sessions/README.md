@@ -128,7 +128,7 @@ Claude Code の更新の知らせ（再起動で反映される）や、放置�
 - `@<path>` で資料が読み込まれる
 - 各セッションの会話が `~/.claude/projects/<project>/<session-id>.jsonl` に保存され、`type: "user"/"assistant"` の行の `message.content` にテキストが入る（`scripts/extract-transcript.mjs` が読む形式。公式に文書化されていない内部形式）
 - 入力のサジェストは薄字（`ESC[2m`）で出る（再起動の後の確認で、入力欄に残った依頼と見分ける）。字を打つとサジェストはその字に置き換わる（色の無い hc の画面で、書きかけと見分ける）
-- `claude agents --json` が、動いているセッションの `pid` と `sessionId` を並べる（hc の端末のセッションIDを引く。2.1.332 で確かめた）
+- `claude agents --json` が、動いているセッションの `pid` と `sessionId` を並べる（hc の端末のセッションIDを引く。2.1.332 で確かめた）。hc の core が名前の `claude` を起動できない（`spawn_failed`）ときは、端末の claude を絶対パスで起動していればそのパス、次に `~/.local/bin/claude`（Windows は `.exe`。Claude Code のインストーラーが置く場所）で流す
 - 選択肢で答える問い（AskUserQuestion）が使える（再起動の前にダイアログで問うていたとき、新セッションがダイアログで出し直す）
 - `SendMessage` はツール呼び出しの切れ目で読まれる（区切りの確認の依頼が、作業中の対象にも届く）
 - 画面の最下部のモードラインに、バックグラウンドのシェル・Monitor の数が `N shells`・`N monitor` の形で出る（`/exit` の前の照合）

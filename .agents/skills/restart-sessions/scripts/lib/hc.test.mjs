@@ -8,6 +8,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 
 import {
+  claudeBinOf,
   claudeFlagsOf,
   claudeTerminalsFrom,
   cwdOf,
@@ -187,7 +188,17 @@ case "$1" in
   rm) echo '{"removed":"t9"}' ;;
   ls) echo '{"terminals":[],"hidden_finished":0,"machines":[]}' ;;
   keys) ;;
-  exec) printf '{"code":0,"stdout":"%s"}\n' "$(printf '[{"pid":100,"sessionId":"s1"}]' | base64 | tr -d '\n')" ;;
+  exec)
+    # bin/nopath があれば、名前の claude を起動できない core（spawn_failed）になる。ホームは /h（--on の先）。
+    if [ -e '${bin}/nopath' ] && printf '%s\n' "$@" | grep -qx claude; then echo '{"error":{"kind":"spawn_failed","message":"cannot start claude"}}' >&2; exit 1; fi
+    case "$*" in *'printf %s'*|*USERPROFILE*) printf '{"code":0,"stdout":"%s"}\n' "$(printf '/h' | base64)"; exit 0 ;; esac
+    # bin/noinstalled なら <ホーム>/.local/bin/claude も起動できず、bin/badinstalled なら起動して終了コード 1。bin/badbin なら /m/claude が別のエラー。
+    case "$*" in
+      *'/h/.local/bin/claude '*) [ -e '${bin}/noinstalled' ] && { echo '{"error":{"kind":"spawn_failed","message":"cannot start /h/.local/bin/claude"}}' >&2; exit 1; }
+        [ -e '${bin}/badinstalled' ] && { printf '{"code":1,"stderr":"%s"}\n' "$(printf 'not logged in' | base64)"; exit 0; } ;;
+      *'/m/claude '*) [ -e '${bin}/badbin' ] && { echo '{"error":{"kind":"timeout","message":"timed out"}}' >&2; exit 1; } ;;
+    esac
+    printf '{"code":0,"stdout":"%s"}\n' "$(printf '[{"pid":100,"sessionId":"s1"}]' | base64 | tr -d '\n')" ;;
   label) if [ -z "$4" ]; then echo '{"error":{"kind":"not_found","message":"no terminal"}}' >&2; exit 3; fi ;;
   read) echo 'not json' ;;
   *) echo '{"error":{"kind":"not_found","message":"no terminal"}}' >&2; exit 3 ;;
@@ -287,6 +298,52 @@ test('claude agents は hc exec で引き、ほかのマシンなら --on を付
   const { call, seen } = fakeHc(t);
   assert.equal(call(`console.log(hc.sessionOf({ address: 'mac/t1', foreground: { pid: 100 } }), JSON.stringify(hc.claudeAgents()));`).stdout.trim(), 's1 [{"pid":100,"sessionId":"s1"}]');
   assert.deepEqual(seen(), ['t3|unsetunset|exec --json --on mac claude agents --json', 't3|unsetunset|exec --json claude agents --json']);
+});
+
+test('名前の claude を起動できない core なら、<ホーム>/.local/bin/claude で引き直す', { skip: process.platform === 'win32' }, (t) => {
+  const { call, seen, bin } = fakeHc(t);
+  fs.writeFileSync(path.join(bin, 'nopath'), '');
+  const home = os.homedir();
+  assert.equal(call(`console.log(hc.sessionOf({ address: 'mac/t1', foreground: { pid: 100 } }), hc.sessionOf({ address: 'win/t2', cwd: 'C:\\\\w', foreground: { pid: 100 } }), JSON.stringify(hc.claudeAgents()));`).stdout.trim(), 's1 s1 [{"pid":100,"sessionId":"s1"}]');
+  assert.deepEqual(seen(), [
+    't3|unsetunset|exec --json --on mac claude agents --json',
+    't3|unsetunset|exec --json --on mac /bin/sh -c printf %s "$HOME"',
+    't3|unsetunset|exec --json --on mac /h/.local/bin/claude agents --json',
+    't3|unsetunset|exec --json --on win claude agents --json',
+    't3|unsetunset|exec --json --on win powershell -NoProfile -NonInteractive -Command try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch {}; $env:USERPROFILE',
+    't3|unsetunset|exec --json --on win /h\\.local\\bin\\claude.exe agents --json',
+    't3|unsetunset|exec --json claude agents --json',
+    `t3|unsetunset|exec --json ${home}/.local/bin/claude agents --json`,
+  ]);
+});
+
+test('引き直しも起動できなければ、名前で起動できなかった理由に試した先を添える。起動して失敗したなら、その理由を残す', { skip: process.platform === 'win32' }, (t) => {
+  const { call, bin } = fakeHc(t);
+  fs.writeFileSync(path.join(bin, 'nopath'), '');
+  const lookup = `console.log(JSON.stringify([hc.claudeAgents('mac'), hc.hcError(), hc.hcErrorKind()]));`;
+  fs.writeFileSync(path.join(bin, 'noinstalled'), '');
+  assert.equal(call(lookup).stdout.trim(), JSON.stringify([null, 'cannot start claude（/h/.local/bin/claude も起動できない）', 'spawn_failed']));
+  fs.rmSync(path.join(bin, 'noinstalled'));
+  fs.writeFileSync(path.join(bin, 'badinstalled'), '');
+  assert.equal(call(lookup).stdout.trim(), JSON.stringify([null, '終了コード 1: not logged in', '']));
+});
+
+test('端末の claude のパスが spawn_failed 以外で失敗したら、名前やホームでは引き直さない', { skip: process.platform === 'win32' }, (t) => {
+  const { call, seen, bin } = fakeHc(t);
+  fs.writeFileSync(path.join(bin, 'badbin'), '');
+  assert.equal(call(`console.log(JSON.stringify([hc.claudeAgents('mac', { bin: '/m/claude' }), hc.hcErrorKind()]));`).stdout.trim(), '[null,"timeout"]');
+  assert.deepEqual(seen(), ['t3|unsetunset|exec --json --on mac /m/claude agents --json']);
+});
+
+test('端末の claude をパスで起動していれば、そのパスで引く（バージョン管理の置き場は core の PATH に無くてよい）', { skip: process.platform === 'win32' }, (t) => {
+  const { call, seen, bin } = fakeHc(t);
+  fs.writeFileSync(path.join(bin, 'nopath'), '');
+  assert.equal(call(`console.log(hc.sessionOf({ address: 'linux/t1', foreground: { pid: 100, argv: ['/m/installs/claude/2.1.332/claude', 'x'] } }));`).stdout.trim(), 's1');
+  assert.deepEqual(seen(), ['t3|unsetunset|exec --json --on linux /m/installs/claude/2.1.332/claude agents --json']);
+  assert.equal(claudeBinOf({ foreground: { argv: ['C:\\u\\.local\\bin\\claude.exe'] } }), 'C:\\u\\.local\\bin\\claude.exe');
+  assert.equal(claudeBinOf({ foreground: { argv: ['claude'] } }), '');
+  assert.equal(claudeBinOf({ foreground: { argv: ['./bin/claude'] } }), '');
+  assert.equal(claudeBinOf({ foreground: { argv: ['/usr/bin/node', '/n/claude'] } }), '');
 });
 
 test('中身の要らない keys は出力が空でも成功、中身の要る read は JSON でなければ失敗', { skip: process.platform === 'win32' }, (t) => {

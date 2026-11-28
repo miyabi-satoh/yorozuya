@@ -6,6 +6,7 @@
 // claude agents は /clear・再開をすぐ映すので、/clear の後も今のセッションを指す。ほかのマシンの端末は hc exec --on で引く。
 
 import { spawnSync } from 'node:child_process';
+import os from 'node:os';
 
 import { backgroundHintFromScreen, draftFromScreen, sleep } from './herdr.mjs';
 
@@ -146,8 +147,30 @@ export function execStdout(result) {
 }
 
 // そのマシンの claude agents --json の一覧。取れなければ null。
-export function claudeAgents(machine = '') {
-  const out = execStdout(hc(['exec', ...(machine ? ['--on', machine] : []), 'claude', 'agents', '--json']));
+// 引く claude は、端末の claude をパスで起動したならそれ（bin。mise のようなバージョン管理の置き場は core の PATH に無くてよい）、次に名前、
+// 次に Claude Code のインストーラーが置く `<ホーム>/.local/bin/claude` の順で、前のものを core が起動できない（spawn_failed）ときだけ次へ進む
+// （rencon の src/records.rs と同じ）。core の PATH が足りないのは、Dock から開いたアプリが launchd の最小の PATH のまま core を起こしたときと、
+// ほかのマシンの hc exec --on が ssh の PATH で動くとき（herdr-core #327）。2026-11-28 に mac で、前者で再起動と exit-self が止まった。
+export function claudeAgents(machine = '', { windows = machine ? false : process.platform === 'win32', bin = '' } = {}) {
+  const on = machine ? ['--on', machine] : [];
+  const run = (program) => execStdout(hc(['exec', ...on, program, 'agents', '--json']));
+  let out = null;
+  for (const program of [bin, 'claude'].filter(Boolean)) {
+    out = run(program);
+    if (out !== null || lastKind !== 'spawn_failed') break;
+  }
+  if (out === null && lastKind === 'spawn_failed') {
+    // ホームを引く hc もエラーを書き換えるので、引き直し先も起動できなかったときは、名前で起動できなかった理由に戻す。
+    // 引き直し先が起動して失敗したなら、そちらの理由を残す。
+    const cause = [lastError, lastKind];
+    const home = homeOf(machine, windows);
+    const installed = home ? (windows ? `${home}\\.local\\bin\\claude.exe` : `${home}/.local/bin/claude`) : '';
+    if (installed) out = run(installed);
+    if (out === null && (!installed || lastKind === 'spawn_failed')) {
+      [lastError, lastKind] = cause;
+      lastError += installed ? `（${installed} も起動できない）` : '（ホームを引けず、~/.local/bin/claude は試していない）';
+    }
+  }
   if (out === null) return null;
   try {
     const list = JSON.parse(out);
@@ -158,9 +181,29 @@ export function claudeAgents(machine = '') {
   }
 }
 
-// 端末の今のセッションID。引けなければ ''。
+// claude 本体の名前か、その名前で終わるパス。
+const CLAUDE_NAME = /(^|[\\/])claude(\.exe)?$/i;
+
+// 端末の claude を絶対パスで起動していれば、そのパス。名前で起動したもの・node で動かすもの（npm で入れた版）・相対パス（core の cwd で読まれてしまう）は ''。
+export function claudeBinOf(info) {
+  const argv0 = info?.foreground?.argv?.[0];
+  return typeof argv0 === 'string' && /^(\/|[A-Za-z]:[\\/]|\\\\)/.test(argv0) && CLAUDE_NAME.test(argv0) ? argv0 : '';
+}
+
+// そのマシンのホームフォルダー。引けなければ ''。Windows 以外は、PATH が足りなくても起動できるよう sh をパスで呼ぶ。
+function homeOf(machine, windows) {
+  if (!machine) return os.homedir();
+  const argv = windows
+    ? ['powershell', '-NoProfile', '-NonInteractive', '-Command', 'try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch {}; $env:USERPROFILE']
+    : ['/bin/sh', '-c', 'printf %s "$HOME"'];
+  return execStdout(hc(['exec', '--on', machine, ...argv]))?.trim() ?? '';
+}
+
+// 端末の今のセッションID。引けなければ ''。Windows のマシンかは、作業フォルダーにドライブ文字があるかで見る。
 export function sessionOf(info) {
-  return sessionIdOf(info, claudeAgents(machineOf(info?.address)));
+  const machine = machineOf(info?.address);
+  const windows = machine ? /^[A-Za-z]:/.test(cwdOf(info)) : undefined;
+  return sessionIdOf(info, claudeAgents(machine, { windows, bin: claudeBinOf(info) }));
 }
 
 // 今その端末の前に出ているのが claude か。claude が終わってシェルに戻ると、ラベルは残るが前景はシェルになる。
@@ -168,7 +211,7 @@ export function sessionOf(info) {
 export function isClaude(info) {
   if (info?.state !== 'live') return false;
   const fg = info.foreground;
-  const named = (word) => /(^|[\\/])claude(\.exe)?$/i.test(word ?? '');
+  const named = (word) => CLAUDE_NAME.test(word ?? '');
   if (named(fg?.name) || named(fg?.argv?.[0])) return true;
   return /(^|[\\/])node(\.exe)?$/i.test(fg?.argv?.[0] ?? '') && named(fg?.argv?.[1]);
 }
@@ -288,7 +331,7 @@ export function claudeTerminals() {
   const terminals = hc(['ls'])?.terminals;
   if (!Array.isArray(terminals)) return null;
   const infos = terminals.filter((t) => t?.state === 'live' && isLocal(t.address)).map((t) => terminalInfo(t.address));
-  return claudeTerminalsFrom(infos, claudeAgents());
+  return claudeTerminalsFrom(infos, claudeAgents('', { bin: infos.map(claudeBinOf).find(Boolean) }));
 }
 
 export function claudeTerminalsFrom(infos, agents) {
