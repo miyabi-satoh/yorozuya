@@ -5,6 +5,7 @@ type SimpleCommand = { words: string[]; nested: boolean }
 const basename = (word: string) => word.split(/[\\/]/).pop() ?? word
 const INPUT_TOOLS = new Set(['osascript', 'cliclick', 'xdotool', 'ydotool', 'wtype'])
 const SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'fish'])
+const WRAPPERS = new Set(['sudo', 'xargs', 'env', 'timeout', 'nohup', 'exec', 'time', 'command', 'doas', 'nice'])
 
 // 引用された引数は1語に保ち、コマンド置換は別のコマンドとして読む。
 function simpleCommands(source: string): SimpleCommand[] {
@@ -161,6 +162,11 @@ export const takesInputInBash = (command: string): boolean => {
   const cmds = simpleCommands(kept.join('\n'))
   let capture = false, open = false
   for (const item of cmds) {
+    // ラッパー（sudo・xargs など）の選択肢は値を取るものを全部は覚えきれないので、後ろのどこかに入力の道具の名前があれば止める側に倒す。
+    // 読み違えても、鍵を求めるだけで済む。command -v のような調べるだけの形は除く。
+    const lead = item.words.findIndex(word => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(word))
+    const leadName = lead < 0 ? '' : basename(item.words[lead])
+    if (WRAPPERS.has(leadName) && !(leadName === 'command' && /^-[a-zA-Z]*[vV]/.test(item.words[lead + 1] ?? '')) && item.words.slice(lead + 1).some(word => INPUT_TOOLS.has(basename(word).toLowerCase()))) return true
     const [raw = '', ...args] = commandWords(item.words)
     const name = basename(raw).toLowerCase()
     if (INPUT_TOOLS.has(name) || (name === 'hyprctl' && args[0] === 'dispatch')) return true
