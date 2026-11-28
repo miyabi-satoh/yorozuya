@@ -221,6 +221,27 @@ test('hc の端末では、HERDR_ENV=1 があっても hc の新しい端末で 
   assert.equal(fs.existsSync(path.join(state, 'closed')), true);
 });
 
+test('呼び出し元の CLAUDE_CODE_GIT_BASH_PATH を job.json に残す（タブの runner は呼び出し元の環境を継がない）', () => {
+  const { env } = fakeHc();
+  const dir = tmp();
+  const bash = path.join(dir, 'bash.exe');
+  const result = run({ ...env, CLAUDE_PID: '', CLAUDE_CODE_GIT_BASH_PATH: bash }, '--dir', dir, '--cwd', dir, '--', 'exit 0');
+  assert.equal(result.status, 0);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'job.json'), 'utf8')).gitBash, bash);
+});
+
+test('runner は job.json の gitBash の Git Bash で流す', { skip: !windows && 'Git Bash を選ぶのは Windows だけ' }, () => {
+  const bash = shellFor('', process.platform, process.env, fs.existsSync)[0];
+  if (bash === 'pwsh') return;
+  const dir = tmp();
+  fs.writeFileSync(path.join(dir, 'job.json'), JSON.stringify({ command: 'echo $((1+2))', cwd: dir, gitBash: bash }));
+  // PATH と ProgramFiles からは Git Bash を見つけられない環境にする。
+  const env = { ...process.env, PATH: path.dirname(process.execPath), Path: undefined, ProgramFiles: path.join(dir, 'none'), CLAUDE_CODE_GIT_BASH_PATH: '' };
+  const result = spawnSync(process.execPath, [script, '--runner', dir], { encoding: 'utf8', env });
+  assert.equal(result.status, 0);
+  assert.match(fs.readFileSync(path.join(dir, 'output.log'), 'utf8'), /^3$/m);
+});
+
 test('hc の名前が使われていれば、-2 を付けて作り直す', () => {
   const { env, state, calls } = fakeHc();
   const home = tmp();
