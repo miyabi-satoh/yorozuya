@@ -16,6 +16,11 @@ function simpleCommands(source: string): SimpleCommand[] {
     const c = source[i]
     if (c === '\\' && source[i + 1] === '\n') { i++; continue }
     if (c === '\\' && i + 1 < source.length) { word += source[++i]; continue }
+    if (c === '#' && !word && !quoted) {
+      while (i < source.length && source[i] !== '\n') i++
+      finish()
+      continue
+    }
     if (c === "'" || c === '"') {
       const quote = c; quoted = true
       let content = ''
@@ -56,10 +61,17 @@ function simpleCommands(source: string): SimpleCommand[] {
 }
 
 function commandWords(words: string[]) {
+  const valueOptions: Record<string, string[]> = {
+    sudo: ['-u', '-g', '-C', '-h', '-p', '-r', '-t', '-U', '-D'],
+    xargs: ['-n', '-P', '-I', '-s', '-L', '-a', '-d', '-E'],
+    exec: ['-a'],
+    nohup: [], command: [], time: [],
+  }
   let i = 0
   while (i < words.length) {
     if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[i])) { i++; continue }
     const name = basename(words[i])
+    if (['then', 'do', 'else', 'elif', 'if', 'while', 'until', '!', '{'].includes(name)) { i++; continue }
     if (name === 'env') {
       i++
       while (i < words.length && (words[i].startsWith('-') || /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[i]))) {
@@ -73,10 +85,11 @@ function commandWords(words: string[]) {
       while (words[i]?.startsWith('-')) { if (['-s', '--signal', '-k', '--kill-after'].includes(words[i])) i++; i++ }
       i++; continue
     }
-    if (['sudo', 'nohup', 'exec', 'command', 'xargs', 'time'].includes(name)) {
+    if (Object.hasOwn(valueOptions, name)) {
       i++
       while (words[i]?.startsWith('-')) {
-        if (['-u', '-g', '-C', '-n', '-P', '-I', '-s', '-L', '-a'].includes(words[i])) i++
+        if (name === 'command' && /^-[a-zA-Z]*[vV]/.test(words[i])) return []
+        if (valueOptions[name].includes(words[i])) i++
         i++
       }
       continue
@@ -110,10 +123,11 @@ export const takesInputInBash = (command: string): boolean => {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
     kept.push(line)
-    const heredocs = [...line.matchAll(/<<(-?)(?!<)\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\2/g)].filter(match => {
+    const heredocs = [...line.matchAll(/(?<!<)<<(?!<)(-?)\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\2/g)].filter(match => {
       let quote = ''
       for (let j = 0; j < (match.index ?? 0); j++) {
         if (line[j] === '\\' && quote !== "'") { j++; continue }
+        if (!quote && line[j] === '#' && (j === 0 || /[\s;&|()]/.test(line[j - 1]))) return false
         if (quote && line[j] === quote) quote = ''
         else if (!quote && (line[j] === "'" || line[j] === '"')) quote = line[j]
       }
@@ -122,10 +136,26 @@ export const takesInputInBash = (command: string): boolean => {
     for (const match of heredocs) {
       const cmds = simpleCommands(line.slice(0, match.index))
       const receiver = basename(commandWords(cmds[cmds.length - 1]?.words ?? [])[0] ?? '')
+      // 同じパイプの後続も本文を受け取る。;・&&・|| の後は別のコマンド。
+      const suffix = line.slice((match.index ?? 0) + match[0].length)
+      let pipelineEnd = suffix.length, pipe = -1, quote = ''
+      for (let j = 0; j < suffix.length; j++) {
+        const c = suffix[j]
+        if (c === '\\' && quote !== "'") { j++; continue }
+        if (quote) { if (c === quote) quote = ''; continue }
+        if (c === "'" || c === '"') { quote = c; continue }
+        if (c === '#' && (j === 0 || /[\s;&|()]/.test(suffix[j - 1]))) { pipelineEnd = j; break }
+        if (c === '&' && (suffix[j - 1] === '>' || suffix[j + 1] === '>')) continue
+        if (c === ';' || c === '&' || (c === '|' && suffix[j + 1] === '|')) { pipelineEnd = j; break }
+        if (c === '|' && pipe < 0) pipe = j
+      }
+      const pipeline = suffix.slice(0, pipelineEnd)
+      const downstream = pipe < 0 ? [] : simpleCommands(pipeline.slice(pipe + 1)).map(cmd => basename(commandWords(cmd.words)[0] ?? ''))
       const body: string[] = []
       while (++i < lines.length && (match[1] ? lines[i].replace(/^\t+/, '') : lines[i]) !== match[3]) body.push(lines[i])
-      if (INPUT_TOOLS.has(receiver)) return true
-      if ((SHELLS.has(receiver) || receiver === 'ssh') && takesInputInBash(body.join('\n'))) return true
+      const receivers = [receiver, ...downstream]
+      if (receivers.some(name => INPUT_TOOLS.has(name))) return true
+      if (receivers.some(name => SHELLS.has(name) || name === 'ssh') && takesInputInBash(body.join('\n'))) return true
     }
   }
   const cmds = simpleCommands(kept.join('\n'))
@@ -139,8 +169,9 @@ export const takesInputInBash = (command: string): boolean => {
       capture = true
       if (item.nested || !capturesWithoutInput(args.join(' '))) return true
     }
-    if ((SHELLS.has(name) || name === 'eval') && (name === 'eval' || args.includes('-c'))) {
-      const inner = name === 'eval' ? args.join(' ') : args[args.indexOf('-c') + 1]
+    const scriptFlag = args.findIndex(arg => /^-[a-zA-Z]*c[a-zA-Z]*$/.test(arg))
+    if ((SHELLS.has(name) || name === 'eval') && (name === 'eval' || scriptFlag >= 0)) {
+      const inner = name === 'eval' ? args.join(' ') : args[scriptFlag + 1]
       if (inner && takesInputInBash(inner)) return true
     }
     if (/^(?:powershell|pwsh)(?:\.exe)?$/.test(name)) {

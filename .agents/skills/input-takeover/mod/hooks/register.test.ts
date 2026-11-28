@@ -633,6 +633,51 @@ describe('入力を奪う操作', () => {
     }
   })
 
+  test('ラッパーの選択肢が値を取るかはラッパーごとに決める', () => {
+    for (const command of ['sudo -n osascript -e x', 'sudo -E cliclick c:1,1', 'sudo -s xdotool key a', 'sudo -u me osascript -e x', 'xargs -n 1 osascript -e x', 'exec -a alias osascript -e x']) {
+      expect(takesInputInBash(command)).toBe(true)
+    }
+    expect(takesInputInBash('sudo -u osascript echo ok')).toBe(false)
+  })
+
+  test('command の -v・-V は実行ではなく検索', () => {
+    for (const command of ['command -v osascript', 'command -V cliclick']) expect(takesInputInBash(command)).toBe(false)
+    expect(takesInputInBash('command osascript -e x')).toBe(true)
+  })
+
+  test('シェルの予約語の後のコマンドを見る', () => {
+    for (const command of ['if true; then osascript -e x; fi', 'for i in 1 2; do cliclick c:1,1; done', '{ xdotool key a; }', '! osascript -e x', 'while true; do xdotool key a; done', 'time osascript -e x']) {
+      expect(takesInputInBash(command)).toBe(true)
+    }
+    expect(takesInputInBash('if true; then echo osascript; fi')).toBe(false)
+  })
+
+  test('語の先頭のコメントを行末まで読み飛ばす', () => {
+    expect(takesInputInBash("# it's the click step\nosascript -e 'x'")).toBe(true)
+    expect(takesInputInBash('echo a#b; osascript -e x')).toBe(true)
+    expect(takesInputInBash('echo a#b # osascript -e x')).toBe(false)
+    expect(takesInputInBash("# <<EOF\nosascript -e x")).toBe(true)
+  })
+
+  test('ヒアストリングを heredoc と誤認しない', () => {
+    expect(takesInputInBash("grep x <<<hello\nosascript -e 'x'")).toBe(true)
+    expect(takesInputInBash('grep x <<<hello')).toBe(false)
+  })
+
+  test('heredoc の同じパイプの後続に本文を実行するものがあるかを見る', () => {
+    expect(takesInputInBash("cat <<'EOF' | bash\nosascript -e 'x'\nEOF")).toBe(true)
+    expect(takesInputInBash("cat <<'EOF' | osascript\nreturn 1\nEOF")).toBe(true)
+    expect(takesInputInBash("cat <<'EOF' 2>&1 | bash\nosascript -e x\nEOF")).toBe(true)
+    expect(takesInputInBash("cat > f <<'EOF'\nosascript -e 'x'\nEOF")).toBe(false)
+    expect(takesInputInBash("cat <<'EOF'; bash -c 'echo ok'\nosascript -e 'x'\nEOF")).toBe(false)
+    expect(takesInputInBash("cat <<'EOF' # | bash\nosascript -e x\nEOF")).toBe(false)
+  })
+
+  test('シェルの短い選択肢をまとめた中の c も読む', () => {
+    for (const command of ["bash -lc 'osascript -e x'", 'sh -ec "xdotool key a"', "zsh -ic 'cliclick c:1,1'"]) expect(takesInputInBash(command)).toBe(true)
+    expect(takesInputInBash("bash -l 'echo osascript'")).toBe(false)
+  })
+
   test('窓か範囲を指して撮るだけの screencapture は、鍵が無くても通す', async ($, on) => {
     machine(on, new Map(), 'a')
     for (const command of [
