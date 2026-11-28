@@ -60,7 +60,7 @@
 - hc の端末（`HC_TERMINAL_ID` がある）・Herdr の中（`HERDR_ENV=1`）では、重いコマンドをペインへ送らずに流すと、CPU の空きにかかわらず止めて `run-in-tab.mjs` を案内する（Workflow は対象外）
 - 止めた理由の文は、`CPU の空きが N% で、10% を切っているため、重い処理を止めました` か、`ほかのセッションが重い処理を始めたところなので、重い処理を止めました` で始まる。Claude Code はツールの結果の頭に `PreToolUse:<ツール> hook error: ` を付けて返す（2.1.289 で実測）。mod はこの形で見分ける
 - ユーザーが強行を認めたときは、コマンドの頭に `CLAUDE_FORCE_HEAVY=1` を付けると通る（PowerShell は `$env:CLAUDE_FORCE_HEAVY=1;`、Workflow は script に `// CLAUDE_FORCE_HEAVY=1` の注釈）
-- 始める瞬間の鍵は、hook の入力の `session_id` で持ち主を見分ける。同じセッションの続きの重い処理は止めない
+- 始める瞬間の鍵は、hook の入力の `session_id`（サブエージェントの呼び出しなら `agent_id` も足したもの）で持ち主を見分ける。同じ持ち主の続きの重い処理は止めず、サブエージェントは呼び出し元と別の持ち主として扱う
 - `node scripts/guard-heavy-commands.cjs --admit --what <何をするか>` で、hook と同じ判断をして、始めてよければ鍵を置いて 0、待つなら理由を出して 1 で返る（`SKILL.md` の手順）
 - `node scripts/guard-heavy-commands.cjs --ready <セッション>` で、hook と同じ測り方の CPU の空きと、ほかのセッションの始める瞬間の鍵を JSON で1行出す（mod が使う）
 
@@ -73,4 +73,7 @@
 | `scripts/guard-heavy-commands.test.cjs` | hook のテスト（`node --test scripts/guard-heavy-commands.test.cjs`） |
 | `scripts/run-in-tab.mjs` | 別のタブで流すスクリプト |
 | `scripts/run-in-tab.test.mjs` | そのテスト（`node --test scripts/run-in-tab.test.mjs`。macOS・Linux 用。hc・herdr は偽物に置き換える） |
+| `scripts/run-in-tab.fake-tools.cjs` | そのテストが使う hc・herdr の偽物 |
+| `scripts/shell-choice.mjs` | 別のタブでコマンドを流すシェルの選び方（Windows では Git for Windows の bash） |
+| `scripts/shell-choice.test.mjs` | そのテスト（`node --test scripts/shell-choice.test.mjs`） |
 | `mod/` | heavy-wait の mod（テストは `claude plugin test mod`） |

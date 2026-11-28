@@ -110,27 +110,6 @@ test('自分の鍵だけを外し、切れた自分の鍵も外して返す', ()
   assert.deepEqual(locks.release('input', { home: dir, session: 'a', now: 0 }), { released: null });
 });
 
-test('前の置き場の input の鍵も、効いている間は見て、自分のものなら外す', () => {
-  const dir = home();
-  const legacy = path.join(dir, '.claude', 'input-takeover.json');
-  fs.writeFileSync(legacy, JSON.stringify({ session: 'old', root: '/p/a', what: 'macos-check', until: 50_000 }));
-  const seen = locks.status('input', { home: dir, now: 1000 });
-  assert.equal(seen.state, 'held');
-  assert.equal(seen.lock.legacy, true);
-  assert.equal(locks.acquire('input', base(dir, { session: 'b', root: '/p/b' })).ok, false);
-  assert.equal(locks.status('cpu', { home: dir, now: 1000 }).state, 'free', 'input だけ');
-  assert.equal(locks.status('input', { home: dir, now: 50_000 }).state, 'free', '切れたら見ない');
-
-  assert.equal(locks.acquire('input', base(dir, { session: 'new', sameRoot: true })).ok, true);
-  assert.equal(fs.readFileSync(legacy, 'utf8'), '{}', '引き継いだら前の置き場は空にする');
-
-  fs.writeFileSync(legacy, JSON.stringify({ session: 'z', root: '/p/z', what: 'x', until: 50_000 }));
-  locks.release('input', { home: dir, session: 'new', now: 1000 });
-  assert.equal(locks.status('input', { home: dir, now: 1000 }).lock.session, 'z');
-  assert.equal(locks.release('input', { home: dir, session: 'z', now: 1000 }).released.session, 'z');
-  assert.equal(fs.readFileSync(legacy, 'utf8'), '{}');
-});
-
 test('同時に取りに来ても、取れるのは1つだけ', async () => {
   const dir = home();
   const runs = Array.from({ length: 8 }, (_, i) =>

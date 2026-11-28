@@ -11,11 +11,11 @@ const DEFAULT_MIN_FREE_GB = 20
 const DEFAULT_RECOVER_GB = 30
 const FIRST_CHECK_AFTER_MS = 60 * 1000
 const CHECK_EVERY_MS = 10 * 60 * 1000
-export const RENOTIFY_AFTER_MS = 24 * 60 * 60 * 1000
+const RENOTIFY_AFTER_MS = 24 * 60 * 60 * 1000
 // 片付けた後も空きが減り続けるときは、新しく溜まった分を早めに片付けさせる。間を1時間置くのは、ビルドの途中の一時的な減りで続けて知らせないため。
-export const RENOTIFY_ON_DROP_AFTER_MS = 60 * 60 * 1000
+const RENOTIFY_ON_DROP_AFTER_MS = 60 * 60 * 1000
 // ビルド1回分の揺れでは知らせ直さない大きさ。
-export const RENOTIFY_ON_DROP_GB = 2
+const RENOTIFY_ON_DROP_GB = 2
 const NOTIFIED_KEY = 'notified'
 
 export type DiskWatchConfig = { minFreeGB: number; recoverGB: number; sharedCachesRepo: string | undefined }

@@ -226,7 +226,7 @@ export const takesInputInPowerShell = (command: string) => /SendKeys|System\.Win
 // 鍵は machine-locks skill の土台（scripts/locks.cjs）が、同じマシンのセッションどうしで取り合う「input」の鍵。
 // 持ち主が外さずに落ちても、見込みの時刻（until）を過ぎるか、持ち主の Claude Code のプロセスが無くなれば外れたとみなす。
 // mod の $.fs には、排他で作る API も消す API も無いので、置く・外すは土台のスクリプトに任せる。
-type InputLock = { session: string; root: string; what: string; since?: number; until: number; legacy?: boolean }
+type InputLock = { session: string; root: string; what: string; since?: number; until: number }
 type LockState = 'free' | 'held' | 'expired' | 'dead'
 type Status = { state: LockState; lock: InputLock | null; last: InputLock | null; alive: boolean | null }
 
@@ -439,7 +439,7 @@ async function noticeDead($: EngineInterface, lock: InputLock) {
 // 切れた鍵は、持ち主が生きている間は残す。時間切れ（操作が続いているかもしれない）の後に、持ち主が終わったことを知らせるため（終わりの hook が記録するか、落ちたのを見つける）。
 async function noticeLast($: EngineInterface, status: Status, options: { hasWaited?: boolean } = {}) {
   const last = status.last
-  if (last === null || last.legacy || (status.state !== 'expired' && status.state !== 'dead')) return
+  if (last === null || (status.state !== 'expired' && status.state !== 'dead')) return
   const late = (await $.clock.now()) - last.until
   if (status.alive === false) {
     // 時間切れを知らせる前に落ちていたら、終わったことだけを知らせる（同じ出来事を2つ続けて知らせないため）。
@@ -656,7 +656,7 @@ export const register: Register = on => {
       const { released } = (await locks($, ['release', 'input'], e.sessionId)) as { released: InputLock | null }
       // 切れてから NOTICE_WINDOW_MS を過ぎた鍵は記録しない。とうに使えるようになっていて、知らせると古い話になるため。
       // end で返したと知らせた鍵も記録しない。
-      if (released !== null && !released.legacy && (await $.clock.now()) - released.until < NOTICE_WINDOW_MS && !(await hasNoticed($, returnedKey(released)))) {
+      if (released !== null && (await $.clock.now()) - released.until < NOTICE_WINDOW_MS && !(await hasNoticed($, returnedKey(released)))) {
         await recordEnded($, released)
       }
     } catch (error) {

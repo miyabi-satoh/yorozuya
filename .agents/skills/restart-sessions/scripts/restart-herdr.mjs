@@ -14,7 +14,6 @@
 // 対象に止めてもらってから呼び直す。--allow-background は、対象がセッションを終えても動かし続けたいと明言した独立したプロセスにだけ使う。
 
 import { dialogOpen } from './lib/screen.mjs';
-import { readScreen } from './lib/herdr.mjs';
 import { existsSync } from 'node:fs';
 import { reporter, takeFlag } from './lib/cli.mjs';
 import { handoffProblem } from './lib/handoff.mjs';
@@ -32,6 +31,7 @@ import {
   NAME_PATTERN,
   paneHoldingName,
   prompt,
+  readScreen,
   SEND_REFUSED,
   shellIsBack,
   sleep,

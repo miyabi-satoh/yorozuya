@@ -9,14 +9,12 @@
 // usage: extract-transcript.mjs <session-id> [--out <path>]
 //   --out を省けば stdout に書く。
 //
-// セッションIDはUUIDで衝突しないので、プロジェクトディレクトリ名の生成規則（cwdのどの文字を
-// 置き換えるか）を当てにせず、~/.claude/projects/*/<session-id>.jsonl をそのまま探す。
+// 記録は ~/.claude/projects/*/<session-id>.jsonl から探す（lib/transcript.mjs）。
 
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { readFileSync, writeFileSync } from 'node:fs';
 
 import { GUIDE_SEPARATOR, WITH_GUIDE_SUFFIX } from './lib/prompts.mjs';
+import { projectsDir, transcriptsOf } from './lib/transcript.mjs';
 
 const [sessionId, ...rest] = process.argv.slice(2);
 const outFlagIndex = rest.indexOf('--out');
@@ -33,18 +31,12 @@ if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sess
 if (outFlagIndex >= 0 && rest[outFlagIndex + 1] === undefined) fail('--out には値が要る');
 const outPath = outFlagIndex >= 0 ? rest[outFlagIndex + 1] : null;
 
-const projectsDir = join(homedir(), '.claude', 'projects');
-let dirs;
+let matches;
 try {
-  dirs = readdirSync(projectsDir, { withFileTypes: true });
+  matches = transcriptsOf(sessionId);
 } catch (error) {
-  fail(`${projectsDir} を読めない: ${error.message}`);
+  fail(`${projectsDir()} を読めない: ${error.message}`);
 }
-
-const matches = dirs
-  .filter((entry) => entry.isDirectory())
-  .map((entry) => join(projectsDir, entry.name, `${sessionId}.jsonl`))
-  .filter((path) => existsSync(path));
 
 if (matches.length === 0) fail(`セッション ${sessionId} のトランスクリプトが見つからない`);
 if (matches.length > 1) fail(`セッション ${sessionId} のトランスクリプトが複数見つかった（想定外）: ${matches.join(', ')}`);

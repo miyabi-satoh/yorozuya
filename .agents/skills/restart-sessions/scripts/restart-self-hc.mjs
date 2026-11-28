@@ -14,7 +14,6 @@
 import { basename, isAbsolute } from 'node:path';
 
 import { dialogOpen } from './lib/screen.mjs';
-import { readScreen } from './lib/hc.mjs';
 import { reporter, takeFlag } from './lib/cli.mjs';
 import { handoffProblem } from './lib/handoff.mjs';
 import {
@@ -26,6 +25,7 @@ import {
   liveNames,
   lastStartNote,
   NAME_PATTERN,
+  readScreen,
   selfId,
   sessionOf,
   slugName,

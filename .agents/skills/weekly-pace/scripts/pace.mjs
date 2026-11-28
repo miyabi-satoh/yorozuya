@@ -56,7 +56,7 @@ function fromUsage(usage) {
 function fromScreen(raw) {
   // ステータスラインの空白はノーブレークスペース（U+00A0）。
   // 照合の前に普通の空白へ揃える（揃えないと "Weekly Reset" のような固定文字列がマッチしない）。
-  const text = raw.replace(/ /g, ' ');
+  const text = raw.replace(/\u00a0/g, ' ');
   // 画面上部の会話に古い値が残っていることがあるので、最下部のステータスラインにあたる最後の一致を使う。
   const lastMatch = (re) => [...text.matchAll(re)].at(-1);
   // 例: "Weekly Reset: 6d 17hr 34m" / "Weekly Reset: 17hr 34m" / "Weekly Reset: 34m" / compact 表示の "6d17h34m"

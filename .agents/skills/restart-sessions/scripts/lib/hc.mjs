@@ -246,7 +246,7 @@ export function inputDraft(t) {
 // 打つ字は見える字にする（hc read は行末の空白を落とすので、空白では書きかけと見分けられない。実測）。
 // 描き直しの途中の画面を拾わないよう、打った後と消した後は、待つ形（打った後は x で終わる文、消した後は打つ前）が続けて2回読めるまで読み直す。
 // 消した後が打つ前と違えば（間にユーザーが打った・x が残った）、null を返して端末を見てもらう。
-export const PROBE_KEY = 'x';
+const PROBE_KEY = 'x';
 export function draftAfterProbe(before, after) {
   if (!before) return before;
   return after === PROBE_KEY ? '' : before;
@@ -448,7 +448,7 @@ export function startClaude({ cwd, name, request, replaces, flags = [] }) {
 // rencon handover を使えるか。古い rencon は handover を端末の名前と取って、開いている rencon の窓に渡してしまうので、
 // 先に `rencon --skill` が 0 で終わるか（handover のある版。古い版は知らない引数で 2 を返し、何も開かない）で確かめる。1回だけ確かめる。
 let handover = null;
-export function hasHandover() {
+function hasHandover() {
   if (handover === null) {
     const probe = spawnSync('rencon', ['--skill'], { stdio: 'ignore', windowsHide: true, timeout: TIMEOUT_MS });
     handover = probe.status === 0;

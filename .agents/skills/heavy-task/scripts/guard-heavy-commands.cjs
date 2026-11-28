@@ -415,5 +415,5 @@ if (require.main === module && process.argv.includes('--ready')) {
 } else if (require.main === module) {
   main().catch(() => {});
 } else {
-  module.exports = { commandSegments, isHeavy, loadConfig, runsOutsideTab, outsideTabReason, FORCE_MARK, START_WINDOW_MS };
+  module.exports = { commandSegments, isHeavy, loadConfig, runsOutsideTab, outsideTabReason };
 }

@@ -16,7 +16,7 @@ const GOAL_PATTERN = '/goal active'
 const UPDATE_FAILED_PATTERN = 'Auto-update failed'
 // 放置の目安は Claude Code の「放置から戻ったときのヒント」に合わせる（10万トークン以上で、最後の応答から75分。2.1.278 のコードで確認）。
 export const IDLE_AFTER_MS = 75 * 60 * 1000
-export const IDLE_MIN_TOKENS = 100_000
+const IDLE_MIN_TOKENS = 100_000
 const IDLE_CHECK_EVERY_MS = 60 * 1000
 const IDLE_RETRY_AFTER_MS = 10 * 60 * 1000
 
@@ -62,11 +62,11 @@ async function ownTerminal($: EngineInterface): Promise<Terminal | undefined> {
 // 引き継ぐため（claude の中から起動すると、そこで起動した claude が会話の記録を書かない）。$.process.run の env は上書きしかできず
 // 変数を外せないので、node を挟んで外してから hc を起動する（scripts/lib/hc.mjs の hcEnv と同じ外し方）。
 // core が応えないときにターンの終わりの見張りが止まり続けないよう、hc は 15 秒で打ち切る（scripts/lib/hc.mjs と同じ。ふだんは数十ミリ秒）。
-export const HC_LAUNCHER =
+const HC_LAUNCHER =
   "const{spawnSync}=require('node:child_process');" +
   "const env=Object.fromEntries(Object.entries(process.env).filter(([k])=>!/^(CLAUDE|HERDR_)/.test(k)));" +
   "const r=spawnSync('hc',process.argv.slice(1),{env,stdio:'inherit',timeout:15000});process.exit(r.status??1)"
-export const hcArgv = (...args: string[]) => ['node', '-e', HC_LAUNCHER, ...args]
+const hcArgv = (...args: string[]) => ['node', '-e', HC_LAUNCHER, ...args]
 
 // hc の read --json の結果から画面の文字を取る。読めなければ null（scripts/lib/hc.mjs の readScreen と同じ読み方）。
 export function hcScreenOf(stdout: string): string | null {
@@ -102,7 +102,7 @@ export function hcCwdOf(stdout: string): string | undefined {
 }
 
 // 自分の Herdr の名前。restart-self.mjs は新しいペインに割って起動し直し、名前だけを引き継ぐ。
-export function agentNameOf(listJson: string, pane: string): string | undefined {
+function agentNameOf(listJson: string, pane: string): string | undefined {
   try {
     const agents = JSON.parse(listJson)?.result?.agents
     return Array.isArray(agents) ? agents.find(a => a?.pane_id === pane)?.name || undefined : undefined

@@ -1,4 +1,4 @@
-// 再起動した新セッションに、最初のプロンプトで渡す進め方。2つのスクリプトが同じことをするので、ここ1つに置く。
+// 再起動した新セッションに、最初のプロンプトで渡す進め方。再起動の4つのスクリプトが同じことをするので、ここ1つに置く。
 //
 // 進め方の本文は after-restart.md に置き、スクリプトが資料の前につないだ別のファイルを作って渡す。プロンプトはそれを指す1行にする。
 // 資料そのものは書き換えない。書き換えると、呼び直したときや、呼び出し元が資料を直して呼び直したときに、
@@ -36,9 +36,9 @@ const GUIDE = fileURLToPath(new URL('../../after-restart.md', import.meta.url));
 export const SKILL_DIR = dirname(GUIDE).replaceAll('\\', '/');
 
 // 進め方の文に書いた `<skill-dir>` を、このスキルの置き場の絶対パスにする。
-export const withSkillDir = (text) => text.replaceAll('<skill-dir>', SKILL_DIR);
+const withSkillDir = (text) => text.replaceAll('<skill-dir>', SKILL_DIR);
 
-export const HOW_TO_PROCEED = '資料の先頭の「再起動した先の進め方」に従って引き継ぐこと。';
+const HOW_TO_PROCEED = '資料の先頭の「再起動した先の進め方」に従って引き継ぐこと。';
 
 // 新セッションに送る1行の依頼。sent は attachGuide が作ったファイル。
 export const restartRequest = (sent) => `@${sent} 前セッションの引き継ぎ資料です。${HOW_TO_PROCEED}`;
