@@ -77,6 +77,9 @@ export const register: Register = on => {
       const command = commandOf(e)
       const since = await $.clock.now()
       await update($, waiting, current => current ?? { command, since })
+    } else if (result.deny === undefined) {
+      const command = commandOf(e)
+      await update($, waiting, current => current && (command === current.command || command.includes(current.command)) ? null : current)
     }
     return result
   })

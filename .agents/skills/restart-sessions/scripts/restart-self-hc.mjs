@@ -13,6 +13,8 @@
 
 import { basename, isAbsolute } from 'node:path';
 
+import { dialogOpen } from './lib/screen.mjs';
+import { readScreen } from './lib/hc.mjs';
 import { reporter, takeFlag } from './lib/cli.mjs';
 import { handoffProblem } from './lib/handoff.mjs';
 import {
@@ -75,6 +77,8 @@ if (name && !NAME_PATTERN.test(name)) skip(`hc の名前の規則（英小文字
 if (name && taken.has(name)) skip(`名前 ${name} はほかの端末が使用中。別の名前を2つ目の引数で渡すこと`);
 
 // 自分の申告は記憶違いで実際の追跡と食い違いうるので、旧の端末を道連れにする前にモードラインで照合する（Herdr 版と同じ）。
+if (dialogOpen(readScreen(self))) skip('選択式の問い（確認画面）が開いている');
+
 if (!allowBackground) {
   const hint = backgroundWorkHint(self);
   if (hint) {

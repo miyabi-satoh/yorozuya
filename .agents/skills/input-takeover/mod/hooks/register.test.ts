@@ -29,7 +29,7 @@ function fakeLocks(argv: string[], files: Map<string, string>, dead: Set<string>
   const own = (l: any) => l.session === session || (sameRoot && l.root === root)
   if (op === 'status') return { state, lock, last: raw, alive }
   if (op === 'acquire') {
-    if (lock !== null && !own(lock)) return { ok: false, heldBy: lock }
+    if (lock !== null && (!own(lock) || (lock.session !== session && alive === true))) return { ok: false, heldBy: lock }
     const since = lock !== null && lock.session === session && typeof lock.since === 'number' ? lock.since : now
     const placed = { resource: 'input', session, root, what: flag('--what'), since, until: now + Number(flag('--ms')) }
     files.set(path, JSON.stringify(placed))
@@ -191,12 +191,24 @@ describe('入力を奪う操作', () => {
 
   test('同じフォルダのセッションの鍵は、立ち上がり直した後に start と end で引き継げる', async ($, on) => {
     const files = new Map([[LOCK, JSON.stringify({ session: 'old', root: '/home/me/Projects/app-a', what: 'x', until: 60000 })]])
-    machine(on, files, 'new')
+    const dialog = machine(on, files, 'new')
+    dialog.unknown = new Set(['old'])
     expect((await $.tool.call(capture) as any).deny).toContain('引き継')
     expect((await $.tool.call(start()) as any).deny).toBeUndefined()
     expect((await $.tool.call(capture) as any).result?.text).toBe('ok')
     await $.tool.call(end)
     expect(files.has(LOCK)).toBe(false)
+  })
+
+  test('同じフォルダの生きているセッションの鍵は引き継がない', async ($, on) => {
+    const held = JSON.stringify({ session: 'old', root: '/home/me/Projects/app-a', what: 'x', until: 60000 })
+    const files = new Map([[LOCK, held]])
+    const dialog = machine(on, files, 'new')
+    const denied = (await $.tool.call(start()) as any).deny
+    expect(denied).toContain('操作中')
+    expect(denied).not.toContain('引き継')
+    expect(dialog.asked).toHaveLength(0)
+    expect(files.get(LOCK)).toBe(held)
   })
 
   test('セッションが終わると自分の鍵を外す', async ($, on) => {
@@ -503,6 +515,7 @@ describe('入力を奪う操作', () => {
   test('同じフォルダのほかのセッションの鍵を引き継ぐときも、問い直す', async ($, on) => {
     const files = new Map([[LOCK, JSON.stringify({ session: 'old', root: '/home/me/Projects/app-a', what: 'x', until: 60000 })]])
     const dialog = machine(on, files, 'new')
+    dialog.unknown = new Set(['old'])
     dialog.reply = 'やめる'
     expect((await $.tool.call(start()) as any).deny).toBeTruthy()
     expect(dialog.asked).toHaveLength(1)
@@ -563,6 +576,7 @@ describe('入力を奪う操作', () => {
     const files = new Map([['/home/me/.claude/locks/input.approved.json', JSON.stringify({ new: 0 })]])
     files.set(LOCK, JSON.stringify({ session: 'old', root: '/home/me/Projects/app-a', what: 'x', until: 60000 }))
     const dialog = machine(on, files, 'new')
+    dialog.unknown = new Set(['old'])
     await $.tool.call(start())
     expect(dialog.asked).toHaveLength(1)
   })
@@ -605,8 +619,18 @@ describe('入力を奪う操作', () => {
 
   test('引用符の中の名前や、ほかのコマンドは止めない', async ($, on) => {
     machine(on, new Map(), 'a')
-    const command = 'git commit -m "screencapture を止める" && grep osascriptx file'
+    const command = 'git commit -m "screencapture を止める" && grep -rn osascript .'
     expect((await $.tool.call({ tool: 'Bash', command }) as any).result?.text).toBe('ok')
+  })
+
+  test('コマンド位置と heredoc・シェル・PowerShell の中を見る', () => {
+    for (const command of ['grep -rn osascript .', 'which cliclick', "cat > B.md <<'EOF'\nosascript -e 'x'\nEOF", 'echo "xdotool"', 'hyprctl monitors']) {
+      expect(takesInputInBash(command)).toBe(false)
+    }
+    const encoded = 'WwBTAHkAcwB0AGUAbQAuAFcAaQBuAGQAbwB3AHMALgBGAG8AcgBtAHMALgBTAGUAbgBkAEsAZQB5AHMAXQA6ADoAUwBlAG4AZABXAGEAaQB0ACgAJwBhACcAKQA='
+    for (const command of ["bash <<'EOF'\nosascript -e 'x'\nEOF", "ssh host <<'EOF'\nxdotool key a\nEOF", "bash -c 'osascript -e x'", 'sh -c "xdotool key a"', 'eval "xdotool key a"', 'env FOO=1 osascript -e x', 'timeout 5 cliclick c:1,1', 'sudo -u me nohup osascript -e x', 'xargs -n 1 cliclick', '/usr/bin/osascript -e x', 'echo "$(osascript -e x)"', 'powershell -c "[System.Windows.Forms.SendKeys]::SendWait(\'a\')"', `pwsh -EncodedCommand ${encoded}`, 'hyprctl dispatch exec foo', 'ydotool key 1', 'wtype hello']) {
+      expect(takesInputInBash(command)).toBe(true)
+    }
   })
 
   test('窓か範囲を指して撮るだけの screencapture は、鍵が無くても通す', async ($, on) => {

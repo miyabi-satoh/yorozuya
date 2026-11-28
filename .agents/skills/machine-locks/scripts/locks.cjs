@@ -229,7 +229,7 @@ function acquire(resource, options) {
   const opts = { ...options, now };
   return withMutex(resource, opts, () => {
     const { lock: held, last } = status(resource, opts);
-    if (held !== null && !isOwn(held, opts)) return { ok: false, heldBy: held };
+    if (held !== null && (!isOwn(held, opts) || (held.session !== session && holderAlive(held, opts) === true))) return { ok: false, heldBy: held };
     // 引けなければ、同じセッションの前の鍵の pid を引き継ぐ（延ばしたときに、落ちたかを見られなくならないように）。
     const pid = claudePidOf(session, opts) ?? (held?.session === session ? held.pid : undefined);
     const lock = { resource, session, root, what, since: held !== null && held.session === session && !held.legacy ? held.since : now, until: now + ms };

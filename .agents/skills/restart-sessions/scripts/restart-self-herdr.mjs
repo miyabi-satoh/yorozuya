@@ -12,6 +12,8 @@
 
 import { basename, isAbsolute } from 'node:path';
 
+import { dialogOpen } from './lib/screen.mjs';
+import { readScreen } from './lib/herdr.mjs';
 import { reporter, takeFlag } from './lib/cli.mjs';
 import { handoffProblem } from './lib/handoff.mjs';
 import { paceNote } from './lib/pace.mjs';
@@ -77,6 +79,8 @@ if (!NAME_PATTERN.test(name)) skip(`Herdr の名前の規則（先頭は小文�
 
 // 自分の申告（「見張りは止めた」など）も、自分自身の記憶違いで実際の追跡と食い違いうる。
 // モードラインは記憶に頼らない表示なので、旧ペインを道連れにする前にここで機械的に照合する。
+if (dialogOpen(readScreen(self))) skip('選択式の問い（確認画面）が開いている');
+
 if (!allowBackground) {
   const hint = backgroundWorkHint(self);
   if (hint) {

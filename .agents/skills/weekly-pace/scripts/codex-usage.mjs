@@ -12,7 +12,7 @@ const TIMEOUT_MS = 8000;
 
 function run() {
   return new Promise((resolve, reject) => {
-    const proc = spawn('codex', ['app-server'], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const proc = spawn('codex', ['app-server'], { stdio: ['pipe', 'pipe', 'pipe'], shell: process.platform === 'win32' });
     const rl = createInterface({ input: proc.stdout });
     let settled = false;
     let stderr = '';

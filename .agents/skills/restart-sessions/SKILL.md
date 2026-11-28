@@ -143,10 +143,10 @@ description: hc（herdr-core）・Herdr 上の Claude セッションを、会�
 hc（herdr-core）の端末（`HC_TERMINAL_ID` がある）でも同じ手順で進める。hc の端末は core を起動した環境の `HERDR_ENV=1` を引き継ぐことがあるので、`HC_TERMINAL_ID` を一番先に見る。スクリプトは hc 版（`scripts/*-hc.mjs`）に進む。違うところだけ書く。
 
 - 手順1: 対象は端末の address（`t1b` の形。ほかのマシンのものは `aero/t5`）と名前（`hc ls` の `name`。名前の無い端末なら address）で指す。状態は `hc get <address> --json` の `status.state`（claude が知らせる `idle`・`working`・`done`・`blocked`）。セッションIDは、`hc get <address> --json` の `foreground.pid` と同じ `pid` の、そのマシンの `claude agents --json` の `sessionId`（ほかのマシンは `hc exec --on <マシン> claude agents --json`）。`node scripts/watch-context.mjs --once --start` の知らせの列にも、address・名前・セッションIDが並ぶ（このマシンの端末だけ）。
-- 手順5: `scripts/restart.mjs <address> <名前> <資料の絶対パス>`。`/exit` して claude が終わったら、同じ cwd に新しい端末を作り、claude を起動のコマンドにして依頼を引数で渡す。claude が端末のプログラムなら、終わった端末を外して同じ名前で作る。シェルから起動した claude なら、シェルに戻った端末は残し、名前は `<名前>-2`（`-2` で終わる名前なら外した名前）にする（hc は名前を付け替えられず、生きた端末の間で一意なため）。`OK` の行の2列目は新しい端末の address、3列目はその名前。
+- 手順5: ほかのマシンの端末は、そのマシンのセッションで再起動するか、hub にそのマシンでセッションを起動してもらう。`scripts/restart.mjs <address> <名前> <資料の絶対パス>` はこのマシンの端末に使う。`/exit` して claude が終わったら、同じ cwd に新しい端末を作り、claude を起動のコマンドにして依頼を引数で渡す。claude が端末のプログラムなら、終わった端末を外して同じ名前で作る。シェルから起動した claude なら、シェルに戻った端末は残し、名前は `<名前>-2`（`-2` で終わる名前なら外した名前）にする（hc は名前を付け替えられず、生きた端末の間で一意なため）。`OK` の行の2列目は新しい端末の address、3列目はその名前。
 - 手順6: スクリプトが、新しい端末の claude が動き出した（`working` になったかターンが進んだ。`done` だけでは数えない）のを確かめる。`OK` なら手順7へ。ダイアログで止まっていれば FAIL で、端末で答えてもらえば資料を読み始める。
 - 新しい端末は `rencon handover run <旧の端末の address> -- <hc run の引数>` で起動する（再起動・自己再起動の両方）。rencon が、旧の端末が終わるか外れたらタイルを新しい端末へ移す。シェルに戻った旧の端末は残るので、タイルは移らない。`restart.mjs` は、`/exit` の前に `rencon handover hold <旧>` でタイルを残す（旧を外してから新を作るので、その間に rencon がタイルを閉じないため）。旧がシェルに戻ったときと、途中で止まったときは `release` で戻す。使い方は `rencon --skill`。`rencon --skill` が 0 で終わらない（rencon が無い・handover の無い古い版）マシンでは、ただの `hc run` で起動し、hold・release は飛ばす。
-- 送るのは `hc send` だが、claude の端末の中から送ると hc が文を `<hc from=…>` で包み、`/exit` や `@<資料>` が効かない。手で送るときは `env -u HC_TERMINAL_ID hc send <address> "<文>"` とする（スクリプトはそうしている）。
+- 送るのは `hc send` だが、claude の端末の中から送ると hc が文を `<hc from=…>` で包み、`/exit` や `@<資料>` が効かない。手で送るときは `env -u HC_TERMINAL_ID hc send <address> "<文>"` とする（スクリプトはそうしている）。Windows の Git Bash（MSYS）から送るときは、`MSYS_NO_PATHCONV=1 env -u HC_TERMINAL_ID hc send <address> "/exit"` と前に付ける。付けないと `/exit` がパスに書き換わり、`/exit` として届かない。
 - 入力欄の書きかけは `hc read <address>` の画面から読む。色が無いので、書きかけに見えたら `x` を1字打って読み直し、`x` だけになればサジェスト（打った字は消して `/exit` へ進む）、末尾に付けば書きかけとして止まる（`Try "…"` の案内は打たずに空とみなす）。
 - FAIL の後に手で戻すときは、`hc run --bg --no-parent --cwd <cwd> claude` で起動し、上がったら `@<資料>-with-guide.md` を打つ。`--no-parent` を外すと、起動した端末の子になり、親の端末が終わると一緒に終わる。
 
@@ -163,7 +163,7 @@ hc（herdr-core）の端末（`HC_TERMINAL_ID` がある）でも同じ手順で
 
 **対象がテキストの問いかけを表示したまま止まっていても進める（`agent_status` が `idle` のもの）。** ユーザーは問いの存在を承知のうえで指示していることがあり、「先に答えますか」と聞き返せば答える方向へ誘導することになる。宙に浮いた問いかけは資料に残り、新セッションが出し直す。
 
-**ただし選択式の問いや承認ダイアログ（`blocked`）は別。**（再起動した新セッションが出し直した選択式の問いもこれに当たる） ダイアログで完全に止まっているので、`SendMessage` を送ってもツール呼び出しの切れ目まで読まれない。手順2で `blocked` を見た時点で送らずにおく。Herdr は選択式の問いを `blocked` と返さないことがあるので、`idle`・`done` でも画面の末尾に問い（`Esc to cancel`）が出ていれば同じに扱う。スクリプトも pre-flight で止まる。ユーザーにペインで答えてもらう。
+**ただし選択式の問いや承認ダイアログ（`blocked`）は別。**（再起動した新セッションが出し直した選択式の問いもこれに当たる） ダイアログで完全に止まっているので、`SendMessage` を送ってもツール呼び出しの切れ目まで読まれない。手順2で `blocked` を見た時点で送らずにおく。Herdr は選択式の問いを `blocked` と返さないことがあるので、`idle`・`done` でも画面の末尾に問い（`Esc to cancel`）が出ていれば同じに扱う。再起動・自己再起動・放置の `/clear` のスクリプトも、画面末尾の `Esc to cancel` を見つけるとキーを送る前に SKIP する。ユーザーにペインで答えてもらう。
 
 ### 詰まったとき
 

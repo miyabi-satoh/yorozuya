@@ -17,7 +17,7 @@ export function parseExitArgs(args) {
 }
 
 // 相談役（hub）の cwd か。hub は自分で終わらない。シンボリックリンクを解いて比べる。
-export function isHubCwd(cwd, home = homedir()) {
+export function isHubCwd(cwd, home = homedir(), hubCwd = '') {
   if (!cwd) return false;
   const real = (p) => {
     try {
@@ -26,7 +26,8 @@ export function isHubCwd(cwd, home = homedir()) {
       return path.resolve(p);
     }
   };
-  const hub = real(path.join(home, 'Projects', 'hub'));
+  const configured = hubCwd === '~' ? home : hubCwd.startsWith('~/') || hubCwd.startsWith('~\\') ? path.join(home, hubCwd.slice(2)) : hubCwd;
+  const hub = real(configured || path.join(home, 'Projects', 'hub'));
   const target = real(cwd);
   return target === hub || target.startsWith(`${hub}${path.sep}`);
 }

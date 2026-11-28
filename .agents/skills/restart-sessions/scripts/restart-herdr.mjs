@@ -13,6 +13,9 @@
 // 見えていれば SKIP する（対象の自己申告と実際の追跡が食い違うことがあるため）。
 // 対象に止めてもらってから呼び直す。--allow-background は、対象がセッションを終えても動かし続けたいと明言した独立したプロセスにだけ使う。
 
+import { dialogOpen } from './lib/screen.mjs';
+import { readScreen } from './lib/herdr.mjs';
+import { existsSync } from 'node:fs';
 import { reporter, takeFlag } from './lib/cli.mjs';
 import { handoffProblem } from './lib/handoff.mjs';
 import { paceNote } from './lib/pace.mjs';
@@ -20,6 +23,7 @@ import { attachGuide, restartRequest } from './lib/prompts.mjs';
 import {
   agentInfo,
   agentStatus,
+  currentPane,
   backgroundWorkHint,
   herdrError,
   herdrErrorCode,
@@ -48,6 +52,8 @@ const { log, skip, fail } = reporter(name);
 const problem = handoffProblem(handoff, '対象のペイン');
 if (problem) skip(problem);
 if (!NAME_PATTERN.test(name)) skip(`Herdr の名前の規則（先頭は小文字・英数と _ - のみ・32字以内）に合わない: ${name}`);
+// 呼び出し元が Herdr のペインの外（自分のペインを引けない）なら、自分を道連れにすることは無いので照合しない。
+if (currentPane()?.pane_id === pane) skip('対象は自分のペイン。自分の再起動は restart-self.mjs で行う');
 // 時間がかかりうるので、対象の状態を確かめる前に済ませる
 const note = paceNote();
 
@@ -87,9 +93,14 @@ if (holder && holder !== pane) {
 const sid = info.agent_session?.value ?? '';
 if (!sid) skip(`ペイン ${pane} のセッションIDを引けない。resume の手がかりが無いまま終了させたくないので止まる`);
 
+const cwd = info.cwd || info.foreground_cwd;
+if (!cwd || !existsSync(cwd)) skip(`ペイン ${pane} の cwd が無いか取得できない: ${cwd || '不明'}`);
+
 // 対象の自己申告（「バックグラウンド処理はありません」）は、実際にハーネスが追跡している
 // シェル・Monitor と食い違うことがある（2026-09-11・2026-09-23 に別プロジェクトで実際に発生）。
 // モードラインは対象の記憶に頼らない表示なので、/exit の前にここで機械的に照合する。
+if (dialogOpen(readScreen(pane))) skip('選択式の問い（確認画面）が開いている');
+
 if (!allowBackground) {
   const hint = backgroundWorkHint(pane);
   if (hint) {
@@ -147,19 +158,22 @@ if (!prompt(pane, '/exit')) {
 // 終了の確認画面（バックグラウンドの処理が残っているなど）が出たら Herdr が blocked を返す。
 // 外から答えるのは、本人が止め忘れたものを外から止めることになるので採らない。
 let back = false;
+let wasWorking = info.agent_status === 'working';
 for (let i = 0; i < 60; i += 1) {
   sleep(1);
   if (shellIsBack(pane)) {
     back = true;
     break;
   }
-  if (agentStatus(pane) === 'blocked') {
+  const status = agentStatus(pane);
+  if (status === 'working') wasWorking = true;
+  if (status === 'blocked') {
     fail(
       `/exit の後に確認画面が出ている。ペインで答えてもらうこと。キャンセルして claude が動き続けているなら何も変わっていないので、同じ引数で呼び直せる。終了してシェルに戻ったら、${recovery}`,
     );
   }
 }
-if (!back) fail(`シェルに戻らない。ペインを見ること。終了してシェルに戻っていたら、${recovery}`);
+if (!back) fail(`60秒たってもシェルに戻らない。ペインを見ること。${wasWorking ? '/exit はキューに入り、現在のターンの後に効く可能性がある。再実行する前に後でもう一度確かめること。' : ''}終了してシェルに戻っていたら、${recovery}`);
 
 // シェルに戻っても、Herdr が旧エージェントの名前をすぐ外すとは限らない
 if (!waitForNameRelease(name, 10)) {

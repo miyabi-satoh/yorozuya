@@ -9,6 +9,8 @@ import type { ContextWatchTold } from '../types'
 const told = atom({ plugin: 'context-watch', key: 'told' } as const, { over: false, update: null, idle: false } as ContextWatchTold)
 
 const DEFAULT_THRESHOLD = 50
+// 再起動を見送った後も、使用率が十分増えたら再び知らせる。
+const OVER_STEP = 10
 const GOAL_PATTERN = '/goal active'
 // 自動更新に失敗した知らせ（2.1.325 では「✘ Auto-update failed · Run claude doctor」）。起動し直すと更新がやり直される。
 const UPDATE_FAILED_PATTERN = 'Auto-update failed'
@@ -21,6 +23,7 @@ const IDLE_RETRY_AFTER_MS = 10 * 60 * 1000
 // 最後に応答した時刻と、放置の /clear を見送った時刻。読み込み直すと初めからになり、待ちが延びるだけで済む。
 let lastAnswerAt = 0
 let idleSkippedAt = 0
+let interactive = true
 
 async function skillDir($: EngineInterface) {
   const { realPath } = await $.fs.stat($.plugin.root, { resolve: true })
@@ -112,7 +115,7 @@ export function agentNameOf(listJson: string, pane: string): string | undefined 
 // 画面を読めなければ、/goal が動いているかもしれないので、動いているとみなして見送る。
 const isGoalActive = async ($: EngineInterface, own: Terminal) => {
   const screen = await readScreen($, own)
-  return screen === null || screen.includes(GOAL_PATTERN)
+  return screen === null || noticeRowOf(screen).includes(GOAL_PATTERN)
 }
 
 // 更新の知らせは、入力欄の上枠のすぐ上の1行に出る。画面全体に当てると、会話に出てきた同じ文言を拾う。
@@ -134,12 +137,12 @@ async function check($: EngineInterface) {
   const guide = `${dir}/restart-self.md に従って、このセッション自身を再起動する。`
   const current = await read($, told)
 
-  if (!current.over) {
+  {
     const config = await $.fs.read(`${dir}/config.local.json`).catch(() => undefined)
     const threshold = thresholdOf(typeof config === 'string' ? config : undefined)
     const { percent } = (await $.session.usage()).context
-    if (percent !== undefined && percent >= threshold && !(await isGoalActive($, own))) {
-      await update($, told, t => ({ ...t, over: true }))
+    if (percent !== undefined && percent >= threshold && (typeof current.over === 'number' ? percent >= current.over + OVER_STEP : !current.over) && !(await isGoalActive($, own))) {
+      await update($, told, t => ({ ...t, over: percent }))
       await $.prompt.submit({ text: `[コンテキストの見張り] OVER ${percent}%（閾値 ${threshold}%）。${guide}` })
       return
     }
@@ -149,9 +152,14 @@ async function check($: EngineInterface) {
   const installed = exitCode === 0 ? versionOf(stdout) : undefined
   const { version: running } = await $.session.version()
   if (installed !== undefined && installed !== running && current.update !== installed && !(await isGoalActive($, own))) {
-    await update($, told, t => ({ ...t, update: installed }))
-    await $.prompt.submit({ text: `[コンテキストの見張り] UPDATE ${running} → ${installed}。Claude Code の更新を反映するため、${guide}` })
-    return
+    const keyName = await failedKeyName($, own)
+    const key = keyName === undefined ? undefined : `update:${keyName}`
+    if (key === undefined || (await $.store.get(key)) !== installed) {
+      await update($, told, t => ({ ...t, update: installed }))
+      if (key !== undefined) await $.store.set(key, installed)
+      await $.prompt.submit({ text: `[コンテキストの見張り] UPDATE ${running} → ${installed}。Claude Code の更新を反映するため、${guide}` })
+      return
+    }
   }
 
   // 自動更新に失敗していれば、起動し直して更新をやり直させる。起動し直しても同じ版で失敗し続けるなら、
@@ -162,7 +170,7 @@ async function check($: EngineInterface) {
   const screen = await readScreen($, own)
   if (screen === null) return
   const row = noticeRowOf(screen)
-  if (!row.includes(UPDATE_FAILED_PATTERN) || screen.includes(GOAL_PATTERN)) return
+  if (!row.includes(UPDATE_FAILED_PATTERN) || row.includes(GOAL_PATTERN)) return
   const keyName = await failedKeyName($, own)
   // hc で作業フォルダーが分からなければ、ほかのセッションと鍵を分けられないので知らせない。
   if (own.kind !== 'herdr' && keyName === undefined) return
@@ -206,6 +214,9 @@ async function checkIdle($: EngineInterface) {
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
+    // 人のいないセッション（-p・SDK）は見張らない。知らせを引き受けると、誰にも見えないまま済んだことになるため。
+    interactive = e.isInteractive
+    if (!e.isInteractive) return started
     lastAnswerAt = await $.clock.now()
     $.clock.every(IDLE_CHECK_EVERY_MS, () => {
       void checkIdle($)
@@ -216,9 +227,9 @@ export const register: Register = on => {
   on('turn.complete', async ($, e, next) => {
     const result = await next(e)
     // サブエージェントのターンと、ユーザーが止めたターンでは見ない。
-    if (e.agentId === undefined && !e.isAborted) {
+    if (interactive && e.agentId === undefined) {
       lastAnswerAt = await $.clock.now()
-      await check($)
+      if (!e.isAborted) await check($)
     }
     return result
   })

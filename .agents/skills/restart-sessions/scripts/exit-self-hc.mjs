@@ -11,6 +11,7 @@ import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from
 import { homedir } from 'node:os';
 import path from 'node:path';
 
+import { loadConfig } from './lib/config.mjs';
 import { reporter } from './lib/cli.mjs';
 import { closeSelfDetached, exitLogLine, isHubCwd, parseExitArgs, sendMessageProblem } from './lib/exit.mjs';
 import { backgroundWorkHint, cwdOf, hcError, isClaude, selfId, sessionOf, terminalInfo } from './lib/hc.mjs';
@@ -25,7 +26,10 @@ const info = self ? terminalInfo(self) : null;
 if (!info) skip(`自分の端末（HC_TERMINAL_ID=${self || '空'}）を hc から引けない（${hcError()}）`);
 if (!isClaude(info)) skip(`この端末で動いているのは claude ではない: ${info.foreground?.name ?? '不明'}`);
 const cwd = cwdOf(info);
-if (isHubCwd(cwd)) skip('相談役（hub）のセッションは自分で終わらない');
+const { config, error: configError } = loadConfig();
+if (configError) skip(configError);
+if (config.hubCwd !== undefined && (typeof config.hubCwd !== 'string' || !config.hubCwd.trim())) skip('config.local.json の hubCwd は空でないパスにすること');
+if (isHubCwd(cwd, homedir(), config.hubCwd)) skip('相談役（hub）のセッションは自分で終わらない');
 const sid = sessionOf(info);
 if (!sid) skip(`自分の端末 ${self} のセッションIDを claude agents から引けない（${hcError() || '前景の pid に当たる項目が無い'}）。resume の手がかりが無いまま終わらない`);
 

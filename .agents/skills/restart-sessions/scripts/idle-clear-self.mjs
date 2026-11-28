@@ -12,9 +12,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { dialogOpen } from './lib/screen.mjs';
+import { handoffProblem } from './lib/handoff.mjs';
 import { reporter } from './lib/cli.mjs';
 import { sleep } from './lib/herdr.mjs';
-import { backgroundWorkHint, idleStatus, inputDraft, isHc, lastError, prompt, self as selfOf, settledDraft } from './lib/mux.mjs';
+import { backgroundWorkHint, idleStatus, inputDraft, lastError, prompt, readScreen, self as selfOf, settledDraft } from './lib/mux.mjs';
 import { idleClearPrompt } from './lib/prompts.mjs';
 
 const { skip } = reporter('idle-clear-self');
@@ -24,19 +26,16 @@ const [, , mode, pane, handoff, shells] = process.argv;
 // 切り離した子: /clear を送り、画面が入れ替わるのを待ってから続きを送る。
 // hc の端末では、/clear を送れなければ続きを送らず、待つ間にユーザーが打ち始めたか何かが動き出していても送らない
 // （続きが打ちかけの末尾につながって送信されるため）。入力欄が読めない（/clear の後でまだ描かれていない）間は数回読み直し、
-// 書きかけが見えたときだけやめる。やめると /clear の後の会話に資料が渡らないので、読めないだけでは止めない。Herdr は分ける前のまま。
+// 書きかけが見えたときだけやめる。やめると /clear の後の会話に資料が渡らないので、読めないだけでは止めない。Herdr でも同じように確かめる。
 if (mode === '--send') {
-  const careful = isHc();
-  if (!prompt(pane, '/clear') && careful) process.exit(1);
+  if (!prompt(pane, '/clear')) process.exit(1);
   sleep(3);
-  if (careful) {
-    let draft = inputDraft(pane);
-    for (let i = 0; draft === null && i < 5; i += 1) {
-      sleep(1);
-      draft = inputDraft(pane);
-    }
-    if (draft || ['working', 'blocked'].includes(idleStatus(pane).status)) process.exit(1);
+  let draft = inputDraft(pane);
+  for (let i = 0; draft === null && i < 5; i += 1) {
+    sleep(1);
+    draft = inputDraft(pane);
   }
+  if (draft || ['working', 'blocked'].includes(idleStatus(pane).status)) process.exit(1);
   prompt(pane, idleClearPrompt(handoff, shells === 'yes'));
   process.exit(0);
 }
@@ -44,6 +43,9 @@ if (mode === '--send') {
 // Herdr のペイン・hc の端末（lib/mux.mjs）。切り離した子は、親の環境を引き継ぐので同じ道具に送る。
 const { id: self, sid } = selfOf();
 if (!self || !sid) skip(`自分のペインかセッションIDを特定できない（${lastError()}）`);
+
+if (/(?:^|[\\/])\.claude[\\/]worktrees[\\/][^\\/]+(?:[\\/]|$)/.test(process.cwd())) skip('Claude の worktree 内では放置後の /clear を自動実行しない');
+if (dialogOpen(readScreen(self))) skip('選択式の問い（確認画面）が開いている');
 
 // idle-clear.md の手順1と同じ照合。どれかに当たれば流さない。
 const { idle, status } = idleStatus(self);
@@ -67,6 +69,9 @@ try {
 } catch (error) {
   skip(`会話ログを抜き出せない: ${String(error.stderr ?? error).trim()}`);
 }
+
+const problem = handoffProblem(out, '自分のペイン');
+if (problem) skip(problem);
 
 const child = spawn(process.execPath, [fileURLToPath(import.meta.url), '--send', self, out, hasShells], { detached: true, stdio: 'ignore' });
 child.unref();
