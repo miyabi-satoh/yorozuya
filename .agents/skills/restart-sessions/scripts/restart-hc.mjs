@@ -12,7 +12,6 @@
 // - 新しい端末は呼び出し元の子にしない（--no-parent）。子にすると、呼び出し元が終わったときに一緒に終わる。
 
 import { dialogOpen } from './lib/screen.mjs';
-import { readScreen } from './lib/hc.mjs';
 import { existsSync } from 'node:fs';
 import { reporter, takeFlag } from './lib/cli.mjs';
 import { handoffProblem } from './lib/handoff.mjs';
@@ -29,6 +28,7 @@ import {
   machineOf,
   markRestarting,
   prompt,
+  readScreen,
   selfId,
   SEND_REFUSED,
   sessionOf,

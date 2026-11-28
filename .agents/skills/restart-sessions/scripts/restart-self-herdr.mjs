@@ -13,7 +13,6 @@
 import { basename, isAbsolute } from 'node:path';
 
 import { dialogOpen } from './lib/screen.mjs';
-import { readScreen } from './lib/herdr.mjs';
 import { reporter, takeFlag } from './lib/cli.mjs';
 import { handoffProblem } from './lib/handoff.mjs';
 import { paceNote } from './lib/pace.mjs';
@@ -26,6 +25,7 @@ import {
   herdrJson,
   NAME_PATTERN,
   paneHoldingName,
+  readScreen,
   startAgent,
   submitAndConfirm,
   waitForNameRelease,

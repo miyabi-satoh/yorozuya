@@ -7,7 +7,7 @@
 // /exit は送らない（終了の確認画面が出ることがある）。切り離したプロセスが 2 秒後に hc kill と hc rm をする。セッションIDは resume できる。
 // 終了コード: 0 は閉じる手配を済ませた（この後は何も出力しない）。1 は SKIP（何も変えていない。理由を報告して続ける）。
 
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 
@@ -15,6 +15,7 @@ import { loadConfig } from './lib/config.mjs';
 import { reporter } from './lib/cli.mjs';
 import { closeSelfDetached, exitLogLine, isHubCwd, parseExitArgs, sendMessageProblem } from './lib/exit.mjs';
 import { backgroundWorkHint, cwdOf, hcError, isClaude, selfId, sessionOf, terminalInfo } from './lib/hc.mjs';
+import { transcriptsOf } from './lib/transcript.mjs';
 
 const { skip } = reporter('exit-self');
 
@@ -43,8 +44,14 @@ if (!args.allowBackground) {
   }
 }
 
-// 会話ログは ~/.claude/projects/*/<セッションID>.jsonl（extract-transcript.mjs と同じ探し方）。見つからなければ確かめずに進む（これまでと同じ）。
-const transcript = findTranscript(sid);
+// 会話ログ（lib/transcript.mjs）が見つからない・読めなければ、確かめずに進む。
+const transcript = (() => {
+  try {
+    return transcriptsOf(sid)[0] ?? null;
+  } catch {
+    return null;
+  }
+})();
 if (transcript) {
   let lines = null;
   try {
@@ -78,17 +85,3 @@ if (!pid) {
 }
 process.stdout.write(`OK\t${self}\t${info.name ?? ''}\tresume:${sid}\n`);
 process.stderr.write(`[exit-self] 2秒後にこの端末 ${self} を閉じる。戻るなら 'claude --resume ${sid}'。ここで止まる（この先の出力は読まれない）\n`);
-
-function findTranscript(sessionId) {
-  const projectsDir = path.join(homedir(), '.claude', 'projects');
-  try {
-    return (
-      readdirSync(projectsDir, { withFileTypes: true })
-        .filter((entry) => entry.isDirectory())
-        .map((entry) => path.join(projectsDir, entry.name, `${sessionId}.jsonl`))
-        .find((file) => existsSync(file)) ?? null
-    );
-  } catch {
-    return null;
-  }
-}

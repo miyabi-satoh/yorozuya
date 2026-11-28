@@ -139,8 +139,7 @@ function runner(dir) {
     };
     write(process.stdout, `[run-in-tab] ${endedAt.toISOString()} 終了 ${describe(result)}\n`);
     // 途中まで書いた exit.json を待つ側が読まないよう、rename で置く。
-    fs.writeFileSync(`${exitFile(dir)}.tmp`, JSON.stringify(result));
-    fs.renameSync(`${exitFile(dir)}.tmp`, exitFile(dir));
+    writeAtomic(exitFile(dir), JSON.stringify(result));
     process.exit(exitCode(result));
   };
   for (const name of ['SIGHUP', 'SIGINT', 'SIGTERM']) {
@@ -222,7 +221,7 @@ function closeTab(job) {
         } catch {
           break;
         }
-        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
+        sleepSync(1000);
       }
       hc('rm', job.hc);
     } else herdr('tab', 'close', job.tab);
@@ -392,9 +391,17 @@ function hcName(label) {
 
 // runner がもう job.json を読んでいる間に書き直すので、途中まで書いた中身を読ませないよう、別のファイルに書いて置き換える。
 function writeJob(jobDir, job) {
-  const tmpFile = `${jobFile(jobDir)}.tmp`;
-  fs.writeFileSync(tmpFile, JSON.stringify(job, null, 2));
-  fs.renameSync(tmpFile, jobFile(jobDir));
+  writeAtomic(jobFile(jobDir), JSON.stringify(job, null, 2));
+}
+
+// 別のファイルに書いてから置き換える。読む側が、書きかけの中身を読まないように。
+function writeAtomic(file, text) {
+  fs.writeFileSync(`${file}.tmp`, text);
+  fs.renameSync(`${file}.tmp`, file);
+}
+
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
 function startInHc(jobDir, base) {

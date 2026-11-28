@@ -6,8 +6,8 @@
 
 // 既定の稼働の時間帯（ローカル時刻の時。始まりを含み、終わりを含まない）。1日 8h の稼働を前提にした、作者の作業の時間帯。
 // 人によって違うので、--active-hours か環境変数で変える。
-export const DEFAULT_ACTIVE_HOURS = '12-20';
-export const ACTIVE_HOURS_ENV = 'WEEKLY_PACE_ACTIVE_HOURS';
+const DEFAULT_ACTIVE_HOURS = '12-20';
+const ACTIVE_HOURS_ENV = 'WEEKLY_PACE_ACTIVE_HOURS';
 
 // 稼働の時間がこれより短いと、使用率の端数で数字が跳ねるので判定しない。
 const MIN_ACTIVE_ELAPSED_HOURS = 2;

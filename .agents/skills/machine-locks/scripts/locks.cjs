@@ -31,10 +31,6 @@ const STALE_MUTEX_MS = 60 * 1000;
 // 作ってから札を書くまでの間に持ち主が落ちると、中身の無いファイルが残る。待ち手が諦める前に消せるよう、MUTEX_WAIT_MS より短くする。
 const EMPTY_MUTEX_MS = 2 * 1000;
 
-// FIX: 前の置き場（input-takeover の mod が rule-guards にあった頃）の鍵。切り替えの瞬間に置かれていた鍵を守るため、効いている間は見る。
-// 置き場をそろえた後、前の作りで置かれた鍵がもう残っていないので、読むのをやめてよい。
-const LEGACY = { input: 'input-takeover.json' };
-
 const RESOURCE = /^[a-z][a-z0-9-]*$/;
 
 function homeOf(options) {
@@ -69,13 +65,6 @@ function readJson(file) {
 function readRaw(resource, options = {}) {
   const lock = readJson(lockPath(resource, options));
   return isLock(lock) ? lock : undefined;
-}
-
-function readLegacy(resource, options) {
-  const name = LEGACY[resource];
-  if (name === undefined) return undefined;
-  const lock = readJson(path.join(homeOf(options), '.claude', name));
-  return isLock(lock) ? { resource, since: lock.until, ...lock, legacy: true } : undefined;
 }
 
 function sessionsDir(options) {
@@ -129,8 +118,6 @@ function status(resource, options) {
   const alive = raw === undefined ? null : holderAlive(raw, opts);
   const state = raw === undefined ? 'free' : raw.until <= now ? 'expired' : alive === false ? 'dead' : 'held';
   if (state === 'held') return { state, lock: raw, last: raw, alive };
-  const legacy = readLegacy(resource, opts);
-  if (legacy !== undefined && legacy.until > now) return { state: 'held', lock: legacy, last: legacy, alive: null };
   return { state, lock: null, last: raw ?? null, alive };
 }
 
@@ -232,17 +219,11 @@ function acquire(resource, options) {
     if (held !== null && (!isOwn(held, opts) || (held.session !== session && holderAlive(held, opts) === true))) return { ok: false, heldBy: held };
     // 引けなければ、同じセッションの前の鍵の pid を引き継ぐ（延ばしたときに、落ちたかを見られなくならないように）。
     const pid = claudePidOf(session, opts) ?? (held?.session === session ? held.pid : undefined);
-    const lock = { resource, session, root, what, since: held !== null && held.session === session && !held.legacy ? held.since : now, until: now + ms };
+    const lock = { resource, session, root, what, since: held !== null && held.session === session ? held.since : now, until: now + ms };
     if (pid !== undefined) lock.pid = pid;
     writeLock(resource, lock, opts);
-    if (held?.legacy) releaseLegacy(resource, opts);
     return { ok: true, lock, previous: last };
   });
-}
-
-function releaseLegacy(resource, options) {
-  const legacy = readLegacy(resource, options);
-  if (legacy !== undefined && isOwn(legacy, options)) fs.writeFileSync(path.join(homeOf(options), '.claude', LEGACY[resource]), '{}');
 }
 
 // 自分の鍵を外す。外した鍵を返す（無ければ null）。見込みの時刻を過ぎた自分の鍵も外して返す（呼ぶ側が、終わったことを知らせるため）。
@@ -255,13 +236,7 @@ function release(resource, options) {
   const opts = { ...options, now };
   return withMutex(resource, opts, () => {
     const raw = readRaw(resource, opts);
-    if (raw === undefined) {
-      const legacy = readLegacy(resource, opts);
-      if (legacy === undefined || !isOwn(legacy, opts)) return { released: null };
-      releaseLegacy(resource, opts);
-      return { released: legacy };
-    }
-    if (!releasable(raw, opts)) return { released: null };
+    if (raw === undefined || !releasable(raw, opts)) return { released: null };
     fs.rmSync(lockPath(resource, opts), { force: true });
     return { released: raw };
   });
@@ -275,7 +250,7 @@ function clear(resource, options) {
   const opts = { ...options, now };
   return withMutex(resource, opts, () => {
     const { state, last } = status(resource, opts);
-    if ((state !== 'expired' && state !== 'dead') || last === null || last.legacy) return { cleared: null };
+    if ((state !== 'expired' && state !== 'dead') || last === null) return { cleared: null };
     if ((options.holder !== undefined && last.session !== options.holder) || (options.until !== undefined && last.until !== options.until)) return { cleared: null };
     fs.rmSync(lockPath(resource, opts), { force: true });
     return { cleared: last };
@@ -367,5 +342,5 @@ function main(argv) {
 if (require.main === module) {
   process.exitCode = main(process.argv.slice(2));
 } else {
-  module.exports = { acquire, release, clear, claim, status, readRaw, holderAlive, lockPath, lockDir };
+  module.exports = { acquire, release, clear, claim, status, lockPath };
 }

@@ -3,7 +3,8 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 import { takesInputInBash, takesInputInPowerShell } from './register'
 
 // 鍵の土台（machine-locks skill の scripts/locks.cjs）の代わり。同じ入れ物（files）の鍵のファイルを、土台と同じ決まりで読み書きする。
-// 土台そのものの決まり（取り合い・持ち主が落ちたとき・前の置き場）は locks.test.cjs が確かめる。dead は、落ちたことにするセッション。
+// mod のテストの実行環境はファイルを手元の入れ物に置くので、土台そのものは呼べない。土台の status・acquire・release・clear・claim の決まりを変えたら、ここも直す。
+// 土台そのものの決まり（取り合い・持ち主が落ちたとき）は locks.test.cjs が確かめる。dead は、落ちたことにするセッション。
 // unknown は、持ち主が生きているかを決められない（pid の無い）セッション。
 function fakeLocks(argv: string[], files: Map<string, string>, dead: Set<string>, unknown: Set<string> = new Set()) {
   const [op, , ...rest] = argv.slice(2)
