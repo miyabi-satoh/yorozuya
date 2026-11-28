@@ -162,12 +162,14 @@ export const takesInputInBash = (command: string): boolean => {
   const cmds = simpleCommands(kept.join('\n'))
   let capture = false, open = false
   for (const item of cmds) {
-    // ラッパー（sudo・xargs など）の選択肢は値を取るものを全部は覚えきれないので、後ろのどこかに入力の道具の名前があれば止める側に倒す。
-    // 読み違えても、鍵を求めるだけで済む。command -v のような調べるだけの形は除く。
+    let [raw = '', ...args] = commandWords(item.words)
+    // ラッパー（sudo・xargs など）の値を取る選択肢は覚えきれないので、表に無い選択肢の値（数字・/ で始まる・大文字だけの語）を
+    // コマンドと読んだら、その後ろの語を読み進めて、入力の道具が来るかを見る。sudo grep osascript のような引数は見ない。
     const lead = item.words.findIndex(word => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(word))
-    const leadName = lead < 0 ? '' : basename(item.words[lead])
-    if (WRAPPERS.has(leadName) && !(leadName === 'command' && /^-[a-zA-Z]*[vV]/.test(item.words[lead + 1] ?? '')) && item.words.slice(lead + 1).some(word => INPUT_TOOLS.has(basename(word).toLowerCase()))) return true
-    const [raw = '', ...args] = commandWords(item.words)
+    const valueLike = (word: string) => /^(?:\d+|\/.*|[A-Z_][A-Z0-9_]*)$/.test(word) && !INPUT_TOOLS.has(basename(word).toLowerCase())
+    if (lead >= 0 && WRAPPERS.has(basename(item.words[lead]))) {
+      while (valueLike(raw) && args.length > 0) [raw = '', ...args] = args[0].startsWith('-') ? args.slice(1) : args
+    }
     const name = basename(raw).toLowerCase()
     if (INPUT_TOOLS.has(name) || (name === 'hyprctl' && args[0] === 'dispatch')) return true
     if (name === 'open') open = true
