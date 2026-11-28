@@ -5,6 +5,7 @@ type SimpleCommand = { words: string[]; nested: boolean }
 const basename = (word: string) => word.split(/[\\/]/).pop() ?? word
 const INPUT_TOOLS = new Set(['osascript', 'cliclick', 'xdotool', 'ydotool', 'wtype'])
 const SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'fish'])
+const KEYWORDS = new Set(['then', 'do', 'else', 'elif', 'if', 'while', 'until', '!', '{'])
 const WRAPPERS = new Set(['sudo', 'xargs', 'env', 'timeout', 'nohup', 'exec', 'time', 'command', 'doas', 'nice'])
 
 // 引用された引数は1語に保ち、コマンド置換は別のコマンドとして読む。
@@ -72,7 +73,7 @@ function commandWords(words: string[]) {
   while (i < words.length) {
     if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[i])) { i++; continue }
     const name = basename(words[i])
-    if (['then', 'do', 'else', 'elif', 'if', 'while', 'until', '!', '{'].includes(name)) { i++; continue }
+    if (KEYWORDS.has(name)) { i++; continue }
     if (name === 'env') {
       i++
       while (i < words.length && (words[i].startsWith('-') || /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[i]))) {
@@ -161,21 +162,14 @@ export const takesInputInBash = (command: string): boolean => {
   }
   const cmds = simpleCommands(kept.join('\n'))
   let capture = false, open = false
-  for (const item of cmds) {
-    let [raw = '', ...args] = commandWords(item.words)
-    // ラッパー（sudo・xargs など）の値を取る選択肢は覚えきれないので、表に無い選択肢の値（数字・/ で始まる・大文字だけの語）を
-    // コマンドと読んだら、その後ろの語を読み進めて、入力の道具が来るかを見る。sudo grep osascript のような引数は見ない。
-    const lead = item.words.findIndex(word => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(word))
-    const valueLike = (word: string) => /^(?:\d+|\/.*|[A-Z_][A-Z0-9_]*)$/.test(word) && !INPUT_TOOLS.has(basename(word).toLowerCase())
-    if (lead >= 0 && WRAPPERS.has(basename(item.words[lead]))) {
-      while (valueLike(raw) && args.length > 0) [raw = '', ...args] = args[0].startsWith('-') ? args.slice(1) : args
-    }
+  // 1つのコマンドを、コマンドの語と引数から見る。
+  const check = (raw: string, args: string[], nested: boolean) => {
     const name = basename(raw).toLowerCase()
     if (INPUT_TOOLS.has(name) || (name === 'hyprctl' && args[0] === 'dispatch')) return true
     if (name === 'open') open = true
     if (name === 'screencapture') {
       capture = true
-      if (item.nested || !capturesWithoutInput(args.join(' '))) return true
+      if (nested || !capturesWithoutInput(args.join(' '))) return true
     }
     const scriptFlag = args.findIndex(arg => /^-[a-zA-Z]*c[a-zA-Z]*$/.test(arg))
     if ((SHELLS.has(name) || name === 'eval') && (name === 'eval' || scriptFlag >= 0)) {
@@ -189,6 +183,20 @@ export const takesInputInBash = (command: string): boolean => {
         const inner = encoded ? decodePowerShell(args[index + 1]) : args.slice(index + 1).join(' ')
         if (takesInputInPowerShell(inner)) return true
       }
+    }
+    return false
+  }
+  for (const item of cmds) {
+    const [raw = '', ...args] = commandWords(item.words)
+    if (check(raw, args, item.nested)) return true
+    // ラッパー（sudo・xargs など）の値を取る選択肢は覚えきれず、読み違えると後ろのコマンドを見落とす。
+    // そこで、ラッパーの後ろの、- で始まらない語のそれぞれから始まるコマンドも同じ規則で見る（止める側に倒す）。
+    // sudo grep osascript f のように、ラッパーの下のコマンドの引数に道具の名前があるだけの形も止まるが、まれで、鍵を求めるだけで済む。
+    const first = item.words.findIndex(word => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(word) && !KEYWORDS.has(word))
+    const wrapper = first < 0 ? '' : basename(item.words[first])
+    if (!WRAPPERS.has(wrapper) || (wrapper === 'command' && /^-[a-zA-Z]*[vV]/.test(item.words[first + 1] ?? ''))) continue
+    for (let j = first + 1; j < item.words.length; j++) {
+      if (!item.words[j].startsWith('-') && check(item.words[j], item.words.slice(j + 1), item.nested)) return true
     }
   }
   return capture && (open || /[<>]\(/.test(command))
