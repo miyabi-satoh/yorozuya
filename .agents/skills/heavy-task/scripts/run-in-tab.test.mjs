@@ -224,12 +224,23 @@ test('hc の端末では、HERDR_ENV=1 があっても hc の新しい端末で 
 test('Windows では、呼び出し元の環境で見つけた Git Bash を job.json に残す（タブの runner は呼び出し元の環境を継がない）', () => {
   const { env } = fakeHc();
   const dir = tmp();
-  // 中身は使わない（job.json に残るかだけを見る）。偽の hc は runner をこの環境で流すので、コマンドは Git Bash でも pwsh でも通る形にする。
-  const bash = path.join(dir, 'bash.exe');
-  fs.writeFileSync(bash, '');
-  const result = run({ ...env, CLAUDE_PID: '', CLAUDE_CODE_GIT_BASH_PATH: bash }, '--dir', dir, '--cwd', dir, '--', 'exit 0');
-  assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'job.json'), 'utf8')).bash, windows ? bash : undefined);
-  if (!windows) assert.equal(result.status, 0);
+  const [found] = shellFor('', process.platform, process.env, fs.existsSync);
+  const result = run({ ...env, CLAUDE_PID: '' }, '--dir', dir, '--cwd', dir, '--', 'exit 0');
+  assert.equal(result.status, 0);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'job.json'), 'utf8')).bash, windows && found !== 'pwsh' ? found : undefined);
+});
+
+test('hc の端末を作れなければ、job.json を残さない（同じ置き場で流し直せる）', () => {
+  const { env, state } = fakeHc();
+  const dir = tmp();
+  const home = tmp();
+  fs.mkdirSync(path.join(home, '.claude', 'sessions'), { recursive: true });
+  fs.writeFileSync(path.join(home, '.claude', 'sessions', '999.json'), JSON.stringify({ name: 'repo-ab' }));
+  // 試す名前（repo-ab, repo-ab-2 … repo-ab-20）を全部使用中にする。
+  for (let n = 1; n <= 20; n += 1) fs.writeFileSync(path.join(state, `taken-repo-ab${n === 1 ? '' : `-${n}`}`), '');
+  const result = run({ ...env, HOME: home, USERPROFILE: home, CLAUDE_PID: '999' }, '--dir', dir, '--label', '検査', '--', 'exit 0');
+  assert.notEqual(result.status, 0);
+  assert.equal(fs.existsSync(path.join(dir, 'job.json')), false);
 });
 
 test('runner は job.json の bash で流し、使ったシェルをログに残す', { skip: !windows && 'Git Bash を選ぶのは Windows だけ' }, (t) => {

@@ -100,11 +100,12 @@ function runner(dir) {
       // ログを書けなくても、処理と exit.json は止めない。
     }
   };
+  write(process.stdout, `[run-in-tab] ${startedAt.toISOString()} 開始\n[run-in-tab] cwd: ${job.cwd}\n`);
   // Windows では、呼び出し元の環境で見つけた Git Bash（job.bash）を先に使う。runner はタブ（hc の core・Herdr のペイン）の環境で動き、
   // 呼び出し元の CLAUDE_CODE_GIT_BASH_PATH や PATH を継がないため。
   const env = job.bash ? { ...process.env, CLAUDE_CODE_GIT_BASH_PATH: job.bash } : process.env;
   const [shell, args] = shellFor(job.command, process.platform, env, fs.existsSync);
-  write(process.stdout, `[run-in-tab] ${startedAt.toISOString()} 開始\n[run-in-tab] cwd: ${job.cwd}\n[run-in-tab] shell: ${shell}\n[run-in-tab] $ ${job.command}\n`);
+  write(process.stdout, `[run-in-tab] shell: ${shell}\n[run-in-tab] $ ${job.command}\n`);
   // 入力を待つコマンドが誰にも気づかれず止まり続けないよう、標準入力は渡さない。
   // 止めるときにシェルの子孫まで届くよう、プロセスグループを分ける（Windows には無い）。
   const ownGroup = process.platform !== 'win32';
@@ -389,23 +390,36 @@ function hcName(label) {
   return (n) => (n === 1 ? slug.slice(0, 32) : `${slug.slice(0, 32 - String(n).length - 1).replace(/-+$/, '')}-${n}`).replace(/-+$/, '');
 }
 
+// runner がもう job.json を読んでいる間に書き直すので、途中まで書いた中身を読ませないよう、別のファイルに書いて置き換える。
+function writeJob(jobDir, job) {
+  const tmpFile = `${jobFile(jobDir)}.tmp`;
+  fs.writeFileSync(tmpFile, JSON.stringify(job, null, 2));
+  fs.renameSync(tmpFile, jobFile(jobDir));
+}
+
 function startInHc(jobDir, base) {
   const nameOf = hcName(base.label);
   // runner は始まるとすぐ job.json を読むので、端末を作る前に書いておく。address と名前は作った後に書き足す。
-  fs.writeFileSync(jobFile(jobDir), JSON.stringify(base, null, 2));
+  writeJob(jobDir, base);
   const argv = [process.execPath, fileURLToPath(import.meta.url), '--runner', jobDir];
   let created;
-  for (let n = 1; !created; n += 1) {
-    try {
-      created = hc('run', '--bg', '--outlive-parent', '--no-notify', '--cwd', base.cwd, '--name', nameOf(n), '--label', `run_in_tab=${base.label}`, '--', ...argv);
-    } catch (error) {
-      if (error.kind !== 'name_taken' || n >= HC_NAME_TRIES) throw error;
+  try {
+    for (let n = 1; !created; n += 1) {
+      try {
+        created = hc('run', '--bg', '--outlive-parent', '--no-notify', '--cwd', base.cwd, '--name', nameOf(n), '--label', `run_in_tab=${base.label}`, '--', ...argv);
+      } catch (error) {
+        if (error.kind !== 'name_taken' || n >= HC_NAME_TRIES) throw error;
+      }
     }
+    // address が無いまま進むと、後の処理が Herdr の側に倒れ、作った端末が閉じられずに残る。
+    if (!created?.address) throw new Error(`hc run の出力に address が無い（hc の出力の形が変わった可能性）。「${nameOf(1)}」の端末が残っていれば閉じること`);
+  } catch (error) {
+    // 同じ置き場で流し直せるよう、始まらなかった回の job.json を残さない（Herdr の側と同じ）。
+    fs.rmSync(jobFile(jobDir), { force: true });
+    throw error;
   }
-  // address が無いまま進むと、後の処理が Herdr の側に倒れ、作った端末が閉じられずに残る。
-  if (!created?.address) throw new Error(`hc run の出力に address が無い（hc の出力の形が変わった可能性）。「${nameOf(1)}」の端末が残っていれば閉じること`);
   const job = { ...base, hc: created.address, name: created.name ?? '' };
-  fs.writeFileSync(jobFile(jobDir), JSON.stringify(job, null, 2));
+  writeJob(jobDir, job);
   console.log(`タブ: ${base.label}（hc の端末 ${job.hc}${job.name ? `、${job.name}` : ''}）\n置き場: ${jobDir}`);
   return jobDir;
 }

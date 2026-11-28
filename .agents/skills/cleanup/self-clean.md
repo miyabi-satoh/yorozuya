@@ -13,7 +13,7 @@ disk-watch の mod から「[ディスクの見張り]」の知らせを受け�
 
 1. **空きを記録する。** macOS / Linux は `df -h ~`、Windows は `Get-PSDrive C`。
 2. **片付ける場所を挙げる。** 元の clone（知らせに書かれたパス）と、`git worktree list` に出る worktree の、`Cargo.toml` の隣にある `target/`。
-3. **使用中のものを外す。** `ps -Ao pid,command`（Windows は `Get-CimInstance Win32_Process | Select-Object ProcessId,CommandLine`）で、コマンドラインにリポジトリのパスを含むプロセスを見る。リポジトリがシンボリックリンクやジャンクションなら、実体のパス（Windows は `(Get-Item <パス>).ResolvedTarget`）でも探す。コマンドラインには実体のパスが出るため。`cargo` 自身のコマンドラインにはパスが出ないが、ビルド中は子の `rustc` の引数に `target/` のパスが出る。Windows ではこの方法で作業フォルダを読めないので、使用中か迷うフォルダは見送る。
+3. **使用中のものを外す。** `ps -Ao pid,command`（Windows は `Get-CimInstance Win32_Process | Select-Object ProcessId,CommandLine`）で、コマンドラインにリポジトリのパスを含むプロセスを見る。リポジトリがシンボリックリンクやジャンクションなら、実体のパス（Windows は `(Get-Item <パス>).Target`）でも探す。コマンドラインには実体のパスが出るため。`cargo` 自身のコマンドラインにはパスが出ないが、ビルド中は子の `rustc` の引数に `target/` のパスが出る。Windows ではこの方法で作業フォルダを読めないので、使用中か迷うフォルダは見送る。
    - ビルド（`cargo`・`rustc`）や開発サーバーが、その `target/` のある場所で動いていれば、その場所は今回は飛ばす。エディターの `rust-analyzer` は数えない。
    - `target/<profile>/` のバイナリが動いていれば（常駐させているアプリなど）、そのプロファイルは消さない。
 4. **消す。** 1件ずつ実行し、1件失敗しても残りを続ける。
