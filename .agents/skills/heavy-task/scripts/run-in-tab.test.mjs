@@ -221,25 +221,29 @@ test('hc の端末では、HERDR_ENV=1 があっても hc の新しい端末で 
   assert.equal(fs.existsSync(path.join(state, 'closed')), true);
 });
 
-test('呼び出し元の CLAUDE_CODE_GIT_BASH_PATH を job.json に残す（タブの runner は呼び出し元の環境を継がない）', () => {
+test('Windows では、呼び出し元の環境で見つけた Git Bash を job.json に残す（タブの runner は呼び出し元の環境を継がない）', () => {
   const { env } = fakeHc();
   const dir = tmp();
+  // 中身は使わない（job.json に残るかだけを見る）。偽の hc は runner をこの環境で流すので、コマンドは Git Bash でも pwsh でも通る形にする。
   const bash = path.join(dir, 'bash.exe');
+  fs.writeFileSync(bash, '');
   const result = run({ ...env, CLAUDE_PID: '', CLAUDE_CODE_GIT_BASH_PATH: bash }, '--dir', dir, '--cwd', dir, '--', 'exit 0');
-  assert.equal(result.status, 0);
-  assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'job.json'), 'utf8')).gitBash, bash);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'job.json'), 'utf8')).bash, windows ? bash : undefined);
+  if (!windows) assert.equal(result.status, 0);
 });
 
-test('runner は job.json の gitBash の Git Bash で流す', { skip: !windows && 'Git Bash を選ぶのは Windows だけ' }, () => {
-  const bash = shellFor('', process.platform, process.env, fs.existsSync)[0];
-  if (bash === 'pwsh') return;
+test('runner は job.json の bash で流し、使ったシェルをログに残す', { skip: !windows && 'Git Bash を選ぶのは Windows だけ' }, (t) => {
+  const [bash] = shellFor('', process.platform, process.env, fs.existsSync);
+  if (bash === 'pwsh') return t.skip('Git Bash が無い');
   const dir = tmp();
-  fs.writeFileSync(path.join(dir, 'job.json'), JSON.stringify({ command: 'echo $((1+2))', cwd: dir, gitBash: bash }));
-  // PATH と ProgramFiles からは Git Bash を見つけられない環境にする。
-  const env = { ...process.env, PATH: path.dirname(process.execPath), Path: undefined, ProgramFiles: path.join(dir, 'none'), CLAUDE_CODE_GIT_BASH_PATH: '' };
-  const result = spawnSync(process.execPath, [script, '--runner', dir], { encoding: 'utf8', env });
+  fs.writeFileSync(path.join(dir, 'job.json'), JSON.stringify({ command: 'echo $((1+2))', cwd: dir, bash }));
+  // タブの側では PATH と ProgramFiles から Git Bash を見つけられない環境にする（Windows の環境変数は大文字小文字を区別しないので、PATH の綴りを1つにする）。
+  const tabEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(path|programfiles|claude_code_git_bash_path)$/i.test(key)));
+  const result = spawnSync(process.execPath, [script, '--runner', dir], { encoding: 'utf8', env: { ...tabEnv, PATH: path.dirname(process.execPath), ProgramFiles: path.join(dir, 'none') } });
   assert.equal(result.status, 0);
-  assert.match(fs.readFileSync(path.join(dir, 'output.log'), 'utf8'), /^3$/m);
+  const log = fs.readFileSync(path.join(dir, 'output.log'), 'utf8');
+  assert.match(log, /^3$/m);
+  assert.ok(log.includes(`[run-in-tab] shell: ${bash}`));
 });
 
 test('hc の名前が使われていれば、-2 を付けて作り直す', () => {

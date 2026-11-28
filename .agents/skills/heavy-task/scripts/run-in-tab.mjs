@@ -100,11 +100,11 @@ function runner(dir) {
       // ログを書けなくても、処理と exit.json は止めない。
     }
   };
-  write(process.stdout, `[run-in-tab] ${startedAt.toISOString()} 開始\n[run-in-tab] cwd: ${job.cwd}\n[run-in-tab] $ ${job.command}\n`);
-
-  // 呼び出し元の CLAUDE_CODE_GIT_BASH_PATH を使う。runner はタブ（hc の core・Herdr のペイン）の環境で動き、呼び出し元の環境を継がないため。
-  const env = job.gitBash ? { ...process.env, CLAUDE_CODE_GIT_BASH_PATH: job.gitBash } : process.env;
+  // Windows では、呼び出し元の環境で見つけた Git Bash（job.bash）を先に使う。runner はタブ（hc の core・Herdr のペイン）の環境で動き、
+  // 呼び出し元の CLAUDE_CODE_GIT_BASH_PATH や PATH を継がないため。
+  const env = job.bash ? { ...process.env, CLAUDE_CODE_GIT_BASH_PATH: job.bash } : process.env;
   const [shell, args] = shellFor(job.command, process.platform, env, fs.existsSync);
+  write(process.stdout, `[run-in-tab] ${startedAt.toISOString()} 開始\n[run-in-tab] cwd: ${job.cwd}\n[run-in-tab] shell: ${shell}\n[run-in-tab] $ ${job.command}\n`);
   // 入力を待つコマンドが誰にも気づかれず止まり続けないよう、標準入力は渡さない。
   // 止めるときにシェルの子孫まで届くよう、プロセスグループを分ける（Windows には無い）。
   const ownGroup = process.platform !== 'win32';
@@ -337,6 +337,13 @@ function ownerName(cwd) {
   }
 }
 
+// 呼び出し元の環境で見つかる Git Bash（Windows だけ）。見つからなければ undefined で、runner はタブの環境で選び直す。
+function callerBash() {
+  if (process.platform !== 'win32') return undefined;
+  const [shell] = shellFor('', process.platform, process.env, fs.existsSync);
+  return shell === 'pwsh' ? undefined : shell;
+}
+
 function start({ command, label, cwd, dir }) {
   const name = label ?? command.trim().split(/\s+/).slice(0, 2).join(' ');
   const jobDir = dir ? path.resolve(dir) : defaultDir(name);
@@ -345,12 +352,12 @@ function start({ command, label, cwd, dir }) {
   if (fs.existsSync(jobFile(jobDir))) throw new Error(`前の回の結果がある置き場です: ${jobDir}`);
   const jobCwd = path.resolve(cwd ?? process.cwd());
   const tabName = `${ownerName(jobCwd)}: ${name}`;
-  const gitBash = process.env.CLAUDE_CODE_GIT_BASH_PATH || undefined;
+  const bash = callerBash();
   const runCommand = `node "${fileURLToPath(import.meta.url)}" --runner "${jobDir}"`;
-  if (inHc()) return startInHc(jobDir, { command, cwd: jobCwd, label: tabName, gitBash });
+  if (inHc()) return startInHc(jobDir, { command, cwd: jobCwd, label: tabName, bash });
   const workspace = process.env.HERDR_WORKSPACE_ID ? ['--workspace', process.env.HERDR_WORKSPACE_ID] : [];
   const created = JSON.parse(herdr('tab', 'create', ...workspace, '--cwd', jobCwd, '--label', tabName, '--no-focus')).result;
-  const job = { command, cwd: jobCwd, label: tabName, gitBash, pane: created.root_pane.pane_id, tab: created.tab.tab_id };
+  const job = { command, cwd: jobCwd, label: tabName, bash, pane: created.root_pane.pane_id, tab: created.tab.tab_id };
   fs.writeFileSync(jobFile(jobDir), JSON.stringify(job, null, 2));
   // 待つ側が打ち切られても待ち直せるよう、始めにここへ出す。
   console.log(`タブ: ${tabName}（${job.tab}）\n置き場: ${jobDir}`);
@@ -384,6 +391,8 @@ function hcName(label) {
 
 function startInHc(jobDir, base) {
   const nameOf = hcName(base.label);
+  // runner は始まるとすぐ job.json を読むので、端末を作る前に書いておく。address と名前は作った後に書き足す。
+  fs.writeFileSync(jobFile(jobDir), JSON.stringify(base, null, 2));
   const argv = [process.execPath, fileURLToPath(import.meta.url), '--runner', jobDir];
   let created;
   for (let n = 1; !created; n += 1) {
