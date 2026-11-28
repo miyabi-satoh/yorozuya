@@ -79,7 +79,7 @@ export const register: Register = on => {
       await update($, waiting, current => current ?? { command, since })
     } else if (result.deny === undefined) {
       const command = commandOf(e)
-      await update($, waiting, current => current && (command === current.command || command.includes(current.command)) ? null : current)
+      await update($, waiting, current => current !== null && current.command !== '' && command === current.command ? null : current)
     }
     return result
   })

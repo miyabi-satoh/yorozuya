@@ -141,6 +141,8 @@ async function check($: EngineInterface) {
     const config = await $.fs.read(`${dir}/config.local.json`).catch(() => undefined)
     const threshold = thresholdOf(typeof config === 'string' ? config : undefined)
     const { percent } = (await $.session.usage()).context
+    // 閾値を下回ったら（/clear などで減ったら）、次に越えたときにまた知らせる。
+    if (percent !== undefined && percent < threshold && current.over !== false) await update($, told, t => ({ ...t, over: false }))
     if (percent !== undefined && percent >= threshold && (typeof current.over === 'number' ? percent >= current.over + OVER_STEP : !current.over) && !(await isGoalActive($, own))) {
       await update($, told, t => ({ ...t, over: percent }))
       await $.prompt.submit({ text: `[コンテキストの見張り] OVER ${percent}%（閾値 ${threshold}%）。${guide}` })

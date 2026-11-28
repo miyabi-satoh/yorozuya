@@ -26,6 +26,7 @@ import {
   currentPane,
   backgroundWorkHint,
   herdrError,
+  herdrJson,
   herdrErrorCode,
   inputDraft,
   NAME_PATTERN,
@@ -93,8 +94,10 @@ if (holder && holder !== pane) {
 const sid = info.agent_session?.value ?? '';
 if (!sid) skip(`ペイン ${pane} のセッションIDを引けない。resume の手がかりが無いまま終了させたくないので止まる`);
 
-const cwd = info.cwd || info.foreground_cwd;
-if (!cwd || !existsSync(cwd)) skip(`ペイン ${pane} の cwd が無いか取得できない: ${cwd || '不明'}`);
+// cwd は pane get で読む（agent get の結果に cwd があるかは確かめていない）。読めなければ、前と同じく照合せずに進める。
+const paneCwd = herdrJson(['pane', 'get', pane])?.result?.pane;
+const cwd = [paneCwd?.cwd, paneCwd?.foreground_cwd].find((value) => typeof value === 'string' && value !== '');
+if (cwd && !existsSync(cwd)) skip(`ペイン ${pane} の cwd が無い: ${cwd}`);
 
 // 対象の自己申告（「バックグラウンド処理はありません」）は、実際にハーネスが追跡している
 // シェル・Monitor と食い違うことがある（2026-09-11・2026-09-23 に別プロジェクトで実際に発生）。

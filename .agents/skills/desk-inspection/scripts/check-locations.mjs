@@ -81,8 +81,9 @@ for (const block of blocks) {
     const shown = text.startsWith(":") ? `${path}${text}` : text;
     const hits = resolve(path);
     if (hits.length !== 1) {
-      const first = path.replace(/^\.\//, '').split('/')[0];
-      if (hits.length === 0 && !/^(?:\/|~|[A-Za-z]:[\\/])/.test(path) && first && files.some(f => f.startsWith(`${first}/`))) {
+      // ディレクトリの部分がまるごとリポジトリにあるのに当たらなければ、書き間違い。src/ のように名前が重なるだけの依存のパスは、確かめられなかったに回す。
+      const dir = path.replace(/^\.\//, '').split('/').slice(0, -1).join('/');
+      if (hits.length === 0 && !/^(?:\/|~|[A-Za-z]:[\\/])/.test(path) && dir && files.some(f => f.startsWith(`${dir}/`))) {
         console.log(`NG  ${shown} → パスが見つからない`);
         bad++;
         prev = path;
