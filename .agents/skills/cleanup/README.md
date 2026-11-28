@@ -27,7 +27,6 @@
 
 - 同じリポジトリ（worktree を含む）を開くセッションが複数あっても、知らせるのは1つ。空きが戻るまでは、前に知らせたときより 2GB 以上減ったとき（前の知らせから1時間たってから）と、1日たったときだけ知らせ直す
 - ラインと、共有のキャッシュ（npm・pnpm など）を片付ける担当のリポジトリは、`config.local.json` の `diskWatch` で決める（`config.example.json`）。既定は 20GB を切ったら知らせ、30GB で戻ったとみる。担当は無し
-- skill をコピーして使う場合は、利用先の `.gitignore` に `.claude/skills/cleanup/config.local.json` を追加する（配置先に合わせてパスを変える）
 - Rust は、14日使っていないプロファイル・ターゲットと incremental を消し、それでも戻らなければ `debug/` を丸ごと消す。node_modules は消さない
 - ユーザーに聞かずに消す。権限の設定で `rm` などが止められた行は、ほかを済ませてから、まとめて1回ユーザーに許可を聞く（Claude Code の `AskUserQuestion`）
 - 実機で確かめたのは macOS（Claude Code 2.1.289）のみ
