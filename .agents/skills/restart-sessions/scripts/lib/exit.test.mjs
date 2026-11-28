@@ -30,6 +30,8 @@ test('hub の cwd（と配下）は自分で終わらない。ほかは終わっ
     assert.equal(isHubCwd(path.join(home, 'Projects', 'hub2'), home), false);
     assert.equal(isHubCwd(path.join(home, 'Projects', 'knowledge'), home), false);
     assert.equal(isHubCwd('', home), false);
+    assert.equal(isHubCwd(path.join(home, 'Projects', 'hub2'), home, '~/Projects/hub2'), true);
+    assert.equal(isHubCwd(path.join(home, 'Projects', 'hub'), home, path.join(home, 'Projects', 'hub2')), false);
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }

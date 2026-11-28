@@ -108,6 +108,8 @@ export async function check($: EngineInterface) {
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
+    // 人のいないセッション（-p・SDK）は見張らない。知らせの印を使うと、対話のセッションに届かなくなるため。
+    if (!e.isInteractive) return started
     // 起動の直後はほかの処理と重なるので、少し置いてから1回測る。
     void $.clock.sleep(FIRST_CHECK_AFTER_MS).then(() => check($))
     $.clock.every(CHECK_EVERY_MS, () => {

@@ -11,6 +11,7 @@
 // 待つ側はタブの中の処理と別のプロセスなので、待つ側が打ち切られてもタブの処理は続く。
 // 置き場には job.json・output.log・exit.json ができる。
 import { execFileSync, spawn } from 'node:child_process';
+import { shellFor } from './shell-choice.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -79,14 +80,6 @@ function readJson(file) {
   }
 }
 
-function shellFor(command) {
-  // pwsh の -Command は、外部コマンドの終了コードを 0 か 1 に丸めるので、自分で返す。
-  if (process.platform === 'win32') {
-    return ['pwsh', ['-NoProfile', '-Command', `${command}\n$ok = $?; if (-not $ok) { if ($LASTEXITCODE) { exit $LASTEXITCODE }; exit 1 }`]];
-  }
-  return [process.env.SHELL || 'sh', ['-c', command]];
-}
-
 // タブの中で動く側。出力はタブの画面とログの両方へ出す。
 function runner(dir) {
   const job = readJson(jobFile(dir));
@@ -109,7 +102,7 @@ function runner(dir) {
   };
   write(process.stdout, `[run-in-tab] ${startedAt.toISOString()} 開始\n[run-in-tab] cwd: ${job.cwd}\n[run-in-tab] $ ${job.command}\n`);
 
-  const [shell, args] = shellFor(job.command);
+  const [shell, args] = shellFor(job.command, process.platform, process.env, fs.existsSync);
   // 入力を待つコマンドが誰にも気づかれず止まり続けないよう、標準入力は渡さない。
   // 止めるときにシェルの子孫まで届くよう、プロセスグループを分ける（Windows には無い）。
   const ownGroup = process.platform !== 'win32';

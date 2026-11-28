@@ -11,7 +11,7 @@
 - **hook が拾うコマンドには、`SKILL.md` の手順は要らない。** hook が同じ目安で測って止める。手順を使うのは、hook の無いエージェントと、hook が拾わないコマンド（下の「hook の見方」）
 - **mod は Claude Code の function hooks（早期アクセスの API）に頼っている。** 版ごとに変わりうる。Claude Code 2.1.289 で確かめた
 - **止めて知らせるところまで実物で通したのは macOS だけ。** hook が CPU の厳しさで止め、mod が空きを測り続けて知らせるところまで、macOS（Claude Code 2.1.289）で確かめた。始める瞬間の鍵は、macOS（Claude Code 2.1.332）で、hook が置き、ほかのセッションの重い処理を止めるところまでテストで確かめた。Windows 11（Claude Code 2.1.296・Node.js 26.5.0）では、CPU の空きを測るところまで確かめた。hook が止めるところと mod は試していない。Linux の測り方（`os.cpus()`）はコードにあるが、実物では試していない
-- **`run-in-tab.mjs` を実物で通したのは macOS（Herdr 0.9.3・hc 0.1.21）だけ。** Windows では `pwsh` で流す形にしてあるが、試していない
+- **`run-in-tab.mjs` を実物で通したのは macOS（Herdr 0.9.3・hc 0.1.21）だけ。** Windows は Git Bash を優先し、無ければ `pwsh` で流すが、実機では未確認
 - **`run-in-tab.mjs` のタブ名は、Claude Code の内部のファイル（`~/.claude/sessions/<pid>.json`）からセッションの名前を読む。** 公開された API ではないので、版によって読めなくなりうる。読めなければリポジトリの名前を付ける
 - **CPU の空きだけを見る。** 測れないとき・入力が読めないときは、止めずに通す
 

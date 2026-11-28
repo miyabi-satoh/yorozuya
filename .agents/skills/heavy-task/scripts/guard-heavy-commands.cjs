@@ -263,10 +263,10 @@ function tabTool() {
   return null;
 }
 
-function outsideTabReason(tool) {
+function outsideTabReason(tool, dir = __dirname) {
   return [
     `重い処理は、${tool} の別の${tool === 'hc' ? '端末' : 'タブ'}で流してください。ログと終了コードが残り、途中で打ち切られても理由が分かります。`,
-    `node ${path.join(__dirname, 'run-in-tab.mjs')} --label <用途> -- '<コマンド>'`,
+    `node ${path.join(dir, 'run-in-tab.mjs').replace(/\\/g, '/')} --label <用途> -- '<コマンド>'`,
     `タブで流せない事情があるときだけ、コマンドの頭に ${FORCE_MARK} を付けます。`,
   ].join('\n');
 }
@@ -372,7 +372,7 @@ async function main() {
   }
   if (!isHeavy(input, config, prePush)) return;
 
-  const { ok, reason } = await admit({ session: input.session_id, root: cwd, what: describe(input, config, prePush), toolName: input.tool_name });
+  const { ok, reason } = await admit({ session: input.agent_id ? `${input.session_id}:${input.agent_id}` : input.session_id, root: cwd, what: describe(input, config, prePush), toolName: input.tool_name });
   if (!ok) output({ permissionDecision: 'deny', permissionDecisionReason: reason });
 }
 
@@ -415,5 +415,5 @@ if (require.main === module && process.argv.includes('--ready')) {
 } else if (require.main === module) {
   main().catch(() => {});
 } else {
-  module.exports = { commandSegments, isHeavy, loadConfig, runsOutsideTab, FORCE_MARK, START_WINDOW_MS };
+  module.exports = { commandSegments, isHeavy, loadConfig, runsOutsideTab, outsideTabReason, FORCE_MARK, START_WINDOW_MS };
 }

@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // レポートの <code>path:line</code> が、検査したリポジトリの今のファイルに実在するかを見る。
 // 使い方: node check-locations.mjs <report.html> <repo のルート>
-// 終了コード: 0 = 通った / 1 = 行がファイルの長さを超える場所がある（書き間違いか、別の版を読んだ）/
+// 終了コード: 0 = 通った / 1 = リポジトリ内のパスが無いか、行がファイルの長さを超える /
 //   2 = 確かめられなかった（引数・読めないファイル・1か所も確かめられなかった）。1 と分けるのは、確かめられないまま通ったと読まないため。
-// リポジトリに無いパス（依存のソースなど）と、名前だけで複数のファイルに当たるものは、確かめられなかったとして並べるだけにする。
+// リポジトリ外のパスと、名前だけで複数のファイルに当たるものは、確かめられなかったとして並べる。
 import { execFileSync } from "node:child_process";
 import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -56,6 +56,7 @@ const countLines = (f) => {
   return lineCount.get(f);
 };
 const resolve = (p) => {
+  if (/^(?:\/|~|[A-Za-z]:[\\/])/.test(p)) return [];
   const clean = p.replace(/^\.\//, "");
   if (fileSet.has(clean)) return [clean];
   return files.filter((f) => f === clean || f.endsWith(`/${clean}`));
@@ -80,6 +81,14 @@ for (const block of blocks) {
     const shown = text.startsWith(":") ? `${path}${text}` : text;
     const hits = resolve(path);
     if (hits.length !== 1) {
+      // ディレクトリの部分がまるごとリポジトリにあるのに当たらなければ、書き間違い。src/ のように名前が重なるだけの依存のパスは、確かめられなかったに回す。
+      const dir = path.replace(/^\.\//, '').split('/').slice(0, -1).join('/');
+      if (hits.length === 0 && !/^(?:\/|~|[A-Za-z]:[\\/])/.test(path) && dir && files.some(f => f.startsWith(`${dir}/`))) {
+        console.log(`NG  ${shown} → パスが見つからない`);
+        bad++;
+        prev = path;
+        continue;
+      }
       unresolved.push(`${shown}${hits.length > 1 ? ` (候補 ${hits.length} 件)` : ""}`);
       prev = path;
       continue;

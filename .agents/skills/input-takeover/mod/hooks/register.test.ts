@@ -29,7 +29,7 @@ function fakeLocks(argv: string[], files: Map<string, string>, dead: Set<string>
   const own = (l: any) => l.session === session || (sameRoot && l.root === root)
   if (op === 'status') return { state, lock, last: raw, alive }
   if (op === 'acquire') {
-    if (lock !== null && !own(lock)) return { ok: false, heldBy: lock }
+    if (lock !== null && (!own(lock) || (lock.session !== session && alive === true))) return { ok: false, heldBy: lock }
     const since = lock !== null && lock.session === session && typeof lock.since === 'number' ? lock.since : now
     const placed = { resource: 'input', session, root, what: flag('--what'), since, until: now + Number(flag('--ms')) }
     files.set(path, JSON.stringify(placed))
@@ -191,12 +191,24 @@ describe('入力を奪う操作', () => {
 
   test('同じフォルダのセッションの鍵は、立ち上がり直した後に start と end で引き継げる', async ($, on) => {
     const files = new Map([[LOCK, JSON.stringify({ session: 'old', root: '/home/me/Projects/app-a', what: 'x', until: 60000 })]])
-    machine(on, files, 'new')
+    const dialog = machine(on, files, 'new')
+    dialog.unknown = new Set(['old'])
     expect((await $.tool.call(capture) as any).deny).toContain('引き継')
     expect((await $.tool.call(start()) as any).deny).toBeUndefined()
     expect((await $.tool.call(capture) as any).result?.text).toBe('ok')
     await $.tool.call(end)
     expect(files.has(LOCK)).toBe(false)
+  })
+
+  test('同じフォルダの生きているセッションの鍵は引き継がない', async ($, on) => {
+    const held = JSON.stringify({ session: 'old', root: '/home/me/Projects/app-a', what: 'x', until: 60000 })
+    const files = new Map([[LOCK, held]])
+    const dialog = machine(on, files, 'new')
+    const denied = (await $.tool.call(start()) as any).deny
+    expect(denied).toContain('操作中')
+    expect(denied).not.toContain('引き継')
+    expect(dialog.asked).toHaveLength(0)
+    expect(files.get(LOCK)).toBe(held)
   })
 
   test('セッションが終わると自分の鍵を外す', async ($, on) => {
@@ -503,6 +515,7 @@ describe('入力を奪う操作', () => {
   test('同じフォルダのほかのセッションの鍵を引き継ぐときも、問い直す', async ($, on) => {
     const files = new Map([[LOCK, JSON.stringify({ session: 'old', root: '/home/me/Projects/app-a', what: 'x', until: 60000 })]])
     const dialog = machine(on, files, 'new')
+    dialog.unknown = new Set(['old'])
     dialog.reply = 'やめる'
     expect((await $.tool.call(start()) as any).deny).toBeTruthy()
     expect(dialog.asked).toHaveLength(1)
@@ -563,6 +576,7 @@ describe('入力を奪う操作', () => {
     const files = new Map([['/home/me/.claude/locks/input.approved.json', JSON.stringify({ new: 0 })]])
     files.set(LOCK, JSON.stringify({ session: 'old', root: '/home/me/Projects/app-a', what: 'x', until: 60000 }))
     const dialog = machine(on, files, 'new')
+    dialog.unknown = new Set(['old'])
     await $.tool.call(start())
     expect(dialog.asked).toHaveLength(1)
   })
@@ -605,8 +619,64 @@ describe('入力を奪う操作', () => {
 
   test('引用符の中の名前や、ほかのコマンドは止めない', async ($, on) => {
     machine(on, new Map(), 'a')
-    const command = 'git commit -m "screencapture を止める" && grep osascriptx file'
+    const command = 'git commit -m "screencapture を止める" && grep -rn osascript .'
     expect((await $.tool.call({ tool: 'Bash', command }) as any).result?.text).toBe('ok')
+  })
+
+  test('コマンド位置と heredoc・シェル・PowerShell の中を見る', () => {
+    for (const command of ['grep -rn osascript .', 'which cliclick', "cat > B.md <<'EOF'\nosascript -e 'x'\nEOF", 'echo "xdotool"', 'hyprctl monitors']) {
+      expect(takesInputInBash(command)).toBe(false)
+    }
+    const encoded = 'WwBTAHkAcwB0AGUAbQAuAFcAaQBuAGQAbwB3AHMALgBGAG8AcgBtAHMALgBTAGUAbgBkAEsAZQB5AHMAXQA6ADoAUwBlAG4AZABXAGEAaQB0ACgAJwBhACcAKQA='
+    for (const command of ["bash <<'EOF'\nosascript -e 'x'\nEOF", "ssh host <<'EOF'\nxdotool key a\nEOF", "bash -c 'osascript -e x'", 'sh -c "xdotool key a"', 'eval "xdotool key a"', 'env FOO=1 osascript -e x', 'timeout 5 cliclick c:1,1', 'sudo -u me nohup osascript -e x', 'xargs -n 1 cliclick', '/usr/bin/osascript -e x', 'echo "$(osascript -e x)"', 'powershell -c "[System.Windows.Forms.SendKeys]::SendWait(\'a\')"', `pwsh -EncodedCommand ${encoded}`, 'hyprctl dispatch exec foo', 'ydotool key 1', 'wtype hello']) {
+      expect(takesInputInBash(command)).toBe(true)
+    }
+  })
+
+  test('ラッパーの選択肢が値を取るかはラッパーごとに決める', () => {
+    for (const command of ['sudo -n osascript -e x', 'sudo -E cliclick c:1,1', 'sudo -s xdotool key a', 'sudo -u me osascript -e x', 'xargs -n 1 osascript -e x', 'exec -a alias osascript -e x', 'sudo --user me osascript -e x', 'xargs --max-args 1 cliclick c:1,1', 'sudo -R /jail osascript -e x', 'sudo -T 5 cliclick c:1,1', 'xargs --process-slot-var X osascript -e x']) {
+      expect(takesInputInBash(command)).toBe(true)
+    }
+    for (const command of ['sudo /bin/sh -c "osascript -e x"', 'sudo /usr/bin/env osascript -e x', 'sudo /usr/bin/screencapture -i a.png', 'if sudo -R /jail osascript -e x; then :; fi', '! sudo -T 5 cliclick c:1,1', 'sudo --login-class staff osascript -e x', 'sudo -x foo xdotool key a']) expect(takesInputInBash(command)).toBe(true)
+    for (const command of ['sudo -u me ls -la', 'command -v osascript', 'grep -n osascript script.sh']) expect(takesInputInBash(command)).toBe(false)
+  })
+
+  test('command の -v・-V は実行ではなく検索', () => {
+    for (const command of ['command -v osascript', 'command -V cliclick']) expect(takesInputInBash(command)).toBe(false)
+    expect(takesInputInBash('command osascript -e x')).toBe(true)
+  })
+
+  test('シェルの予約語の後のコマンドを見る', () => {
+    for (const command of ['if true; then osascript -e x; fi', 'for i in 1 2; do cliclick c:1,1; done', '{ xdotool key a; }', '! osascript -e x', 'while true; do xdotool key a; done', 'time osascript -e x']) {
+      expect(takesInputInBash(command)).toBe(true)
+    }
+    expect(takesInputInBash('if true; then echo osascript; fi')).toBe(false)
+  })
+
+  test('語の先頭のコメントを行末まで読み飛ばす', () => {
+    expect(takesInputInBash("# it's the click step\nosascript -e 'x'")).toBe(true)
+    expect(takesInputInBash('echo a#b; osascript -e x')).toBe(true)
+    expect(takesInputInBash('echo a#b # osascript -e x')).toBe(false)
+    expect(takesInputInBash("# <<EOF\nosascript -e x")).toBe(true)
+  })
+
+  test('ヒアストリングを heredoc と誤認しない', () => {
+    expect(takesInputInBash("grep x <<<hello\nosascript -e 'x'")).toBe(true)
+    expect(takesInputInBash('grep x <<<hello')).toBe(false)
+  })
+
+  test('heredoc の同じパイプの後続に本文を実行するものがあるかを見る', () => {
+    expect(takesInputInBash("cat <<'EOF' | bash\nosascript -e 'x'\nEOF")).toBe(true)
+    expect(takesInputInBash("cat <<'EOF' | osascript\nreturn 1\nEOF")).toBe(true)
+    expect(takesInputInBash("cat <<'EOF' 2>&1 | bash\nosascript -e x\nEOF")).toBe(true)
+    expect(takesInputInBash("cat > f <<'EOF'\nosascript -e 'x'\nEOF")).toBe(false)
+    expect(takesInputInBash("cat <<'EOF'; bash -c 'echo ok'\nosascript -e 'x'\nEOF")).toBe(false)
+    expect(takesInputInBash("cat <<'EOF' # | bash\nosascript -e x\nEOF")).toBe(false)
+  })
+
+  test('シェルの短い選択肢をまとめた中の c も読む', () => {
+    for (const command of ["bash -lc 'osascript -e x'", 'sh -ec "xdotool key a"', "zsh -ic 'cliclick c:1,1'"]) expect(takesInputInBash(command)).toBe(true)
+    expect(takesInputInBash("bash -l 'echo osascript'")).toBe(false)
   })
 
   test('窓か範囲を指して撮るだけの screencapture は、鍵が無くても通す', async ($, on) => {

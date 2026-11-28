@@ -11,6 +11,9 @@
 //   そのときは名前が空かないので、lib/hc.mjs の successorName の名前にする。
 // - 新しい端末は呼び出し元の子にしない（--no-parent）。子にすると、呼び出し元が終わったときに一緒に終わる。
 
+import { dialogOpen } from './lib/screen.mjs';
+import { readScreen } from './lib/hc.mjs';
+import { existsSync } from 'node:fs';
 import { reporter, takeFlag } from './lib/cli.mjs';
 import { handoffProblem } from './lib/handoff.mjs';
 import {
@@ -23,6 +26,7 @@ import {
   isClaude,
   lastStartNote,
   liveNames,
+  machineOf,
   markRestarting,
   prompt,
   selfId,
@@ -64,6 +68,7 @@ function clearRestarting() {
 
 const problem = handoffProblem(handoff, '対象の端末');
 if (problem) skip(problem);
+if (machineOf(target)) skip('端末は別のマシンにある。そのマシンのセッションで再起動するか、hub にそのマシンでセッションを起動してもらうこと');
 if (target === selfId()) skip('対象は自分の端末。自分の再起動は restart-self.mjs で行う');
 // 時間がかかりうるので、対象の状態を確かめる前に済ませる
 const note = paceNote();
@@ -82,6 +87,10 @@ const sid = sessionOf(info);
 if (!sid) skip(`端末 ${target} のセッションIDを claude agents から引けない（${hcError() || '前景の pid に当たる項目が無い'}）。resume の手がかりが無いまま終了させたくないので止まる`);
 const cwd = cwdOf(info);
 if (!cwd) skip(`端末 ${target} の cwd を hc から取れない。新しい端末をどこで起動するか決められないので止まる`);
+
+if (dialogOpen(readScreen(target))) skip('選択式の問い（確認画面）が開いている');
+
+if (!existsSync(cwd)) skip(`端末 ${target} の cwd が無い: ${cwd}`);
 
 if (!allowBackground) {
   const hint = backgroundWorkHint(target);
@@ -128,9 +137,11 @@ if (!prompt(target, '/exit')) {
 
 // 終わったかは、端末が終わったか（claude が端末のプログラム）、前景が claude でなくなったか（シェルに戻った）で見る。
 let after = null;
+let wasWorking = statusOf(info) === 'working';
 for (let i = 0; i < 60; i += 1) {
   sleep(1);
   const now = terminalInfo(target);
+  if (now && statusOf(now) === 'working') wasWorking = true;
   if (now && !isClaude(now)) {
     after = now;
     break;
@@ -139,7 +150,7 @@ for (let i = 0; i < 60; i += 1) {
     fail(`/exit の後に確認画面が出ている。端末で答えてもらうこと。キャンセルして claude が動き続けているなら何も変わっていないので、同じ引数で呼び直せる。終了したら、${recovery}`);
   }
 }
-if (!after) fail(`60秒たっても claude が終わらない。'hc read ${target}' で見ること。終了していたら、${recovery}`);
+if (!after) fail(`60秒たっても claude が終わらない。'hc read ${target}' で見ること。${wasWorking ? '/exit はキューに入り、現在のターンの後に効く可能性がある。再実行する前に後でもう一度確かめること。' : ''}終了していたら、${recovery}`);
 
 // 端末ごと終わったなら外して名前を空ける。シェルに戻った端末は残す。
 let newName = info.name ?? '';
@@ -159,7 +170,7 @@ if (wanted && !newName) log(`名前 ${wanted} とその代わりの名前がど�
 log('起動');
 const created = startClaude({ cwd, name: newName, request, replaces: info.address, flags });
 if (lastStartNote()) log(lastStartNote());
-if (!created) fail(`新しい端末で claude を起動できなかった（${hcError()}）。${recovery}`);
+if (!created) fail(`新しい端末で claude を起動できなかった（${hcError()}）。${after.state === 'finished' ? `タイルの保持が残っていれば 'rencon handover release ${target}' で外すこと。` : ''}${recovery}`);
 log(`新しい端末 ${created}${newName ? `（${newName}）` : ''}`);
 const started = waitForStart(created);
 if (started.result === 'exited') fail(`新しい端末 ${created} の claude がすぐに終わった（'hc read ${created}' で理由を見る）。${recovery}`);

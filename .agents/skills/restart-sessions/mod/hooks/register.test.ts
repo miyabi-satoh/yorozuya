@@ -40,6 +40,8 @@ function setUp(
     hcFail?: boolean
     cwd?: string | null
     pane?: string
+    agentName?: string
+    store?: Map<string, unknown>
   },
 ) {
   const sent: string[] = []
@@ -53,7 +55,7 @@ function setUp(
   on('fs.read', () => ({ value: '{"watch":{"threshold":50}}' }))
   on('session.usage', () => ({ value: { context: { percent: s.percent, tokens: s.tokens, window: 1000000 } } }))
   on('session.version', () => ({ value: { version: '2.1.289' } }))
-  const store = new Map<string, unknown>()
+  const store = s.store ?? new Map<string, unknown>()
   on('store.get', (_$: any, e: any) => ({ value: store.get(e.key) }))
   on('store.set', (_$: any, e: any) => {
     store.set(e.key, e.value)
@@ -68,7 +70,7 @@ function setUp(
       return { value: { exitCode: 0, stdout: JSON.stringify({ text: s.screen ?? '', complete: true, how: 'screen' }), stderr: '' } }
     }
     if (e.argv[1] === 'agent') {
-      const agents = [{ name: 'knowledge-f3', pane_id: s.pane ?? 'w1:p1' }]
+      const agents = [{ name: s.agentName ?? 'knowledge-f3', pane_id: s.pane ?? 'w1:p1' }]
       return { value: { exitCode: 0, stdout: JSON.stringify({ result: { agents } }), stderr: '' } }
     }
     return { value: { exitCode: 0, stdout: s.screen ?? '', stderr: '' } }
@@ -85,6 +87,18 @@ function setUp(
 const turn = { answer: 'a', reason: 'answer', durationMs: 1, isAborted: false, turnId: 't' } as const
 
 describe('ターンの終わりの見張り', () => {
+  test('会話だけの goal は知らせを止めず、10ポイント増えれば再び知らせる', async ($, on) => {
+    mock.clock(on, { now: 0 })
+    const state = { percent: 50, screen: screenWith('', '/goal active') }
+    const sent = setUp(on, state)
+    await $.turn.complete(turn)
+    state.percent = 59
+    await $.turn.complete(turn)
+    expect(sent.length).toBe(1)
+    state.percent = 60
+    await $.turn.complete(turn)
+    expect(sent.length).toBe(2)
+  })
   test('閾値を超えたら、自分を再起動するよう1回だけ知らせる', async ($, on) => {
     mock.clock(on, { now: 0 })
     const sent = setUp(on, { percent: 52 })
@@ -111,6 +125,23 @@ describe('ターンの終わりの見張り', () => {
     expect(sent[0]).toContain('UPDATE 2.1.289 → 2.1.290')
   })
 
+  test('別の名前の通知済みの版は、このセッションの UPDATE を止めない', async ($, on) => {
+    mock.clock(on, { now: 0 })
+    const store = new Map<string, unknown>([['update:other', '2.1.290']])
+    const sent = setUp(on, { percent: 10, installed: '2.1.290', agentName: 'here', store })
+    await $.turn.complete(turn)
+    expect(sent.length).toBe(1)
+    expect(store.get('update:here')).toBe('2.1.290')
+  })
+
+  test('同じ名前で同じ版は再起動後に知らせ直さない', async ($, on) => {
+    mock.clock(on, { now: 0 })
+    const store = new Map<string, unknown>([['update:here', '2.1.290']])
+    const sent = setUp(on, { percent: 10, installed: '2.1.290', agentName: 'here', store })
+    await $.turn.complete(turn)
+    expect(sent).toEqual([])
+  })
+
   test('自動更新に失敗していれば、名前と版の組みごとに1回だけ再起動を知らせる（再起動で新しいペインに移っても繰り返さない）', async ($, on) => {
     mock.clock(on, { now: 0 })
     // 空白がノーブレークスペースで来る画面でも当たる。
@@ -133,7 +164,7 @@ describe('ターンの終わりの見張り', () => {
 
   test('/goal が動いている間と、サブエージェントのターンでは知らせない', async ($, on) => {
     mock.clock(on, { now: 0 })
-    const sent = setUp(on, { percent: 80, screen: '… /goal active (5m) …' })
+    const sent = setUp(on, { percent: 80, screen: screenWith('/goal active (5m)') })
     await $.turn.complete(turn)
     await $.turn.complete({ ...turn, agentId: 'a1' } as any)
     expect(sent).toEqual([])
@@ -158,7 +189,7 @@ test('hc の画面は read --json の text、作業フォルダーは get --json
 describe('hc の端末での見張り', () => {
   test('HERDR_ENV も入っていても hc の端末として見て、画面は hc で読む', async ($, on) => {
     mock.clock(on, { now: 0 })
-    const sent = setUp(on, { percent: 80, hc: true, screen: '… /goal active (5m) …' })
+    const sent = setUp(on, { percent: 80, hc: true, screen: screenWith('/goal active (5m)') })
     await $.turn.complete(turn)
     expect(sent).toEqual([])
     expect(sent.runs.some(argv => argv[0] === 'node' && argv[3] === 'read' && argv.includes('t3'))).toBe(true)
@@ -206,7 +237,7 @@ describe('放置の /clear', () => {
   test('最後の応答から75分たち、10万トークン以上なら、idle-clear-self.mjs を1回だけ流す', async ($, on) => {
     const sent = setUp(on, { percent: 20, tokens: 200_000 })
     const clock = mock.clock(on, { now: 0 })
-    await ($.session as any).start({ source: 'startup', cwd: '/w' })
+    await ($.session as any).start({ source: 'startup', isInteractive: true, cwd: '/w' })
     await clock.advance(IDLE_AFTER_MS - 60_000)
     expect(idleRuns(sent.runs)).toEqual([])
     await clock.advance(120_000)
@@ -217,7 +248,7 @@ describe('放置の /clear', () => {
   test('hc の端末でも流す', async ($, on) => {
     const sent = setUp(on, { percent: 20, tokens: 200_000, hc: true })
     const clock = mock.clock(on, { now: 0 })
-    await ($.session as any).start({ source: 'startup', cwd: '/w' })
+    await ($.session as any).start({ source: 'startup', isInteractive: true, cwd: '/w' })
     await clock.advance(IDLE_AFTER_MS + 120_000)
     expect(idleRuns(sent.runs).length).toBe(1)
   })
@@ -225,8 +256,18 @@ describe('放置の /clear', () => {
   test('小さい会話では流さない', async ($, on) => {
     const sent = setUp(on, { percent: 5, tokens: 50_000 })
     const clock = mock.clock(on, { now: 0 })
-    await ($.session as any).start({ source: 'startup', cwd: '/w' })
+    await ($.session as any).start({ source: 'startup', isInteractive: true, cwd: '/w' })
     await clock.advance(IDLE_AFTER_MS + 120_000)
     expect(idleRuns(sent.runs)).toEqual([])
   })
+})
+
+test('非対話のセッションではターンの終わりも見張らない', async ($, on) => {
+  const sent = setUp(on, { percent: 80, tokens: 200_000 })
+  const clock = mock.clock(on, { now: 0 })
+  await ($.session as any).start({ source: 'startup', isInteractive: false, cwd: '/w' })
+  await $.turn.complete(turn)
+  await clock.advance(IDLE_AFTER_MS + 120_000)
+  expect(sent).toEqual([])
+  expect(sent.runs).toEqual([])
 })

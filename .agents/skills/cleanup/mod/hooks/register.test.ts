@@ -80,10 +80,17 @@ describe('shouldNotify', () => {
 })
 
 describe('見張り', () => {
+  test('非対話のセッションでは測らない', async ($, on) => {
+    const sent = setUp(on, [1])
+    const clock = mock.clock(on, { now: 0 })
+    await ($.session as any).start({ source: 'startup', isInteractive: false, cwd: '/Users/me/Works/app' })
+    await clock.advance(120_000)
+    expect(sent.length).toBe(0)
+  })
   test('ラインを切ったら1回だけ知らせ、戻るまで知らせ直さない', async ($, on) => {
     const sent = setUp(on, [25, 25, 18, 15, 25])
     const clock = mock.clock(on, { now: 0 })
-    await ($.session as any).start({ source: 'startup', cwd: '/Users/me/Works/app' })
+    await ($.session as any).start({ source: 'startup', isInteractive: true, cwd: '/Users/me/Works/app' })
     await clock.advance(FIRST)
     await clock.advance(TICK)
     expect(sent).toEqual([])
@@ -101,7 +108,7 @@ describe('見張り', () => {
   test('Windows では df を使わず PowerShell で測る', async ($, on) => {
     const sent = setUp(on, [25, 18], { windows: true })
     const clock = mock.clock(on, { now: 0 })
-    await ($.session as any).start({ source: 'startup', cwd: '/Users/me/Works/app' })
+    await ($.session as any).start({ source: 'startup', isInteractive: true, cwd: '/Users/me/Works/app' })
     await clock.advance(FIRST)
     expect(sent).toEqual([])
     await clock.advance(TICK)
@@ -112,7 +119,7 @@ describe('見張り', () => {
   test('30GB に戻れば、次にラインを切ったときにまた知らせる', async ($, on) => {
     const sent = setUp(on, [25, 18, 31, 19])
     const clock = mock.clock(on, { now: 0 })
-    await ($.session as any).start({ source: 'startup', cwd: '/Users/me/Works/app' })
+    await ($.session as any).start({ source: 'startup', isInteractive: true, cwd: '/Users/me/Works/app' })
     await clock.advance(FIRST)
     for (let i = 0; i < 3; i++) await clock.advance(TICK)
     expect(sent.length).toBe(2)
@@ -121,7 +128,7 @@ describe('見張り', () => {
   test('戻らないままでも、1日たてば知らせ直す', async ($, on) => {
     const sent = setUp(on, Array(200).fill(15))
     const clock = mock.clock(on, { now: 0 })
-    await ($.session as any).start({ source: 'startup', cwd: '/Users/me/Works/app' })
+    await ($.session as any).start({ source: 'startup', isInteractive: true, cwd: '/Users/me/Works/app' })
     await clock.advance(FIRST)
     expect(sent.length).toBe(1)
     // 最初の知らせは起動の1分後。1440分の見張りではまだ1439分なので知らせず、1450分で知らせ直す。
@@ -134,7 +141,7 @@ describe('見張り', () => {
   test('前に知らせたときより2GB減っていれば、1時間たったところで知らせ直す', async ($, on) => {
     const sent = setUp(on, [15, ...Array(5).fill(14), 13, 13])
     const clock = mock.clock(on, { now: 0 })
-    await ($.session as any).start({ source: 'startup', cwd: '/Users/me/Works/app' })
+    await ($.session as any).start({ source: 'startup', isInteractive: true, cwd: '/Users/me/Works/app' })
     await clock.advance(FIRST)
     expect(sent.length).toBe(1)
     // 50分までは1GB減っただけ。60分で2GB減ったが、知らせてから59分なのでまだ知らせない。
@@ -148,7 +155,7 @@ describe('見張り', () => {
   test('共有のキャッシュの担当のリポジトリには、それも片付けるよう書き添える', async ($, on) => {
     const sent = setUp(on, [25, 15], { repo: '/Users/me/Works/knowledge', config: '{"diskWatch":{"sharedCachesRepo":"knowledge"}}' })
     const clock = mock.clock(on, { now: 0 })
-    await ($.session as any).start({ source: 'startup', cwd: '/Users/me/Works/knowledge' })
+    await ($.session as any).start({ source: 'startup', isInteractive: true, cwd: '/Users/me/Works/knowledge' })
     await clock.advance(FIRST)
     await clock.advance(TICK)
     expect(sent.length).toBe(1)

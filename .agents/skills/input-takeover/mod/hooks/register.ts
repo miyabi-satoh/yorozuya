@@ -1,36 +1,205 @@
 import type { EngineInterface, Register } from 'claude-code'
 
-// キーボード・マウス・フォーカスを奪う操作。Bash は引用符の外のコマンド名、PowerShell は使う API で見分ける。
-// heredoc の本文は見る。`bash <<EOF`・`ssh host <<EOF` の本文は実行されるので、見ないと素通りになる。
-// screencapture は、窓（-l）か範囲（-R）を指して撮るだけなら、ポインタもキーもフォーカスも使わないので止めない。
-// 指さない形（クリックを待つことがある）と、CAPTURE_TAKES_FOCUS の選択肢を付けた形は止める。
-// 同じコマンドで open を流すときは、窓を前に出してフォーカスを奪うので止める。
-export const takesInputInBash = (command: string) => {
-  // 行末の \ で続けた行は1つのコマンドなので、つないでから読む。2>&1 などの & で引数の読み取りを切らないよう、リダイレクトは外す。
-  const bare = command.replace(BASH_QUOTED, "''").replace(/\\\n/g, ' ').replace(/\d*>&(?:\d+|-)|&>>?/g, ' ')
-  // 語の頭から、/usr/bin/open のようなパスを挟んで名前が来て、名前の後が区切りの形だけを拾う。
-  // osascript.md・open.log のような語は、その道具を流していない。
-  const named = (names: string, rest = '') => new RegExp(`(?:^|[\\s;&|(\`])(?:\\S*/)?(?:${names})(?=[\\s;&|)]|$)${rest}`, 'gm')
-  if (named('osascript|cliclick|xdotool').test(bare)) return true
-  if (!named('screencapture').test(bare)) return false
-  if (named('open').test(bare)) return true
-  // -l $(node win.mjs | head -1) のように、値を作る置き換えの中の | や ; で引数の読み取りを切らないよう、
-  // 置き換えは内側から1語に縮めてから読む。縮めきれない形（中に括弧がある・閉じていない）と、
-  // 置き換えの中で screencapture を流す形は、引数を読み違えうるので止める側に倒す。
-  let flat = bare
-  let nested = false
-  for (let prev = ''; prev !== flat; ) {
-    prev = flat
-    flat = flat.replace(/\$\(([^()]*)\)|`([^`]*)`/g, (match, inner = '', ticked = '') => {
-      if (named('screencapture').test(inner || ticked)) nested = true
-      return 'X'
-    })
+// キーボード・マウス・フォーカスを奪う操作。Bash はコマンドの位置、PowerShell は使う API で見分ける。
+type SimpleCommand = { words: string[]; nested: boolean }
+const basename = (word: string) => word.split(/[\\/]/).pop() ?? word
+const INPUT_TOOLS = new Set(['osascript', 'cliclick', 'xdotool', 'ydotool', 'wtype'])
+const SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'fish'])
+const KEYWORDS = new Set(['then', 'do', 'else', 'elif', 'if', 'while', 'until', '!', '{'])
+const WRAPPERS = new Set(['sudo', 'xargs', 'env', 'timeout', 'nohup', 'exec', 'time', 'command', 'doas', 'nice'])
+
+// 引用された引数は1語に保ち、コマンド置換は別のコマンドとして読む。
+function simpleCommands(source: string): SimpleCommand[] {
+  const commands: SimpleCommand[] = []
+  let words: string[] = [], word = '', quoted = false
+  const pushWord = () => { if (word || quoted) words.push(word); word = ''; quoted = false }
+  const finish = () => { pushWord(); if (words.length) commands.push({ words, nested: false }); words = [] }
+  for (let i = 0; i < source.length; i++) {
+    const c = source[i]
+    if (c === '\\' && source[i + 1] === '\n') { i++; continue }
+    if (c === '\\' && i + 1 < source.length) { word += source[++i]; continue }
+    if (c === '#' && !word && !quoted) {
+      while (i < source.length && source[i] !== '\n') i++
+      finish()
+      continue
+    }
+    if (c === "'" || c === '"') {
+      const quote = c; quoted = true
+      let content = ''
+      while (++i < source.length && source[i] !== quote) {
+        if (quote === '"' && source[i] === '\\' && i + 1 < source.length) content += source[++i]
+        else content += source[i]
+      }
+      if (quote === '"' && /\$\(|`/.test(content)) commands.push(...simpleCommands(`echo ${content}`).filter(cmd => cmd.nested))
+      word += content
+      continue
+    }
+    if ((c === '$' && source[i + 1] === '(') || c === '`' || ((c === '<' || c === '>') && source[i + 1] === '(')) {
+      const tick = c === '`', start = i + (tick ? 1 : 2)
+      let depth = 1, j = start, quote = ''
+      for (; j < source.length; j++) {
+        const ch = source[j]
+        if (ch === '\\') { j++; continue }
+        if (quote) { if (ch === quote) quote = ''; continue }
+        if (ch === "'" || ch === '"') { quote = ch; continue }
+        if (tick ? ch === '`' : ch === ')') { if (--depth === 0) break }
+        else if (!tick && ch === '(') depth++
+      }
+      commands.push(...simpleCommands(source.slice(start, j)).map(cmd => ({ ...cmd, nested: true })))
+      word += 'X'
+      i = j
+      continue
+    }
+    if (/\s/.test(c)) { pushWord(); if (c === '\n') finish(); continue }
+    if (';&|()'.includes(c)) {
+      // 2>&1 と >&- はリダイレクトで、コマンドの区切りではない。
+      if (c === '&' && source[i - 1] === '>') { word += c; continue }
+      finish(); continue
+    }
+    word += c
   }
-  // <(…)・>(…) も中の区切りで引数を切るので、含むものは止める側に倒す。
-  if (nested || /\$\(|`|[<>]\(/.test(flat)) return true
-  // 引数は ) で切らない（読みすぎても、止める側に倒れるだけ）。
-  const captures = [...flat.matchAll(named('screencapture', '([^;&|\\n]*)'))]
-  return captures.some(([, args]) => !capturesWithoutInput(args ?? ''))
+  finish()
+  return commands
+}
+
+function commandWords(words: string[]) {
+  const valueOptions: Record<string, string[]> = {
+    sudo: ['-u', '-g', '-C', '-h', '-p', '-r', '-t', '-U', '-D', '--user', '--group', '--close-from', '--host', '--prompt', '--role', '--type', '--other-user', '--chdir'],
+    xargs: ['-n', '-P', '-I', '-s', '-L', '-a', '-d', '-E', '--max-args', '--max-procs', '--max-chars', '--max-lines', '--arg-file', '--delimiter'],
+    exec: ['-a'],
+    nohup: [], command: [], time: [],
+  }
+  let i = 0
+  while (i < words.length) {
+    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[i])) { i++; continue }
+    const name = basename(words[i])
+    if (KEYWORDS.has(name)) { i++; continue }
+    if (name === 'env') {
+      i++
+      while (i < words.length && (words[i].startsWith('-') || /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[i]))) {
+        if (['-u', '--unset', '-C', '--chdir'].includes(words[i])) i++
+        i++
+      }
+      continue
+    }
+    if (name === 'timeout') {
+      i++
+      while (words[i]?.startsWith('-')) { if (['-s', '--signal', '-k', '--kill-after'].includes(words[i])) i++; i++ }
+      i++; continue
+    }
+    if (Object.hasOwn(valueOptions, name)) {
+      i++
+      while (words[i]?.startsWith('-')) {
+        if (name === 'command' && /^-[a-zA-Z]*[vV]/.test(words[i])) return []
+        if (valueOptions[name].includes(words[i])) i++
+        i++
+      }
+      continue
+    }
+    break
+  }
+  return words.slice(i)
+}
+
+// mod の実行環境は Node の Buffer を持たないので、PowerShell の UTF-16LE をここで読む。
+function decodePowerShell(text: string) {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+  const bytes: number[] = []
+  let bits = 0, value = 0
+  for (const char of text.replace(/\s/g, '')) {
+    if (char === '=') break
+    const digit = alphabet.indexOf(char)
+    if (digit < 0) return ''
+    value = (value << 6) | digit
+    bits += 6
+    if (bits >= 8) { bits -= 8; bytes.push((value >> bits) & 255) }
+  }
+  let decoded = ''
+  for (let i = 0; i + 1 < bytes.length; i += 2) decoded += String.fromCharCode(bytes[i] | (bytes[i + 1] << 8))
+  return decoded
+}
+
+export const takesInputInBash = (command: string): boolean => {
+  // heredoc は受け手が実行する場合だけ本文を見る。ファイルへ写す本文はコマンドではない。
+  const lines = command.split('\n'), kept: string[] = []
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    kept.push(line)
+    const heredocs = [...line.matchAll(/(?<!<)<<(?!<)(-?)\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\2/g)].filter(match => {
+      let quote = ''
+      for (let j = 0; j < (match.index ?? 0); j++) {
+        if (line[j] === '\\' && quote !== "'") { j++; continue }
+        if (!quote && line[j] === '#' && (j === 0 || /[\s;&|()]/.test(line[j - 1]))) return false
+        if (quote && line[j] === quote) quote = ''
+        else if (!quote && (line[j] === "'" || line[j] === '"')) quote = line[j]
+      }
+      return !quote
+    })
+    for (const match of heredocs) {
+      const cmds = simpleCommands(line.slice(0, match.index))
+      const receiver = basename(commandWords(cmds[cmds.length - 1]?.words ?? [])[0] ?? '')
+      // 同じパイプの後続も本文を受け取る。;・&&・|| の後は別のコマンド。
+      const suffix = line.slice((match.index ?? 0) + match[0].length)
+      let pipelineEnd = suffix.length, pipe = -1, quote = ''
+      for (let j = 0; j < suffix.length; j++) {
+        const c = suffix[j]
+        if (c === '\\' && quote !== "'") { j++; continue }
+        if (quote) { if (c === quote) quote = ''; continue }
+        if (c === "'" || c === '"') { quote = c; continue }
+        if (c === '#' && (j === 0 || /[\s;&|()]/.test(suffix[j - 1]))) { pipelineEnd = j; break }
+        if (c === '&' && (suffix[j - 1] === '>' || suffix[j + 1] === '>')) continue
+        if (c === ';' || c === '&' || (c === '|' && suffix[j + 1] === '|')) { pipelineEnd = j; break }
+        if (c === '|' && pipe < 0) pipe = j
+      }
+      const pipeline = suffix.slice(0, pipelineEnd)
+      const downstream = pipe < 0 ? [] : simpleCommands(pipeline.slice(pipe + 1)).map(cmd => basename(commandWords(cmd.words)[0] ?? ''))
+      const body: string[] = []
+      while (++i < lines.length && (match[1] ? lines[i].replace(/^\t+/, '') : lines[i]) !== match[3]) body.push(lines[i])
+      const receivers = [receiver, ...downstream]
+      if (receivers.some(name => INPUT_TOOLS.has(name))) return true
+      if (receivers.some(name => SHELLS.has(name) || name === 'ssh') && takesInputInBash(body.join('\n'))) return true
+    }
+  }
+  const cmds = simpleCommands(kept.join('\n'))
+  let capture = false, open = false
+  // 1つのコマンドを、コマンドの語と引数から見る。
+  const check = (raw: string, args: string[], nested: boolean) => {
+    const name = basename(raw).toLowerCase()
+    if (INPUT_TOOLS.has(name) || (name === 'hyprctl' && args[0] === 'dispatch')) return true
+    if (name === 'open') open = true
+    if (name === 'screencapture') {
+      capture = true
+      if (nested || !capturesWithoutInput(args.join(' '))) return true
+    }
+    const scriptFlag = args.findIndex(arg => /^-[a-zA-Z]*c[a-zA-Z]*$/.test(arg))
+    if ((SHELLS.has(name) || name === 'eval') && (name === 'eval' || scriptFlag >= 0)) {
+      const inner = name === 'eval' ? args.join(' ') : args[scriptFlag + 1]
+      if (inner && takesInputInBash(inner)) return true
+    }
+    if (/^(?:powershell|pwsh)(?:\.exe)?$/.test(name)) {
+      const index = args.findIndex(arg => /^-(?:c|command|encodedcommand|enc|e)$/i.test(arg))
+      if (index >= 0 && args[index + 1]) {
+        const encoded = /^-(?:encodedcommand|enc|e)$/i.test(args[index])
+        const inner = encoded ? decodePowerShell(args[index + 1]) : args.slice(index + 1).join(' ')
+        if (takesInputInPowerShell(inner)) return true
+      }
+    }
+    return false
+  }
+  for (const item of cmds) {
+    const [raw = '', ...args] = commandWords(item.words)
+    if (check(raw, args, item.nested)) return true
+    // ラッパー（sudo・xargs など）の値を取る選択肢は覚えきれず、読み違えると後ろのコマンドを見落とす。
+    // そこで、ラッパーの後ろの、- で始まらない語のそれぞれから始まるコマンドも同じ規則で見る（止める側に倒す）。
+    // sudo grep osascript f のように、ラッパーの下のコマンドの引数に道具の名前があるだけの形も止まるが、まれで、鍵を求めるだけで済む。
+    const first = item.words.findIndex(word => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(word) && !KEYWORDS.has(word))
+    const wrapper = first < 0 ? '' : basename(item.words[first])
+    if (!WRAPPERS.has(wrapper) || (wrapper === 'command' && /^-[a-zA-Z]*[vV]/.test(item.words[first + 1] ?? ''))) continue
+    for (let j = first + 1; j < item.words.length; j++) {
+      if (!item.words[j].startsWith('-') && check(item.words[j], item.words.slice(j + 1), item.nested)) return true
+    }
+  }
+  return capture && (open || /[<>]\(/.test(command))
 }
 
 // screencapture -h の選択肢のうち、選ばせる（-i・-w・-s・-W・-J・-U）、撮った後に開く・画面を出す（-P・-B・-M・-u・-d）、
@@ -53,9 +222,6 @@ function capturesWithoutInput(args: string) {
   return target
 }
 export const takesInputInPowerShell = (command: string) => /SendKeys|System\.Windows\.Automation|UIAutomation/i.test(command)
-
-// 引用符の中（コミットメッセージなど）は見ない。
-const BASH_QUOTED = /'[^']*'|"(?:\\.|[^"\\])*"/g
 
 // 鍵は machine-locks skill の土台（scripts/locks.cjs）が、同じマシンのセッションどうしで取り合う「input」の鍵。
 // 持ち主が外さずに落ちても、見込みの時刻（until）を過ぎるか、持ち主の Claude Code のプロセスが無くなれば外れたとみなす。
@@ -313,6 +479,7 @@ async function describeLock($: EngineInterface, lock: InputLock) {
 async function heldByMessage($: EngineInterface, lock: InputLock) {
   const held = await describeLock($, lock)
   if (lock.root === (await $.session.root())) {
+    if ((await lockStatus($)).alive === true) return `同じフォルダの別のセッションが操作中です（${held}）。鍵が外れてから流し直してください。`
     return `このフォルダのセッションが置いた鍵が効いています（${held}）。立ち上がり直す前の自分の鍵なら、${TOOL} の start を呼び直して引き継いでから、流し直してください。`
   }
   return `ほかのセッションが、入力を奪う操作の途中です（${held}）。同時に動かすと、クリックや入力が互いの窓に入って両方とも失敗します。鍵が外れるか見込みの時間を過ぎてから、${TOOL} の start で鍵を置いて流し直してください。`
@@ -341,7 +508,7 @@ async function start($: EngineInterface, input: { what?: unknown; minutes?: unkn
   const hasNotes = Array.isArray(notes) && notes.length > 0
   const status = await lockStatus($)
   const held = status.lock ?? undefined
-  if (held !== undefined && !isOwn(held, session, root)) return { deny: await heldByMessage($, held) }
+  if (held !== undefined && (!isOwn(held, session, root) || (held.session !== session && status.alive === true))) return { deny: await heldByMessage($, held) }
   // 問わないのは、このセッションの鍵が効いているときだけ。同じ what の置き直しは、了承を受けた操作が延びたときなので問わない。別の what は、了承から APPROVAL_TTL_MS のうちなら問わない。
   // 効いている鍵が無ければ（end で返した後・切れた後）、了承のうちでも問う（上の APPROVAL_TTL_MS の ADR）。了承の記録は消さず、この条件で問い直させる。
   // 同じフォルダのほかのセッションの鍵（立ち上がり直す前の自分か、同じフォルダで動くほかのセッション）の引き継ぎには、了承のうちでも取り直す。そのセッションのユーザーの操作の最中かもしれないため。

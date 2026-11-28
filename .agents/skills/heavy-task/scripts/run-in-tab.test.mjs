@@ -8,6 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { shellFor } from './shell-choice.mjs';
 
 const script = fileURLToPath(new URL('./run-in-tab.mjs', import.meta.url));
 const fakeTools = fileURLToPath(new URL('./run-in-tab.fake-tools.cjs', import.meta.url));
@@ -16,8 +17,9 @@ const windows = process.platform === 'win32';
 // POSIX のシグナルを送る・受けるテスト。Windows の Node は SIGHUP などを送ると相手をすぐ終わらせ、受けた側のハンドラーは動かない
 // （Windows でタブが閉じたときの扱いは run-in-tab.mjs の STATUS_CONTROL_C_EXIT で、ここでは試せない）。
 const posixSignals = { skip: windows && 'Windows には POSIX のシグナルが無い' };
-// タブの中のシェルは、Windows では pwsh（run-in-tab.mjs の shellFor）。
-const shellCommand = (posix, pwsh) => (windows ? pwsh : posix);
+// Windows でも Git Bash があれば Bash の構文で試す。
+const usesPowerShell = windows && shellFor('', process.platform, process.env, fs.existsSync)[0] === 'pwsh';
+const shellCommand = (posix, pwsh) => (usesPowerShell ? pwsh : posix);
 
 // 偽物の hc・herdr を置いた bin と、偽物が書き残す state。中身は run-in-tab.fake-tools.cjs。
 function fakeBin(tool) {

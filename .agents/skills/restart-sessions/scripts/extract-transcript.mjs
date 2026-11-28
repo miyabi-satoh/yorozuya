@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // 旧セッションのJSONLトランスクリプト（Claude Codeが自動保存している会話の生ログ）から、
-// ユーザー・アシスタントの発言テキストだけを抜き出す。ツール実行結果・thinkingは含めない
+// ユーザー・アシスタントの発言テキストだけを抜き出す。選択式の問いと回答以外のツール実行結果・thinkingは含めない
 // （量が大きい上、再起動の引き継ぎに要るのは「何が話されたか」であって「何を実行したか」ではないため）。
 // 繰り返し出るシステムリマインダー（<system-reminder>...）はボイラープレートなので落とす。
 //
@@ -76,6 +76,7 @@ const LOCAL_COMMAND = /^<(?:local-command-caveat|local-command-stdout|local-comm
 
 const lines = readFileSync(jsonlPath, 'utf8').split('\n');
 const entries = [];
+const questions = new Set();
 for (const line of lines) {
   if (!line.trim()) continue;
   let record;
@@ -92,9 +93,18 @@ for (const line of lines) {
   if (typeof content === 'string') {
     texts.push(content);
   } else if (Array.isArray(content)) {
-    // text 以外（tool_use・tool_result・thinking・image）は落とす。
     for (const block of content) {
       if (block && block.type === 'text' && typeof block.text === 'string') texts.push(block.text);
+      else if (record.type === 'assistant' && block?.type === 'tool_use' && block.name === 'AskUserQuestion' && block.id) {
+        questions.add(block.id);
+        const items = Array.isArray(block.input?.questions) ? block.input.questions : [];
+        const text = items.map((q) => [q.question, ...(Array.isArray(q.options) ? q.options.map((o) => `- ${o.label}`) : [])].filter(Boolean).join('\n')).join('\n\n');
+        if (text) texts.push(text);
+      } else if (record.type === 'user' && block?.type === 'tool_result' && questions.has(block.tool_use_id)) {
+        const answer = typeof block.content === 'string' ? block.content : Array.isArray(block.content) ? block.content.map((part) => part?.text ?? '').join('\n') : '';
+        texts.push(answer || '選択式の問いへの回答は取り消されたか、結果が空だった。');
+        questions.delete(block.tool_use_id);
+      }
     }
   }
   for (const raw of texts) {
@@ -188,7 +198,7 @@ const NESTED = /\n---\n\n# (?:前の資料|その前の|それより前の)/;
 function previousHandoff() {
   const first = filtered.find((e) => e.role === 'User');
   // 複数行だったころの自己再起動の依頼は、ユーザーの貼り付けとして <pasted_content> に包まれて JSONL に残る（2.1.285 で実測）。
-  const match = first?.text.match(/^(?:<pasted_content[^>]*>\s*)?@(\/\S+)\s+(.*)/s);
+  const match = first?.text.match(/^(?:<pasted_content[^>]*>\s*)?@((?:\/|[A-Za-z]:[\\/])\S*)\s+(.*)/s);
   if (!match || !HANDOFF_PROMPT.test(match[2])) return null;
   const path = match[1];
   // 進め方をつないだファイルなら、進め方の無い元の資料を読む（進め方を世代ごとに重ねないため）。
@@ -245,7 +255,7 @@ if (prev?.text === null) {
 const totalChars = filtered.reduce((n, e) => n + e.text.length, 0);
 const header =
   `<!-- 自動抽出: ${jsonlPath} / セッション ${sessionId} / 元${entries.length}件→${filtered.length}件・約${totalChars}文字。` +
-  'ツール実行結果・thinking・system-reminder・skill の本文は含めない。定型文の機械的な間引きあり（要約はしていない）。' +
+  '選択式の問いとその回答以外のツール実行結果・thinking・system-reminder・skill の本文は含めない。定型文の機械的な間引きあり（要約はしていない）。' +
   '発言の区切りは「===== 話者 =====」の行。末尾にある再起動の依頼と返信は、済んだやり取り。' +
   '最初の発言で読んだ前の資料（古い世代）があれば、「# 前の資料」の見出しの下につなぐ。最新のやり取りは、その見出しの直前まで -->\n\n';
 // 区切りを Markdown の見出しにしないのは、発言の中の見出しと見分けるため。

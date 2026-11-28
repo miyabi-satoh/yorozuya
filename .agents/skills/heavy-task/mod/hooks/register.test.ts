@@ -5,10 +5,11 @@ import { isHeavyDeny } from './register'
 const DENY = 'PreToolUse:Bash hook error: CPU の空きが 4.2% で、10% を切っているため、重い処理を止めました。\nheavy-wait の mod があれば…'
 
 // hook に止められる重い処理と、--ready で測った空き（starting は、ほかのセッションが重い処理を始めたところか）を決め、セッションに届いた知らせを集める。
-function setUp(on: any, idles: (number | null)[], starting: boolean[] = []) {
+function setUp(on: any, idles: (number | null)[], starting: boolean[] = [], succeedsOnRetry = false) {
   const sent: string[] = []
   on('fs.stat', () => ({ value: { realPath: '/skills/heavy-task/mod' } }))
-  on('tool.call', () => ({ result: DENY, text: DENY, isError: true }))
+  let calls = 0
+  on('tool.call', () => succeedsOnRetry && ++calls > 1 ? { result: 'ok', text: 'ok', isError: false } : { result: DENY, text: DENY, isError: true })
   on('process.run', () => ({ value: { exitCode: 0, stdout: `${JSON.stringify({ idle: idles.length > 0 ? idles.shift() : 0, heldBy: starting.shift() ? { session: 'b' } : null })}\n`, stderr: '' } }))
   on('session.id', () => ({ value: 'a' }))
   on('prompt.submit', (_$: any, e: any) => {
@@ -31,6 +32,15 @@ describe('isHeavyDeny', () => {
 })
 
 describe('待ち', () => {
+  test('止められた処理を流し直したら、後から知らせない', async ($, on) => {
+    const sent = setUp(on, [30], [], true)
+    const clock = mock.clock(on, { now: 0 })
+    await ($.session as any).start({ source: 'startup', cwd: '/Users/me/Works/x' })
+    await $.tool.call({ tool: 'Bash', command: 'just ci' })
+    await $.tool.call({ tool: 'Bash', command: 'just ci' })
+    await clock.advance(60_000)
+    expect(sent).toEqual([])
+  })
   test('空いたら知らせる', async ($, on) => {
     const sent = setUp(on, [3, 25])
     const clock = mock.clock(on, { now: 0 })

@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { test } = require('node:test');
-const { commandSegments, isHeavy, loadConfig, runsOutsideTab } = require('./guard-heavy-commands.cjs');
+const { commandSegments, isHeavy, loadConfig, runsOutsideTab, outsideTabReason } = require('./guard-heavy-commands.cjs');
 
 function projectWith(config) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'guard-heavy-'));
@@ -257,13 +257,25 @@ test('CPU が埋まっていれば重い処理を拒む', async () => {
 });
 
 // 始める瞬間の鍵は、HOME を試しのフォルダーにして、ほんとうの鍵に触れない。
-function hookAs(project, home, session, command = 'just ci') {
+function hookAs(project, home, session, command = 'just ci', agent) {
   return spawnSync(process.execPath, [path.join(__dirname, 'guard-heavy-commands.cjs')], {
-    input: JSON.stringify({ ...bash(command), cwd: project, ...(session ? { session_id: session } : {}) }),
+    input: JSON.stringify({ ...bash(command), cwd: project, ...(session ? { session_id: session } : {}), ...(agent ? { agent_id: agent } : {}) }),
     env: { ...process.env, HC_TERMINAL_ID: '', HERDR_ENV: '', CLAUDE_PROJECT_DIR: project, HOME: home, USERPROFILE: home, CLAUDE_PID: '' },
     encoding: 'utf8',
   });
 }
+
+test('Windows の案内のパスはスラッシュで区切る', () => {
+  assert.match(outsideTabReason('Herdr', 'C:\\work\\heavy-task\\scripts'), /C:\/work\/heavy-task\/scripts\/run-in-tab\.mjs/);
+});
+
+test('同じセッションでもサブエージェントごとに始める瞬間の鍵を分ける', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'guard-agent-'));
+  const project = projectWith(JSON.stringify({ heavy: ['just ci'] }));
+  assert.equal(hookAs(project, home, 'a', 'just ci', 'one').stdout, '');
+  assert.equal(hookAs(project, home, 'a', 'just ci', 'one').stdout, '');
+  assert.equal(JSON.parse(hookAs(project, home, 'a', 'just ci', 'two').stdout).hookSpecificOutput.permissionDecision, 'deny');
+});
 
 test('重い処理を通したら、始めて60秒はほかのセッションの重い処理を止め、自分のは通す', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'guard-home-'));

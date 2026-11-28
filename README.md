@@ -2,9 +2,9 @@
 
 Claude Code に持たせる skill の置き場。
 
-skill は、決まったコマンドを順に叩くスクリプトではなく、Claude がその場で判断して進める手順として書いている（スクリプトを持つのは restart-sessions で、後戻りできない連鎖と、読むだけの処理（見張り・会話ログの抜き出し）にとどめている）。実際に打つコマンドは、Claude Code のバージョン・権限の設定・CLAUDE.md などで変わる。うまくいかないときは、その場で指示を足すか調べさせる。
+skill は、決まったコマンドを順に叩くスクリプトではなく、Claude がその場で判断して進める手順として書いている（restart-sessions・weekly-pace・heavy-task・machine-locks・desk-inspection はスクリプトも持つが、後戻りできない連鎖と、読むだけの処理（見張り・会話ログの抜き出し・使用量の読み取りなど）にとどめている）。実際に打つコマンドは、Claude Code のバージョン・権限の設定・CLAUDE.md などで変わる。うまくいかないときは、その場で指示を足すか調べさせる。
 
-使うには、`.agents/skills/<skill>/` を使う側のプロジェクトの skill ディレクトリ（Claude Code なら `.claude/skills/`）に置く。clone した先への symlink にすると、pull した更新がそのまま届く。写したなら、restart-sessions の `config.local.json` を使う側の `.gitignore` に足す（このリポジトリの `.gitignore` は効かない）。restart-sessions のコンテキストの見張りは、mod（`mod/`）を読み込ませれば各セッションが自分を見張る。mod を使わずに外から見張るなら、使う側の `.claude/settings.json` に SessionStart の hook を置く（[restart-sessions の README](.agents/skills/restart-sessions/README.md#使い方)）。heavy-task の hook も `settings.json` に置く（[heavy-task の README](.agents/skills/heavy-task/README.md#使い方)）。heavy-task と input-takeover は、隣の machine-locks を読むので、3つを同じ clone から置く。
+使うには、`.agents/skills/<skill>/` を使う側のプロジェクトの skill ディレクトリ（Claude Code なら `.claude/skills/`）に置く。clone した先への symlink にすると、pull した更新がそのまま届く。写したなら、restart-sessions と cleanup の `config.local.json` を使う側の `.gitignore` に足す（このリポジトリの `.gitignore` は効かない）。restart-sessions のコンテキストの見張りは、mod（`mod/`）を読み込ませれば各セッションが自分を見張る。mod を使わずに外から見張るなら、使う側の `.claude/settings.json` に SessionStart の hook を置く（[restart-sessions の README](.agents/skills/restart-sessions/README.md#使い方)）。heavy-task の hook も `settings.json` に置く（[heavy-task の README](.agents/skills/heavy-task/README.md#使い方)）。heavy-task と input-takeover は、隣の machine-locks を読むので、3つを同じ clone から置く。
 
 ## skill 一覧
 

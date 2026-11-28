@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { dialogOpen } from './lib/screen.mjs';
 // 各 claude ペインのステータスラインからコンテキストの使用率を読み、閾値以上になったら1行出す。
 // Claude Code の更新の知らせ（再起動で反映される）と、放置のヒントが出ているペインも1行ずつ出す。
 // usage: watch-context.mjs [--pattern <正規表現>] [--threshold <使用率>] [--interval 120] [--update-pattern <正規表現>] [--idle-pattern <正規表現>] [--goal-pattern <正規表現>] [--no-update] [--no-idle] [--no-goal] [--start] [--once]
@@ -167,20 +168,6 @@ function readUsage(screen) {
 }
 
 // Claude Code の選択式の問い（AskUserQuestion）は、Herdr 0.9.1 が blocked でなく idle・done と返す（2026-09-25 に実際に確かめた）。
-// 問いの間はダイアログがステータスラインを隠すので、blocked と同じく WARN の数に入れない（IDLE・UPDATE の判定は止めない。問いの画面では当たらない）。
-// 問いの最下部には `Enter to select · ↑/↓ to navigate · Esc to cancel` が出る（2.1.286 で実測）。その下にはタイトルの罫線の行しか無い。
-// 会話に同じ文言が映っても、入力欄とステータスラインがその下に来るので、末尾の数行には入らない。
-// 入力欄の無い画面（トランスクリプト表示など）では、会話の末尾の文言を拾いうる。ユーザーが見ている画面なので、WARN が出なくても困らない。
-// 読み違えても、そのペインの WARN が出ないか遅れるだけで済む。使用率が読めたペインには当てない。
-const DIALOG_FOOTER = /Esc to cancel/;
-const DIALOG_TAIL = 3;
-
-function dialogOpen(screen) {
-  if (screen === null) return false;
-  const tail = screen.split('\n').filter((line) => line.trim() !== '').slice(-DIALOG_TAIL);
-  return tail.some((line) => DIALOG_FOOTER.test(line));
-}
-
 // 更新の知らせは、入力欄の上枠のすぐ上の行に右寄せで出る（2.1.272 で実測）。その1行だけを返す。
 // 画面全体に当てると、会話に出てきた同じ文言（この見張りの話をしているときなど）を拾い、要らない再起動まで進む。
 // 下から見て最初の「─ だけの行」を下枠、その上で最初の「─ で始まる行」を上枠とみなす。
