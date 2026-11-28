@@ -94,7 +94,7 @@ if (holder && holder !== pane) {
 const sid = info.agent_session?.value ?? '';
 if (!sid) skip(`ペイン ${pane} のセッションIDを引けない。resume の手がかりが無いまま終了させたくないので止まる`);
 
-// cwd は pane get で読む（agent get の結果に cwd があるかは確かめていない）。読めなければ、前と同じく照合せずに進める。
+// cwd は pane get で読む（pane current と同じ形で cwd・foreground_cwd が返る。2026-11-28 に手元の Herdr で確かめた）。読めなければ照合せずに進める（この照合は消えた cwd で /exit しないためのもので、cwd が無くても再起動はできる）。
 const paneCwd = herdrJson(['pane', 'get', pane])?.result?.pane;
 const cwd = [paneCwd?.cwd, paneCwd?.foreground_cwd].find((value) => typeof value === 'string' && value !== '');
 if (cwd && !existsSync(cwd)) skip(`ペイン ${pane} の cwd が無い: ${cwd}`);

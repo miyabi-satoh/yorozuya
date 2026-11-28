@@ -634,7 +634,7 @@ describe('入力を奪う操作', () => {
   })
 
   test('ラッパーの選択肢が値を取るかはラッパーごとに決める', () => {
-    for (const command of ['sudo -n osascript -e x', 'sudo -E cliclick c:1,1', 'sudo -s xdotool key a', 'sudo -u me osascript -e x', 'xargs -n 1 osascript -e x', 'exec -a alias osascript -e x']) {
+    for (const command of ['sudo -n osascript -e x', 'sudo -E cliclick c:1,1', 'sudo -s xdotool key a', 'sudo -u me osascript -e x', 'xargs -n 1 osascript -e x', 'exec -a alias osascript -e x', 'sudo --user me osascript -e x', 'xargs --max-args 1 cliclick c:1,1']) {
       expect(takesInputInBash(command)).toBe(true)
     }
     expect(takesInputInBash('sudo -u osascript echo ok')).toBe(false)

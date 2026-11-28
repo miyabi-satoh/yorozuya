@@ -62,8 +62,8 @@ function simpleCommands(source: string): SimpleCommand[] {
 
 function commandWords(words: string[]) {
   const valueOptions: Record<string, string[]> = {
-    sudo: ['-u', '-g', '-C', '-h', '-p', '-r', '-t', '-U', '-D'],
-    xargs: ['-n', '-P', '-I', '-s', '-L', '-a', '-d', '-E'],
+    sudo: ['-u', '-g', '-C', '-h', '-p', '-r', '-t', '-U', '-D', '--user', '--group', '--close-from', '--host', '--prompt', '--role', '--type', '--other-user', '--chdir'],
+    xargs: ['-n', '-P', '-I', '-s', '-L', '-a', '-d', '-E', '--max-args', '--max-procs', '--max-chars', '--max-lines', '--arg-file', '--delimiter'],
     exec: ['-a'],
     nohup: [], command: [], time: [],
   }
