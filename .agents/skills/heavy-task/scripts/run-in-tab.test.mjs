@@ -221,6 +221,42 @@ test('hc の端末では、HERDR_ENV=1 があっても hc の新しい端末で 
   assert.equal(fs.existsSync(path.join(state, 'closed')), true);
 });
 
+test('Windows では、呼び出し元の環境で見つけた Git Bash を job.json に残す（タブの runner は呼び出し元の環境を継がない）', () => {
+  const { env } = fakeHc();
+  const dir = tmp();
+  const [found] = shellFor('', process.platform, process.env, fs.existsSync);
+  const result = run({ ...env, CLAUDE_PID: '' }, '--dir', dir, '--cwd', dir, '--', 'exit 0');
+  assert.equal(result.status, 0);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'job.json'), 'utf8')).bash, windows && found !== 'pwsh' ? found : undefined);
+});
+
+test('hc の端末を作れなければ、job.json を残さない（同じ置き場で流し直せる）', () => {
+  const { env, state } = fakeHc();
+  const dir = tmp();
+  const home = tmp();
+  fs.mkdirSync(path.join(home, '.claude', 'sessions'), { recursive: true });
+  fs.writeFileSync(path.join(home, '.claude', 'sessions', '999.json'), JSON.stringify({ name: 'repo-ab' }));
+  // 試す名前（repo-ab, repo-ab-2 … repo-ab-20）を全部使用中にする。
+  for (let n = 1; n <= 20; n += 1) fs.writeFileSync(path.join(state, `taken-repo-ab${n === 1 ? '' : `-${n}`}`), '');
+  const result = run({ ...env, HOME: home, USERPROFILE: home, CLAUDE_PID: '999' }, '--dir', dir, '--label', '検査', '--', 'exit 0');
+  assert.notEqual(result.status, 0);
+  assert.equal(fs.existsSync(path.join(dir, 'job.json')), false);
+});
+
+test('runner は job.json の bash で流し、使ったシェルをログに残す', { skip: !windows && 'Git Bash を選ぶのは Windows だけ' }, (t) => {
+  const [bash] = shellFor('', process.platform, process.env, fs.existsSync);
+  if (bash === 'pwsh') return t.skip('Git Bash が無い');
+  const dir = tmp();
+  fs.writeFileSync(path.join(dir, 'job.json'), JSON.stringify({ command: 'echo $((1+2))', cwd: dir, bash }));
+  // タブの側では PATH と ProgramFiles から Git Bash を見つけられない環境にする（Windows の環境変数は大文字小文字を区別しないので、PATH の綴りを1つにする）。
+  const tabEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(path|programfiles|claude_code_git_bash_path)$/i.test(key)));
+  const result = spawnSync(process.execPath, [script, '--runner', dir], { encoding: 'utf8', env: { ...tabEnv, PATH: path.dirname(process.execPath), ProgramFiles: path.join(dir, 'none') } });
+  assert.equal(result.status, 0);
+  const log = fs.readFileSync(path.join(dir, 'output.log'), 'utf8');
+  assert.match(log, /^3$/m);
+  assert.ok(log.includes(`[run-in-tab] shell: ${bash}`));
+});
+
 test('hc の名前が使われていれば、-2 を付けて作り直す', () => {
   const { env, state, calls } = fakeHc();
   const home = tmp();

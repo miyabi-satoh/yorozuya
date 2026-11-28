@@ -12,7 +12,10 @@ const TIMEOUT_MS = 8000;
 
 function run() {
   return new Promise((resolve, reject) => {
-    const proc = spawn('codex', ['app-server'], { stdio: ['pipe', 'pipe', 'pipe'], shell: process.platform === 'win32' });
+    // Windows では npm で入れた codex.cmd も起動できるよう、シェルを通す。引数を配列で渡すと Node が DEP0190 を警告するので、1つの文字列にする。
+    const proc = process.platform === 'win32'
+      ? spawn('codex app-server', { stdio: ['pipe', 'pipe', 'pipe'], shell: true })
+      : spawn('codex', ['app-server'], { stdio: ['pipe', 'pipe', 'pipe'] });
     const rl = createInterface({ input: proc.stdout });
     let settled = false;
     let stderr = '';
